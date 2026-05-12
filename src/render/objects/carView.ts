@@ -125,14 +125,14 @@ export function createCarView(scale = 1) {
   const splitter = new Mesh(new BoxGeometry(2.12, 0.06, 0.62), trimMaterial);
   splitter.position.set(0, 0.15, 2.58);
 
-  const streetSkirtL = new Mesh(new BoxGeometry(0.16, 0.12, 2.78), trimMaterial);
-  streetSkirtL.position.set(-1.07, 0.25, -0.1);
+  const streetSkirtL = new Mesh(new BoxGeometry(0.1, 0.09, 2.22), trimMaterial);
+  streetSkirtL.position.set(-1.02, 0.23, -0.04);
   const streetSkirtR = streetSkirtL.clone();
-  streetSkirtR.position.x = 1.07;
-  const wideSkirtL = new Mesh(new BoxGeometry(0.28, 0.14, 3.05), trimMaterial);
-  wideSkirtL.position.set(-1.14, 0.23, -0.08);
+  streetSkirtR.position.x = 1.02;
+  const wideSkirtL = new Mesh(new BoxGeometry(0.16, 0.1, 2.48), trimMaterial);
+  wideSkirtL.position.set(-1.08, 0.22, -0.04);
   const wideSkirtR = wideSkirtL.clone();
-  wideSkirtR.position.x = 1.14;
+  wideSkirtR.position.x = 1.08;
 
   const underglowLeft = new PointLight(0x2f8fff, 0, 4.2, 2.4);
   underglowLeft.position.set(-0.82, 0.16, 0);

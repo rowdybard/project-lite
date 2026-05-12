@@ -23,6 +23,7 @@ body,
 body {
   margin: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 canvas {
@@ -111,7 +112,7 @@ canvas {
 .session-card--options {
   width: min(760px, calc(100vw - 36px));
   max-height: calc(100vh - 36px);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .session-card[hidden] {
@@ -407,7 +408,7 @@ canvas {
   right: 18px;
   width: min(410px, calc(100vw - 36px));
   max-height: calc(100vh - 36px);
-  overflow: auto;
+  overflow: hidden;
   padding: 16px;
   border-radius: 3px;
 }
@@ -542,11 +543,33 @@ canvas {
   margin-top: 12px;
 }
 
+.garage-subtabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.garage-subtabs button {
+  min-height: 34px;
+  border: 1px solid rgb(190 210 230 / 16%);
+  color: #dfe8f1;
+  background: rgb(255 255 255 / 5%);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.garage-subtabs button.is-active {
+  color: #101720;
+  background: #e5bf55;
+}
+
 .garage-option-group {
   display: grid;
   gap: 7px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgb(190 210 230 / 12%);
+  padding: 8px 0 0;
 }
 
 .garage-option-group h3 {
@@ -621,7 +644,7 @@ canvas {
   grid-row: 1 / span 3;
   align-self: stretch;
   padding: 16px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .garage-tabs {

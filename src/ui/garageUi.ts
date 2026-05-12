@@ -34,6 +34,7 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
   document.body.append(root);
 
   let activeCategory: CustomizationCategory = customizationCategories[0];
+  let activeBodySlot: CustomizationSlot = "spoiler";
 
   function render() {
     root.innerHTML = `
@@ -83,19 +84,32 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
 
     const options = root.querySelector("[data-options]")!;
     if (activeCategory.id === "spoiler") {
+      const bodyTabs = document.createElement("nav");
+      bodyTabs.className = "garage-subtabs";
       for (const slot of bodySlotIds) {
         const category = customizationCategories.find((item) => item.id === slot)!;
-        const group = document.createElement("section");
-        group.className = "garage-option-group";
-        group.innerHTML = `<h3>${category.label}</h3>`;
-        for (const option of category.options) {
-          const active = customization[slot] === option.id;
-          const button = optionButton(option, active);
-          button.addEventListener("click", () => callbacks.onCustomizationChange(slot, option.id));
-          group.append(button);
-        }
-        options.append(group);
+        const tab = document.createElement("button");
+        tab.type = "button";
+        tab.className = slot === activeBodySlot ? "is-active" : "";
+        tab.textContent = category.label;
+        tab.addEventListener("click", () => {
+          activeBodySlot = slot;
+          render();
+        });
+        bodyTabs.append(tab);
       }
+      options.append(bodyTabs);
+
+      const category = customizationCategories.find((item) => item.id === activeBodySlot)!;
+      const group = document.createElement("section");
+      group.className = "garage-option-group";
+      for (const option of category.options) {
+        const active = customization[activeBodySlot] === option.id;
+        const button = optionButton(option, active);
+        button.addEventListener("click", () => callbacks.onCustomizationChange(activeBodySlot, option.id));
+        group.append(button);
+      }
+      options.append(group);
     } else if (!activeCategory.comingSoon) {
       for (const option of activeCategory.options) {
         const slot = activeCategory.id as CustomizationSlot;
