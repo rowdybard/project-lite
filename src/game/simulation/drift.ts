@@ -31,8 +31,6 @@ export function createDriftState(): DriftState {
     active: false,
     grace: 0,
     lastDirection: 0,
-    transitionCooldown: 0,
-    transitionCount: 0,
     grade: "Drift",
     bestRun: readBestRun(),
     currentZone: -1,
@@ -53,8 +51,6 @@ export function resetDrift(state: DriftState) {
   state.active = false;
   state.grace = 0;
   state.lastDirection = 0;
-  state.transitionCooldown = 0;
-  state.transitionCount = 0;
   state.grade = "Drift";
   state.currentZone = -1;
   state.zonesHit = [];
@@ -80,10 +76,8 @@ export function finishDriftRun(state: DriftState) {
 export function updateDriftScore(state: DriftState, car: CarState, dt: number, onTrack: boolean, zoneIndex: number) {
   const speedMph = car.speed * mph;
   const angle = car.slipAngle;
-  const direction = Math.sign(car.driftDirection || car.steerAxis || car.yawVelocity);
   const isScoring = onTrack && speedMph > 14 && angle > 6 && car.driftAmount > 0.18;
 
-  state.transitionCooldown = Math.max(0, state.transitionCooldown - dt);
   state.calloutTimer = Math.max(0, state.calloutTimer - dt);
   state.onTrack = onTrack;
   state.currentZone = zoneIndex;
@@ -93,26 +87,14 @@ export function updateDriftScore(state: DriftState, car: CarState, dt: number, o
     if (!state.active) {
       state.callout = "Drift started";
       state.calloutTimer = 1.1;
-      state.transitionCount = 0;
     }
 
     state.active = true;
     state.grace = 1.15;
     state.driftTime += dt;
     state.totalDriftTime += dt;
-    state.multiplier = Math.min(5, 1 + state.driftTime * 0.1 + state.transitionCount * 0.35);
+    state.multiplier = Math.min(5, 1 + state.driftTime * 0.12);
     state.grade = gradeFor(state.comboScore, angle, state.driftTime);
-
-    if (state.lastDirection !== 0 && direction !== 0 && direction !== state.lastDirection && state.transitionCooldown <= 0) {
-      const bonus = 450 * state.multiplier;
-      state.comboScore += bonus;
-      state.transitionCount += 1;
-      state.transitionCooldown = 0.8;
-      state.callout = `Transition +${Math.round(bonus)}`;
-      state.calloutTimer = 1.2;
-    }
-
-    if (direction !== 0) state.lastDirection = direction;
 
     if (zoneIndex >= 0 && !state.zonesHit.includes(zoneIndex)) {
       const zoneBonus = 900 * state.multiplier;

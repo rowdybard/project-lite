@@ -116,8 +116,6 @@ export type DriftState = {
   active: boolean;
   grace: number;
   lastDirection: number;
-  transitionCooldown: number;
-  transitionCount: number;
   grade: string;
   bestRun: number;
   currentZone: number;

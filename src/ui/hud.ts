@@ -7,12 +7,6 @@ export function createHud() {
   const root = document.createElement("div");
   root.className = "hud";
   root.innerHTML = `
-    <div class="hud__cluster">
-      <div class="hud__label">Speed</div>
-      <div class="hud__speed"><span data-speed>0</span><small>mph</small></div>
-      <div class="hud__gear"><span data-gear>1</span><strong data-rpm>850</strong> rpm</div>
-      <div class="hud__rpm"><span data-rpm-bar></span></div>
-    </div>
     <div class="hud__strip">
       <span>Time <strong data-time>90.0s</strong></span>
       <span>Surface <strong data-surface>Track</strong></span>
@@ -21,7 +15,6 @@ export function createHud() {
       <span>Load <strong data-load>50F/50R</strong></span>
       <span>Angle <strong data-angle>0 deg</strong></span>
     </div>
-    <div class="hud__slip"><span data-slip></span></div>
     <div class="drift-score">
       <div class="drift-score__label">Drift score</div>
       <div class="drift-score__total" data-total-score>0</div>
@@ -34,6 +27,12 @@ export function createHud() {
         <span>Best <strong data-best-run>0</strong></span>
       </div>
       <div class="drift-score__callout" data-callout hidden>Drift</div>
+    </div>
+    <div class="speedometer">
+      <div class="speedometer__gear" data-gear>1</div>
+      <div class="speedometer__readout"><span data-speed>0</span><small>mph</small></div>
+      <div class="speedometer__rpm-text"><strong data-rpm>850</strong> rpm</div>
+      <div class="speedometer__tach"><span data-rpm-bar></span></div>
     </div>
     <div class="hud__hint">R restart</div>
   `;
@@ -52,7 +51,6 @@ export function createHud() {
       root.querySelector("[data-load]")!.textContent =
         `${Math.round(car.weightForward * 100)}F/${Math.round((1 - car.weightForward) * 100)}R`;
       root.querySelector("[data-angle]")!.textContent = `${Math.round(car.slipAngle)} deg`;
-      (root.querySelector("[data-slip]") as HTMLElement).style.transform = `scaleX(${car.slipAmount})`;
       root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore + drift.comboScore);
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
       root.querySelector("[data-multiplier]")!.textContent = `x${drift.multiplier.toFixed(1)}`;

@@ -33,19 +33,17 @@ canvas {
   position: fixed;
   inset: 18px 18px auto;
   display: grid;
-  grid-template-columns: 154px minmax(280px, 1fr) 286px;
+  grid-template-columns: minmax(280px, 1fr);
   gap: 12px;
   align-items: start;
   pointer-events: none;
   z-index: 5;
 }
 
-.hud__cluster,
 .hud__strip,
 .hud__hint,
-.hud__slip,
 .hud__warning,
-.drift-score,
+.speedometer,
 .tune-panel {
   color: #f7f0df;
   background: rgb(10 15 22 / 76%);
@@ -54,89 +52,13 @@ canvas {
   backdrop-filter: blur(8px);
 }
 
-.hud__cluster {
-  grid-column: 1;
-  min-width: 0;
-  padding: 12px 14px;
-  border-radius: 3px;
-}
-
-.hud__label {
-  color: #aeb9c8;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.hud__speed {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  font-variant-numeric: tabular-nums;
-}
-
-.hud__speed span {
-  font-size: 38px;
-  line-height: 1;
-  font-weight: 800;
-}
-
-.hud__speed small {
-  color: #cbd3df;
-  font-size: 14px;
-}
-
-.hud__gear {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-top: 8px;
-  color: #bac6d3;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.hud__gear span {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 24px;
-  border-radius: 2px;
-  color: #101720;
-  background: #e5bf55;
-  font-size: 17px;
-  font-weight: 900;
-}
-
-.hud__gear strong {
-  color: #f7f0df;
-}
-
-.hud__rpm {
-  height: 6px;
-  margin-top: 8px;
-  overflow: hidden;
-  border-radius: 1px;
-  background: rgb(255 255 255 / 14%);
-}
-
-.hud__rpm span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform: scaleX(0);
-  transform-origin: left center;
-  background: linear-gradient(90deg, #68d8ff, #e5bf55 70%, #f05a4f);
-}
-
 .hud__strip {
-  grid-column: 2;
+  grid-column: 1;
   align-self: start;
   display: grid;
   grid-template-columns: repeat(6, minmax(72px, 1fr));
   gap: 8px;
-  width: min(100%, 690px);
+  width: min(100%, 740px);
   padding: 10px;
   border-radius: 3px;
   font-size: 12px;
@@ -281,24 +203,6 @@ canvas {
   font-variant-numeric: tabular-nums;
 }
 
-.hud__slip {
-  grid-column: 2;
-  width: min(450px, 100%);
-  height: 8px;
-  overflow: hidden;
-  border-radius: 1px;
-}
-
-.hud__slip span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform-origin: left center;
-  transform: scaleX(0);
-  background: linear-gradient(90deg, #61d28c, #e5bf55 58%, #f05a4f);
-  transition: transform 80ms linear;
-}
-
 .hud__hint {
   position: fixed;
   left: 50%;
@@ -338,6 +242,81 @@ canvas {
   box-shadow: none;
   text-align: center;
   backdrop-filter: none;
+}
+
+.speedometer {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  column-gap: 12px;
+  align-items: end;
+  width: 260px;
+  padding: 13px 14px 12px;
+  border-radius: 3px;
+}
+
+.speedometer__gear {
+  grid-row: 1 / span 3;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 64px;
+  color: #101720;
+  background: #e5bf55;
+  border: 1px solid rgb(255 255 255 / 20%);
+  font-size: 34px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.speedometer__readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 7px;
+  color: #fff6d8;
+  font-variant-numeric: tabular-nums;
+}
+
+.speedometer__readout span {
+  font-size: 54px;
+  line-height: 0.9;
+  font-weight: 900;
+}
+
+.speedometer__readout small,
+.speedometer__rpm-text {
+  color: #cbd3df;
+  font-size: 13px;
+}
+
+.speedometer__rpm-text {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.speedometer__rpm-text strong {
+  color: #f7f0df;
+}
+
+.speedometer__tach {
+  height: 8px;
+  margin-top: 6px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 12%);
+}
+
+.speedometer__tach span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, #68d8ff, #e5bf55 68%, #f05a4f);
 }
 
 .drift-score__label {
@@ -500,11 +479,6 @@ canvas {
     max-width: calc(100vw - 20px);
   }
 
-  .hud__slip {
-    grid-column: 1;
-    width: calc(100vw - 20px);
-  }
-
   .hud__hint {
     bottom: 10px;
     font-size: 12px;
@@ -513,6 +487,12 @@ canvas {
   .drift-score {
     top: 150px;
     width: calc(100vw - 24px);
+  }
+
+  .speedometer {
+    right: 10px;
+    bottom: 10px;
+    width: min(250px, calc(100vw - 20px));
   }
 
   .tune-panel {
