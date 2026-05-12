@@ -1,4 +1,4 @@
-import { Box3, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
+import { Box3, Group, Object3D, Vector3, type Euler } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 type ImportedCarDefinition = {
@@ -64,43 +64,20 @@ function collectVehicleNodes(source: Group, rootName: string) {
   return { body, wheels };
 }
 
-function addProceduralWheelRig(raw: Group, bounds: Box3) {
-  const size = bounds.getSize(new Vector3());
-  const tireMaterial = new MeshStandardMaterial({ color: 0x111111, roughness: 0.86 });
-  const rimMaterial = new MeshStandardMaterial({ color: 0x59636d, roughness: 0.44, metalness: 0.24 });
-  const radius = Math.max(0.22, Math.min(size.x, size.z) * 0.085);
-  const width = radius * 0.72;
-  const track = Math.max(size.x * 0.48, radius * 2.2);
-  const frontZ = bounds.min.z + size.z * 0.72;
-  const rearZ = bounds.min.z + size.z * 0.28;
-  const wheelY = bounds.min.y + radius;
-  const wheelGeometry = new CylinderGeometry(radius, radius, width, 18);
-  const rimGeometry = new CylinderGeometry(radius * 0.48, radius * 0.48, width * 1.08, 14);
-  const wheels: ImportedWheel[] = [];
+function createWheelPivot(sourceWheel: Object3D) {
+  const wheel = sourceWheel.clone(true);
+  wheel.position.copy(sourceWheel.getWorldPosition(new Vector3()));
+  wheel.quaternion.copy(sourceWheel.getWorldQuaternion(wheel.quaternion));
+  wheel.scale.copy(sourceWheel.getWorldScale(new Vector3()));
+  wheel.updateMatrixWorld(true);
 
-  for (const item of [
-    { x: -track, z: frontZ, front: true },
-    { x: track, z: frontZ, front: true },
-    { x: -track, z: rearZ, front: false },
-    { x: track, z: rearZ, front: false },
-  ]) {
-    const pivot = new Group();
-    pivot.position.set(item.x, wheelY, item.z);
-
-    const tire = new Mesh(wheelGeometry, tireMaterial);
-    tire.rotation.z = Math.PI / 2;
-    tire.castShadow = true;
-    pivot.add(tire);
-
-    const rim = new Mesh(rimGeometry, rimMaterial);
-    rim.rotation.z = Math.PI / 2;
-    pivot.add(rim);
-
-    raw.add(pivot);
-    wheels.push({ object: pivot, front: item.front, baseRotation: pivot.rotation.clone() });
-  }
-
-  return wheels;
+  const bounds = new Box3().setFromObject(wheel);
+  const center = bounds.getCenter(new Vector3());
+  const pivot = new Group();
+  pivot.position.copy(center);
+  wheel.position.sub(center);
+  pivot.add(wheel);
+  return pivot;
 }
 
 export async function createImportedCarModel(id: string): Promise<ImportedCarModel | null> {
@@ -109,7 +86,7 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   const sourceScene = await loadScene(definition.path);
   sourceScene.updateMatrixWorld(true);
-  const { body } = collectVehicleNodes(sourceScene, definition.rootName);
+  const { body, wheels } = collectVehicleNodes(sourceScene, definition.rootName);
   if (!body) return null;
 
   const raw = new Group();
@@ -120,8 +97,15 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
   clone.scale.copy(body.getWorldScale(new Vector3()));
   raw.add(clone);
 
-  const bounds = new Box3().setFromObject(raw);
-  wheelRecords.push(...addProceduralWheelRig(raw, bounds));
+  for (const wheel of wheels) {
+    const pivot = createWheelPivot(wheel);
+    raw.add(pivot);
+    wheelRecords.push({
+      object: pivot,
+      front: wheel.name.includes("front"),
+      baseRotation: pivot.rotation.clone(),
+    });
+  }
 
   const finalBounds = new Box3().setFromObject(raw);
   const center = finalBounds.getCenter(new Vector3());
@@ -129,6 +113,8 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
   raw.position.set(-center.x, -finalBounds.min.y, -center.z);
 
   const root = new Group();
+  const sourceForwardIsX = size.x > size.z;
+  if (sourceForwardIsX) raw.rotation.y = -Math.PI / 2;
   const footprint = Math.max(size.x, size.z, 0.001);
   root.scale.setScalar(definition.fitLength / footprint);
   root.add(raw);
