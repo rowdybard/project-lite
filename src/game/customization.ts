@@ -236,17 +236,19 @@ export function applyTuningPreset(base: CarTuning, preset: string): CarTuning {
   if (preset === "grip") {
     tuning.frontGrip *= 1.05;
     tuning.rearGrip *= 1.08;
-    tuning.throttleGripLoss *= 0.75;
-    tuning.counterSteerAssist *= 0.85;
-    tuning.slideDrag *= 1.08;
+    tuning.throttleGripLoss *= 0.82;
+    tuning.counterSteerAssist *= 0.92;
+    tuning.slideDrag *= 1.05;
+    tuning.yawDamping *= 1.08;
   }
 
   if (preset === "drift") {
-    tuning.rearGrip *= 0.92;
-    tuning.handbrakeRearGrip *= 0.9;
-    tuning.throttleGripLoss *= 1.16;
-    tuning.counterSteerAssist *= 1.08;
-    tuning.slideDrag *= 0.95;
+    tuning.rearGrip *= 0.94;
+    tuning.handbrakeRearGrip *= 0.92;
+    tuning.throttleGripLoss *= 1.1;
+    tuning.counterSteerAssist *= 1.06;
+    tuning.slideDrag *= 0.96;
+    tuning.yawDamping *= 0.94;
   }
 
   return tuning;

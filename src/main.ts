@@ -34,6 +34,7 @@ import type { Cone } from "./game/simulation/trackCollision";
 import type { Mesh } from "three";
 
 type AppState = "garage" | "event" | "results";
+const eventCarScale = 1.38;
 
 async function boot() {
   document.querySelector<HTMLDivElement>("#app")!.innerHTML = '<canvas id="game"></canvas>';
@@ -67,7 +68,7 @@ async function boot() {
   const trackView = await createTrackView(gameScene, track);
   const colliders = createTrackColliders(track);
   const coneMeshes = trackView.coneMeshes;
-  const carView = createCarView(carEntry.scale ?? 1);
+  const carView = createCarView((carEntry.scale ?? 1) * eventCarScale);
   carView.applyCustomization(customization);
   const tireTracks = createTireTracks();
   const tireSmoke = createTireSmoke();

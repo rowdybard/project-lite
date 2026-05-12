@@ -31,7 +31,7 @@ export function createEngineSound() {
     if (ctx) return;
     ctx = new AudioContext();
     masterGain = ctx.createGain();
-    masterGain.gain.value = 0.35;
+    masterGain.gain.value = 0.28;
     masterGain.connect(ctx.destination);
 
     // Engine oscillator bank
@@ -148,12 +148,12 @@ export function createEngineSound() {
     harmonic4.frequency.setTargetAtTime(firingFreq * 4, t, 0.03);
 
     // Engine volume: louder with throttle and rpm
-    const engineVol = 0.3 + throttle * 0.5 + rpmNorm * 0.2;
-    engineGain.gain.setTargetAtTime(clamp(engineVol, 0.15, 0.85), t, 0.05);
+    const engineVol = 0.12 + throttle * 0.48 + rpmNorm * 0.22;
+    engineGain.gain.setTargetAtTime(clamp(engineVol, 0.05, 0.78), t, 0.05);
 
     // Exhaust: gets louder and higher-pitched with RPM
-    const exhaustVol = 0.15 + throttle * 0.35 + rpmNorm * 0.25;
-    exhaustGain.gain.setTargetAtTime(clamp(exhaustVol, 0.08, 0.65), t, 0.06);
+    const exhaustVol = 0.045 + throttle * 0.32 + rpmNorm * 0.22;
+    exhaustGain.gain.setTargetAtTime(clamp(exhaustVol, 0.018, 0.54), t, 0.06);
     exhaustFilter.frequency.setTargetAtTime(60 + rpmNorm * 140, t, 0.04);
     exhaustFilter2.frequency.setTargetAtTime(300 + rpmNorm * 600 + throttle * 200, t, 0.04);
 
@@ -166,7 +166,7 @@ export function createEngineSound() {
   function setMuted(value: boolean) {
     muted = value;
     if (ctx && masterGain) {
-      masterGain.gain.setTargetAtTime(value ? 0 : 0.35, ctx.currentTime, 0.05);
+      masterGain.gain.setTargetAtTime(value ? 0 : 0.28, ctx.currentTime, 0.05);
     }
   }
 
@@ -176,7 +176,7 @@ export function createEngineSound() {
     }
     if (ctx) {
       if (ctx.state === "suspended") ctx.resume();
-      if (!muted) masterGain.gain.setTargetAtTime(0.35, ctx.currentTime + 0.01, 0.05);
+      if (!muted) masterGain.gain.setTargetAtTime(0.28, ctx.currentTime + 0.01, 0.05);
     }
   }
 

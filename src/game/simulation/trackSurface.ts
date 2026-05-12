@@ -1,4 +1,5 @@
 import type { TrackConfig, Vec2 } from "../types";
+import { getRoadHalfWidth } from "./trackLayout";
 
 const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2) => {
   const abx = b.x - a.x;
@@ -13,12 +14,13 @@ const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2) => {
 };
 
 export function isOnTrack(point: Vec2, track: TrackConfig) {
-  return getTrackDistance(point, track) <= 12;
+  return getTrackDistance(point, track) <= getRoadHalfWidth(track) + 2.5;
 }
 
 export function isInRunoff(point: Vec2, track: TrackConfig) {
   const distance = getTrackDistance(point, track);
-  return distance > 12 && distance <= 15.5;
+  const roadEdge = getRoadHalfWidth(track) + 2.5;
+  return distance > roadEdge && distance <= roadEdge + 3.5;
 }
 
 export function getTrackDistance(point: Vec2, track: TrackConfig) {

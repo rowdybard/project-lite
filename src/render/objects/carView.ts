@@ -67,9 +67,9 @@ const setVisible = (visible: boolean, ...objects: (Mesh | Group)[]) => {
 
 export function createCarView(scale = 1) {
   const root = new Group();
+  root.scale.setScalar(scale);
   const bodyGroup = new Group();
   root.add(bodyGroup);
-  bodyGroup.scale.setScalar(scale);
 
   const frontWheelPivots: Group[] = [];
   const frontWheelMeshes: Mesh[] = [];

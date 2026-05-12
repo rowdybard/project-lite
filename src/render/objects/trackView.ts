@@ -17,6 +17,7 @@ import {
   Vector3,
 } from "three";
 import type { TrackConfig } from "../../game/types";
+import { getRoadWidth, isTracksideClearZone } from "../../game/simulation/trackLayout";
 import { loadGltf } from "../loaders/loadGltf";
 
 export type TrackViewResult = {
@@ -55,7 +56,7 @@ function createRoadFromPath(track: TrackConfig) {
   const points = track.roadPath!.map((point) => new Vector3(point.x, 0, point.z));
   const curve = new CatmullRomCurve3(points, true, "catmullrom", 0.48);
   const samples = curve.getPoints(240);
-  const roadWidth = 19;
+  const roadWidth = getRoadWidth(track);
   const roadShape = new Shape();
 
   const leftEdge: Vector3[] = [];
@@ -85,8 +86,8 @@ function createRoadFromPath(track: TrackConfig) {
   group.add(road);
 
   group.add(createCornerPoles(track, roadWidth));
-  group.add(createCurbs(samples, roadWidth));
-  const trackside = createTracksideDepth(samples, roadWidth);
+  group.add(createCurbs(track, samples, roadWidth));
+  const trackside = createTracksideDepth(track, samples, roadWidth);
   group.add(trackside.group);
   group.add(createTrainingCircuitDressing(track, samples, roadWidth));
   return { group, coneMeshes: trackside.coneMeshes };
@@ -119,6 +120,8 @@ function createCornerPoles(track: TrackConfig, roadWidth: number): Object3D {
     const normal = new Vector3(-tangent.z, 0, tangent.x);
 
     for (const side of [-1, 1]) {
+      if (isTracksideClearZone({ x: current.x, z: current.z }, track)) continue;
+
       const pole = new Mesh(new CylinderGeometry(0.12, 0.12, 2.5, 12), material);
       pole.position.set(current.x + normal.x * side * (roadWidth / 2 + 1.05), 1.25, current.z + normal.z * side * (roadWidth / 2 + 1.05));
       pole.castShadow = true;
@@ -181,7 +184,7 @@ function createGrassTexture() {
   return texture;
 }
 
-function createCurbs(samples: Vector3[], roadWidth: number) {
+function createCurbs(track: TrackConfig, samples: Vector3[], roadWidth: number) {
   const group = new Group();
   const red = new MeshStandardMaterial({ color: 0xbd2d32, roughness: 0.62 });
   const white = new MeshStandardMaterial({ color: 0xf4f0dc, roughness: 0.58 });
@@ -189,6 +192,8 @@ function createCurbs(samples: Vector3[], roadWidth: number) {
   for (let i = 0; i < samples.length; i += 10) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const tangent = next.clone().sub(previous).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
     const angle = Math.atan2(tangent.x, tangent.z);
@@ -207,7 +212,7 @@ function createCurbs(samples: Vector3[], roadWidth: number) {
   return group;
 }
 
-function createTracksideDepth(samples: Vector3[], roadWidth: number) {
+function createTracksideDepth(track: TrackConfig, samples: Vector3[], roadWidth: number) {
   const group = new Group();
   const coneMeshes: Mesh[] = [];
   const coneMaterial = new MeshStandardMaterial({ color: 0xe68a2e, roughness: 0.7 });
@@ -216,6 +221,8 @@ function createTracksideDepth(samples: Vector3[], roadWidth: number) {
   for (let i = 6; i < samples.length; i += 24) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const tangent = next.clone().sub(previous).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
 
@@ -251,33 +258,11 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
   const signMaterial = new MeshStandardMaterial({ color: 0x1b2836, roughness: 0.58, metalness: 0.05 });
   const yellowMaterial = new MeshStandardMaterial({ color: 0xe5bf55, emissive: 0x322000, roughness: 0.52 });
   const lightMaterial = new MeshStandardMaterial({ color: 0xf6edd2, emissive: 0xe5bf55, roughness: 0.35 });
-  const buildingMaterial = new MeshStandardMaterial({ color: 0x4a5662, roughness: 0.82 });
-
-  const first = samples[0];
-  const second = samples[1];
-  const tangent = second.clone().sub(first).normalize();
-  const normal = new Vector3(-tangent.z, 0, tangent.x);
-  const angle = Math.atan2(tangent.x, tangent.z);
-
-  const gantry = new Group();
-  for (const side of [-1, 1]) {
-    const post = new Mesh(new BoxGeometry(0.42, 5.2, 0.42), darkBarrierMaterial);
-    post.position.copy(first.clone().addScaledVector(normal, side * (roadWidth / 2 + 1.8)));
-    post.position.y = 2.6;
-    post.castShadow = true;
-    gantry.add(post);
-  }
-  const crossbar = new Mesh(new BoxGeometry(roadWidth + 4.8, 0.72, 0.58), signMaterial);
-  crossbar.position.copy(first);
-  crossbar.position.y = 5.05;
-  crossbar.rotation.y = angle + Math.PI / 2;
-  crossbar.castShadow = true;
-  gantry.add(crossbar);
-  group.add(gantry);
-
   for (let i = 4; i < samples.length; i += 18) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const localTangent = next.clone().sub(previous).normalize();
     const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
     const localAngle = Math.atan2(localTangent.x, localTangent.z);
@@ -296,6 +281,8 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
   for (let i = 14; i < samples.length; i += 44) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const localTangent = next.clone().sub(previous).normalize();
     const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
     const localAngle = Math.atan2(localTangent.x, localTangent.z);
@@ -318,6 +305,8 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
   for (let i = 22; i < samples.length; i += 58) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const localTangent = next.clone().sub(previous).normalize();
     const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
 
@@ -333,19 +322,5 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
     lamp.castShadow = true;
     group.add(lamp);
   }
-
-  for (const pad of [
-    { x: track.start.x - 15, z: track.start.z - 18, sx: 11, sz: 6 },
-    { x: track.start.x - 28, z: track.start.z - 23, sx: 8, sz: 5 },
-    { x: track.start.x - 40, z: track.start.z - 14, sx: 13, sz: 7 },
-  ]) {
-    const building = new Mesh(new BoxGeometry(pad.sx, 3.2, pad.sz), buildingMaterial);
-    building.position.set(pad.x, 1.6, pad.z);
-    building.rotation.y = -0.35;
-    building.castShadow = true;
-    building.receiveShadow = true;
-    group.add(building);
-  }
-
   return group;
 }

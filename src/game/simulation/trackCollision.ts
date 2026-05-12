@@ -1,5 +1,6 @@
-import type { CarState, TrackConfig } from "../types";
 import { CatmullRomCurve3, Vector3 } from "three";
+import type { CarState, TrackConfig } from "../types";
+import { getRoadWidth, isTracksideClearZone } from "./trackLayout";
 
 export type Barrier = {
   x: number;
@@ -24,6 +25,15 @@ export type TrackColliders = {
   cones: Cone[];
 };
 
+type CollisionCircle = {
+  x: number;
+  z: number;
+  radius: number;
+};
+
+const carHalfLength = 3.15;
+const carHalfWidth = 1.38;
+
 export function createTrackColliders(track: TrackConfig): TrackColliders {
   const barriers: Barrier[] = [];
   const cones: Cone[] = [];
@@ -33,12 +43,13 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
   const points = track.roadPath.map((p) => new Vector3(p.x, 0, p.z));
   const curve = new CatmullRomCurve3(points, true, "catmullrom", 0.48);
   const samples = curve.getPoints(240);
-  const roadWidth = 19;
+  const roadWidth = getRoadWidth(track);
 
-  // Barriers: every 18 samples, both sides (matches trackView)
   for (let i = 4; i < samples.length; i += 18) {
     const prev = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const tangent = next.clone().sub(prev).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
     const angle = Math.atan2(tangent.x, tangent.z);
@@ -50,15 +61,16 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
         z: pos.z,
         angle,
         halfLength: 2.6,
-        halfWidth: 0.19,
+        halfWidth: 0.22,
       });
     }
   }
 
-  // Cones: every 24 samples starting at 6, both sides (matches trackView)
   for (let i = 6; i < samples.length; i += 24) {
     const prev = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
     const tangent = next.clone().sub(prev).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
 
@@ -79,109 +91,143 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
   return { barriers, cones };
 }
 
+function getCarCollisionCircles(car: CarState): CollisionCircle[] {
+  const forwardX = Math.sin(car.heading);
+  const forwardZ = Math.cos(car.heading);
+  const bumperOffset = carHalfLength * 0.7;
+
+  return [
+    {
+      x: car.position.x + forwardX * bumperOffset,
+      z: car.position.z + forwardZ * bumperOffset,
+      radius: carHalfWidth * 0.94,
+    },
+    {
+      x: car.position.x,
+      z: car.position.z,
+      radius: carHalfWidth,
+    },
+    {
+      x: car.position.x - forwardX * bumperOffset,
+      z: car.position.z - forwardZ * bumperOffset,
+      radius: carHalfWidth * 0.94,
+    },
+  ];
+}
+
+function resolveBarrierCircle(car: CarState, barrier: Barrier, circle: CollisionCircle) {
+  const dx = circle.x - barrier.x;
+  const dz = circle.z - barrier.z;
+  const cos = Math.cos(barrier.angle);
+  const sin = Math.sin(barrier.angle);
+  const localX = dx * cos + dz * sin;
+  const localZ = -dx * sin + dz * cos;
+  const clampedX = Math.max(-barrier.halfLength, Math.min(barrier.halfLength, localX));
+  const clampedZ = Math.max(-barrier.halfWidth, Math.min(barrier.halfWidth, localZ));
+  const distX = localX - clampedX;
+  const distZ = localZ - clampedZ;
+  const dist = Math.hypot(distX, distZ);
+
+  let pushLocalX = 0;
+  let pushLocalZ = 0;
+  let overlap = 0;
+
+  if (dist > 0.001) {
+    if (dist >= circle.radius) return;
+    pushLocalX = distX / dist;
+    pushLocalZ = distZ / dist;
+    overlap = circle.radius - dist;
+  } else {
+    const xPenetration = barrier.halfLength + circle.radius - Math.abs(localX);
+    const zPenetration = barrier.halfWidth + circle.radius - Math.abs(localZ);
+    if (xPenetration <= 0 || zPenetration <= 0) return;
+
+    if (xPenetration < zPenetration) {
+      pushLocalX = localX < 0 ? -1 : 1;
+      overlap = xPenetration;
+    } else {
+      pushLocalZ = localZ < 0 ? -1 : 1;
+      overlap = zPenetration;
+    }
+  }
+
+  const pushWorldX = pushLocalX * cos - pushLocalZ * sin;
+  const pushWorldZ = pushLocalX * sin + pushLocalZ * cos;
+  car.position.x += pushWorldX * overlap * 0.72;
+  car.position.z += pushWorldZ * overlap * 0.72;
+
+  const normalSpeed = car.velocity.x * pushWorldX + car.velocity.z * pushWorldZ;
+  if (normalSpeed < 0) {
+    car.velocity.x -= normalSpeed * 1.18 * pushWorldX;
+    car.velocity.z -= normalSpeed * 1.18 * pushWorldZ;
+    car.velocity.x *= 0.86;
+    car.velocity.z *= 0.86;
+
+    const leverX = circle.x - car.position.x;
+    const leverZ = circle.z - car.position.z;
+    const hitOffset = leverX * pushWorldZ - leverZ * pushWorldX;
+    car.yawVelocity += hitOffset * Math.abs(normalSpeed) * 0.012;
+  }
+}
+
 export function updateTrackCollision(car: CarState, colliders: TrackColliders, dt: number) {
-  const carRadius = 1.1;
-  const carX = car.position.x;
-  const carZ = car.position.z;
-  const carVx = car.velocity.x;
-  const carVz = car.velocity.z;
-
-  // Barrier collision — oriented box vs circle
   for (const barrier of colliders.barriers) {
-    const dx = carX - barrier.x;
-    const dz = carZ - barrier.z;
-    const cos = Math.cos(barrier.angle);
-    const sin = Math.sin(barrier.angle);
-
-    // Transform car position into barrier's local space
-    const localX = dx * cos + dz * sin;
-    const localZ = -dx * sin + dz * cos;
-
-    // Clamp to barrier box
-    const clampedX = Math.max(-barrier.halfLength, Math.min(barrier.halfLength, localX));
-    const clampedZ = Math.max(-barrier.halfWidth, Math.min(barrier.halfWidth, localZ));
-
-    // Distance from car center to nearest point on barrier
-    const distX = localX - clampedX;
-    const distZ = localZ - clampedZ;
-    const dist = Math.hypot(distX, distZ);
-
-    if (dist < carRadius && dist > 0.001) {
-      const overlap = carRadius - dist;
-      // Push direction in local space
-      const pushLocalX = distX / dist;
-      const pushLocalZ = distZ / dist;
-      // Transform back to world
-      const pushWorldX = pushLocalX * cos - pushLocalZ * sin;
-      const pushWorldZ = pushLocalX * sin + pushLocalZ * cos;
-
-      // Push car out
-      car.position.x += pushWorldX * overlap;
-      car.position.z += pushWorldZ * overlap;
-
-      // Reflect velocity component along push direction (light bounce)
-      const velDot = car.velocity.x * pushWorldX + car.velocity.z * pushWorldZ;
-      if (velDot < 0) {
-        car.velocity.x -= velDot * 1.3 * pushWorldX;
-        car.velocity.z -= velDot * 1.3 * pushWorldZ;
-        // Reduce speed on impact
-        car.velocity.x *= 0.92;
-        car.velocity.z *= 0.92;
-        // Add some yaw on offset hits
-        const offsetHit = (carX - barrier.x) * pushWorldZ - (carZ - barrier.z) * pushWorldX;
-        car.yawVelocity += offsetHit * 0.008 * Math.abs(velDot);
-      }
+    for (const circle of getCarCollisionCircles(car)) {
+      resolveBarrierCircle(car, barrier, circle);
     }
   }
 
-  // Cone collision — circle vs circle, cones get knocked
   for (const cone of colliders.cones) {
-    const dx = carX - cone.x;
-    const dz = carZ - cone.z;
-    const dist = Math.hypot(dx, dz);
-    const combinedRadius = carRadius + cone.radius;
+    let bestCircle: CollisionCircle | null = null;
+    let bestDistance = Infinity;
 
-    if (dist < combinedRadius && dist > 0.001) {
-      const overlap = combinedRadius - dist;
-      const nx = dx / dist;
-      const nz = dz / dist;
-
-      // Push cone away from car
-      cone.x -= nx * overlap * 0.9;
-      cone.z -= nz * overlap * 0.9;
-      // Push car slightly
-      car.position.x += nx * overlap * 0.1;
-      car.position.z += nz * overlap * 0.1;
-
-      // Transfer velocity to cone
-      const relVelX = carVx - cone.vx;
-      const relVelZ = carVz - cone.vz;
-      const impactSpeed = relVelX * (-nx) + relVelZ * (-nz);
-
-      if (impactSpeed > 0) {
-        cone.vx += -nx * impactSpeed * 1.4;
-        cone.vz += -nz * impactSpeed * 1.4;
-        cone.spin += (Math.random() - 0.5) * impactSpeed * 3;
-        cone.knocked = true;
-
-        // Tiny speed loss for car
-        car.velocity.x *= 0.98;
-        car.velocity.z *= 0.98;
+    for (const circle of getCarCollisionCircles(car)) {
+      const distance = Math.hypot(circle.x - cone.x, circle.z - cone.z);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestCircle = circle;
       }
+    }
+
+    if (!bestCircle) continue;
+    const combinedRadius = bestCircle.radius + cone.radius;
+    if (bestDistance >= combinedRadius || bestDistance <= 0.001) continue;
+
+    const nx = (bestCircle.x - cone.x) / bestDistance;
+    const nz = (bestCircle.z - cone.z) / bestDistance;
+    const overlap = combinedRadius - bestDistance;
+
+    cone.x -= nx * overlap * 0.9;
+    cone.z -= nz * overlap * 0.9;
+    car.position.x += nx * overlap * 0.06;
+    car.position.z += nz * overlap * 0.06;
+
+    const relVelX = car.velocity.x - cone.vx;
+    const relVelZ = car.velocity.z - cone.vz;
+    const impactSpeed = relVelX * (-nx) + relVelZ * (-nz);
+
+    if (impactSpeed > 0) {
+      cone.vx += -nx * impactSpeed * 1.4;
+      cone.vz += -nz * impactSpeed * 1.4;
+      cone.spin += (Math.random() - 0.5) * impactSpeed * 3;
+      cone.knocked = true;
+      car.velocity.x *= 0.985;
+      car.velocity.z *= 0.985;
     }
   }
 
-  // Update cone physics (simple friction)
   for (const cone of colliders.cones) {
     if (!cone.knocked) continue;
     cone.x += cone.vx * dt;
     cone.z += cone.vz * dt;
     cone.vx *= 1 - 3.5 * dt;
     cone.vz *= 1 - 3.5 * dt;
-    cone.spin *= 1 - 2.0 * dt;
+    cone.spin *= 1 - 2 * dt;
     if (Math.abs(cone.vx) < 0.01 && Math.abs(cone.vz) < 0.01) {
       cone.vx = 0;
       cone.vz = 0;
     }
   }
+
+  car.speed = Math.hypot(car.velocity.x, car.velocity.z);
 }

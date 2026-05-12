@@ -1,12 +1,12 @@
 import { PerspectiveCamera, Vector3 } from "three";
 import type { CarState } from "../../game/types";
 
-const cameraOffset = new Vector3(0, 5.9, -15.3);
-const lookOffset = new Vector3(0, 1.55, 6.2);
+const cameraOffset = new Vector3(0, 6.7, -17.6);
+const lookOffset = new Vector3(0, 1.9, 7.2);
 
 export function createCamera() {
-  const camera = new PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 700);
-  camera.position.set(0, 6.4, -17.5);
+  const camera = new PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 700);
+  camera.position.set(0, 7.0, -18.2);
   return camera;
 }
 
@@ -30,7 +30,7 @@ export function updateChaseCamera(camera: PerspectiveCamera, car: CarState, dt: 
   );
 
   camera.position.lerp(target, 1 - Math.pow(0.00002, dt));
-  camera.fov += (58 + Math.min(16, car.speed * 0.34) - camera.fov) * (1 - Math.pow(0.0004, dt));
+  camera.fov += (55 + Math.min(13, car.speed * 0.28) - camera.fov) * (1 - Math.pow(0.0004, dt));
   camera.updateProjectionMatrix();
   camera.lookAt(lookAt);
 }
