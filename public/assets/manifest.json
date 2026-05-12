@@ -1,0 +1,84 @@
+{
+  "activeCar": "starter-coupe",
+  "activeTrack": "drift-switchback",
+  "cars": {
+    "starter-coupe": {
+      "name": "S13 240SX Drift Coupe",
+      "tuning": "/assets/cars/starter/tuning.json",
+      "scale": 1
+    }
+  },
+  "tracks": {
+    "drift-switchback": {
+      "id": "drift-switchback",
+      "name": "Drift Switchback",
+      "start": {
+        "x": -62,
+        "z": 42,
+        "heading": 1.25
+      },
+      "roadWidth": 78,
+      "boundaryMargin": 24,
+      "roadPath": [
+        {
+          "x": -62,
+          "z": 42
+        },
+        {
+          "x": -14,
+          "z": 66
+        },
+        {
+          "x": 48,
+          "z": 42
+        },
+        {
+          "x": 66,
+          "z": -12
+        },
+        {
+          "x": 20,
+          "z": -56
+        },
+        {
+          "x": -38,
+          "z": -50
+        },
+        {
+          "x": -72,
+          "z": -10
+        },
+        {
+          "x": -42,
+          "z": 28
+        }
+      ],
+      "checkpoints": [
+        {
+          "x": -62,
+          "z": 42
+        },
+        {
+          "x": -4,
+          "z": 62
+        },
+        {
+          "x": 58,
+          "z": 24
+        },
+        {
+          "x": 42,
+          "z": -48
+        },
+        {
+          "x": -34,
+          "z": -52
+        },
+        {
+          "x": -70,
+          "z": -4
+        }
+      ]
+    }
+  }
+}
