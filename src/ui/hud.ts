@@ -52,7 +52,6 @@ export function createHud() {
       root.querySelector("[data-load]")!.textContent =
         `${Math.round(car.weightForward * 100)}F/${Math.round((1 - car.weightForward) * 100)}R`;
       root.querySelector("[data-angle]")!.textContent = `${Math.round(car.slipAngle)} deg`;
-      root.querySelector("[data-total-drift]")!.textContent = formatTime(drift.totalDriftTime);
       (root.querySelector("[data-slip]") as HTMLElement).style.transform = `scaleX(${car.slipAmount})`;
       root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore + drift.comboScore);
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
