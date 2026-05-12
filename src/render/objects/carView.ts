@@ -3,7 +3,7 @@ import { paintColors, underglowColors, wheelColors, type CarCustomization } from
 import type { CarState } from "../../game/types";
 
 type WheelCorner = "fl" | "fr" | "rl" | "rr";
-type CarProfileId = "lite-coupe" | "street-hatch";
+type CarProfileId = "lite-coupe" | "street-sedan";
 
 const carProfiles: Record<
   CarProfileId,
@@ -15,6 +15,7 @@ const carProfiles: Record<
     hatchRoof: { width: number; length: number; height: number; y: number; z: number; rotation: number; visible: boolean };
     frontBumperZ: number;
     rearBumperZ: number;
+    visualStyle: "coupe" | "sedan";
     wheelbaseFront: number;
     wheelbaseRear: number;
     wheelTrack: number;
@@ -29,23 +30,25 @@ const carProfiles: Record<
     hatchRoof: { width: 1.46, length: 1.02, height: 0.22, y: 0.9, z: -1.12, rotation: -0.2, visible: false },
     frontBumperZ: 2.18,
     rearBumperZ: -2.18,
+    visualStyle: "coupe",
     wheelbaseFront: 1.34,
     wheelbaseRear: -1.48,
     wheelTrack: 1.08,
     wheelRadius: 0.38,
   },
-  "street-hatch": {
-    body: { width: 1.82, length: 3.82, height: 0.62, y: 0.58 },
-    hood: { width: 1.58, length: 1.0, height: 0.15, y: 0.92, z: 0.92 },
-    rearDeck: { width: 1.48, length: 0.32, height: 0.14, y: 0.88, z: -1.68, visible: false },
-    cabin: { width: 1.36, length: 1.58, height: 0.68, y: 1.04, z: -0.55 },
-    hatchRoof: { width: 1.52, length: 1.2, height: 0.28, y: 0.94, z: -1.18, rotation: -0.34, visible: true },
-    frontBumperZ: 1.86,
-    rearBumperZ: -1.86,
-    wheelbaseFront: 1.1,
-    wheelbaseRear: -1.22,
-    wheelTrack: 1.0,
-    wheelRadius: 0.34,
+  "street-sedan": {
+    body: { width: 1.9, length: 4.95, height: 0.58, y: 0.58 },
+    hood: { width: 1.7, length: 1.42, height: 0.11, y: 0.93, z: 1.12 },
+    rearDeck: { width: 1.72, length: 1.18, height: 0.16, y: 0.9, z: -1.58, visible: true },
+    cabin: { width: 1.34, length: 1.8, height: 0.58, y: 1.02, z: -0.3 },
+    hatchRoof: { width: 1.52, length: 0.24, height: 0.18, y: 0.98, z: -1.2, rotation: 0, visible: false },
+    frontBumperZ: 2.36,
+    rearBumperZ: -2.36,
+    visualStyle: "sedan",
+    wheelbaseFront: 1.5,
+    wheelbaseRear: -1.62,
+    wheelTrack: 1.02,
+    wheelRadius: 0.35,
   },
 };
 
@@ -55,6 +58,10 @@ const hide = (...objects: (Mesh | Group | PointLight | null)[]) => {
 
 const setBox = (mesh: Mesh, width: number, height: number, depth: number) => {
   mesh.scale.set(width, height, depth);
+};
+
+const setVisible = (visible: boolean, ...objects: (Mesh | Group)[]) => {
+  for (const object of objects) object.visible = visible;
 };
 
 export function createCarView(scale = 1) {
@@ -101,6 +108,8 @@ export function createCarView(scale = 1) {
 
   const headlightMaterial = new MeshStandardMaterial({ color: 0xf4efe0, emissive: 0x332816, roughness: 0.4 });
   const tailMaterial = new MeshStandardMaterial({ color: 0xb42732, emissive: 0x2c0507, roughness: 0.45 });
+  const glassMaterial = new MeshStandardMaterial({ color: 0x111923, roughness: 0.28, metalness: 0.04 });
+  const cutlineMaterial = new MeshStandardMaterial({ color: 0x0a0d12, roughness: 0.72 });
   const leftHeadlight = new Mesh(new BoxGeometry(0.54, 0.08, 0.06), headlightMaterial);
   leftHeadlight.position.set(-0.55, 0.64, 2.43);
   const rightHeadlight = leftHeadlight.clone();
@@ -110,6 +119,33 @@ export function createCarView(scale = 1) {
   const rightTail = leftTail.clone();
   rightTail.position.x = 0.56;
   bodyGroup.add(leftHeadlight, rightHeadlight, leftTail, rightTail);
+
+  const windshield = new Mesh(new BoxGeometry(1.16, 0.08, 0.5), glassMaterial);
+  const rearGlass = new Mesh(new BoxGeometry(1.16, 0.08, 0.48), glassMaterial);
+  const leftSideGlass = new Mesh(new BoxGeometry(0.05, 0.34, 1.05), glassMaterial);
+  const rightSideGlass = leftSideGlass.clone();
+  const leftRearSideGlass = new Mesh(new BoxGeometry(0.05, 0.3, 0.62), glassMaterial);
+  const rightRearSideGlass = leftRearSideGlass.clone();
+  const leftDoorCut = new Mesh(new BoxGeometry(0.035, 0.42, 0.04), cutlineMaterial);
+  const rightDoorCut = leftDoorCut.clone();
+  const leftBpillar = new Mesh(new BoxGeometry(0.055, 0.42, 0.05), cutlineMaterial);
+  const rightBpillar = leftBpillar.clone();
+  const sedanGrille = new Mesh(new BoxGeometry(0.74, 0.18, 0.05), cutlineMaterial);
+  const coupeNoseVent = new Mesh(new BoxGeometry(0.42, 0.08, 0.05), cutlineMaterial);
+  bodyGroup.add(
+    windshield,
+    rearGlass,
+    leftSideGlass,
+    rightSideGlass,
+    leftRearSideGlass,
+    rightRearSideGlass,
+    leftDoorCut,
+    rightDoorCut,
+    leftBpillar,
+    rightBpillar,
+    sedanGrille,
+    coupeNoseVent,
+  );
 
   const wheelMaterial = new MeshStandardMaterial({ color: 0x151515, roughness: 0.86 });
   const wheelGeometry = new CylinderGeometry(0.38, 0.38, 0.34, 24);
@@ -229,6 +265,35 @@ export function createCarView(scale = 1) {
     hatchRoof.position.set(0, profile.hatchRoof.y, profile.hatchRoof.z);
     hatchRoof.rotation.x = profile.hatchRoof.rotation;
     hatchRoof.visible = profile.hatchRoof.visible;
+
+    const sedan = profile.visualStyle === "sedan";
+    windshield.position.set(0, profile.cabin.y + 0.13, profile.cabin.z + profile.cabin.length * 0.39);
+    windshield.rotation.x = sedan ? -0.22 : -0.35;
+    rearGlass.position.set(0, profile.cabin.y + 0.09, profile.cabin.z - profile.cabin.length * 0.42);
+    rearGlass.rotation.x = sedan ? 0.18 : 0.34;
+    leftSideGlass.position.set(-profile.cabin.width * 0.52, profile.cabin.y + 0.03, profile.cabin.z + 0.14);
+    rightSideGlass.position.set(profile.cabin.width * 0.52, profile.cabin.y + 0.03, profile.cabin.z + 0.14);
+    leftRearSideGlass.position.set(-profile.cabin.width * 0.52, profile.cabin.y, profile.cabin.z - 0.62);
+    rightRearSideGlass.position.set(profile.cabin.width * 0.52, profile.cabin.y, profile.cabin.z - 0.62);
+    leftDoorCut.position.set(-profile.body.width * 0.506, 0.66, profile.cabin.z + 0.04);
+    rightDoorCut.position.set(profile.body.width * 0.506, 0.66, profile.cabin.z + 0.04);
+    leftBpillar.position.set(-profile.cabin.width * 0.53, profile.cabin.y + 0.01, profile.cabin.z - 0.25);
+    rightBpillar.position.set(profile.cabin.width * 0.53, profile.cabin.y + 0.01, profile.cabin.z - 0.25);
+    setBox(leftSideGlass, 0.05, sedan ? 0.32 : 0.28, sedan ? 0.72 : 0.96);
+    setBox(rightSideGlass, 0.05, sedan ? 0.32 : 0.28, sedan ? 0.72 : 0.96);
+    setVisible(sedan, leftRearSideGlass, rightRearSideGlass, leftDoorCut, rightDoorCut, leftBpillar, rightBpillar, sedanGrille);
+    setVisible(!sedan, coupeNoseVent);
+
+    leftHeadlight.scale.set(sedan ? 0.72 : 1, 1, 1);
+    rightHeadlight.scale.set(sedan ? 0.72 : 1, 1, 1);
+    leftHeadlight.position.set(sedan ? -0.42 : -0.55, 0.64, profile.frontBumperZ + 0.25);
+    rightHeadlight.position.set(sedan ? 0.42 : 0.55, 0.64, profile.frontBumperZ + 0.25);
+    leftTail.scale.set(sedan ? 0.62 : 1, 1, 1);
+    rightTail.scale.set(sedan ? 0.62 : 1, 1, 1);
+    leftTail.position.set(sedan ? -0.68 : -0.56, 0.62, profile.rearBumperZ - 0.25);
+    rightTail.position.set(sedan ? 0.68 : 0.56, 0.62, profile.rearBumperZ - 0.25);
+    sedanGrille.position.set(0, 0.55, profile.frontBumperZ + 0.26);
+    coupeNoseVent.position.set(0, 0.66, profile.frontBumperZ + 0.26);
 
     for (let index = 0; index < suspensionPivots.length; index += 1) {
       const wheelPosition = wheelPositions[index];

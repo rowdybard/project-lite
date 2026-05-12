@@ -56,7 +56,7 @@ export const defaultCustomization: CarCustomization = {
 
 export const carOptions: CustomizationOption[] = [
   { id: "lite-coupe", label: "Lite Coupe" },
-  { id: "street-hatch", label: "Street Hatch" },
+  { id: "street-sedan", label: "Street Sedan" },
   { id: "slot-3", label: "Empty Bay", disabled: true },
   { id: "slot-4", label: "Empty Bay", disabled: true },
 ];
