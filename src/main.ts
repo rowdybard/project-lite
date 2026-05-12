@@ -24,6 +24,8 @@ import { createTireTracks } from "./render/objects/tireTracks";
 import { createTrackView } from "./render/objects/trackView";
 import { createGarageUi } from "./ui/garageUi";
 import { createHud, createResultsOverlay } from "./ui/hud";
+import { createAttachmentTuner } from "./ui/attachmentTuner";
+import { isImportedCar } from "./render/objects/importedCars";
 
 type AppState = "garage" | "event" | "results";
 
@@ -64,6 +66,11 @@ async function boot() {
   hud.root.hidden = true;
 
   const garageView = createGarageView(canvas, renderer, customization);
+  const attachmentTuner = createAttachmentTuner((att) => {
+    carView.applyAttachments(att);
+    garageView.carView.applyAttachments(att);
+  });
+  if (isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
   const runLength = 90;
   let appState: AppState = "garage";
   let activeMode: ModeId = customization.selectedMode;
@@ -88,6 +95,8 @@ async function boot() {
     hud.root.hidden = true;
     garageUi.show();
     garageView.applyCustomization(customization);
+    if (isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
+    else attachmentTuner.hide();
   };
 
   const startEvent = () => {
@@ -98,6 +107,7 @@ async function boot() {
     results.hide();
     hud.root.hidden = false;
     garageUi.hide();
+    attachmentTuner.hide();
     resetEvent();
     setHudCarName();
     hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");
@@ -120,6 +130,8 @@ async function boot() {
       garageUi.update(customization);
       garageView.applyCustomization(customization);
       carView.applyCustomization(customization);
+      if (isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
+      else attachmentTuner.hide();
     },
     onModeChange(mode) {
       customization = { ...customization, selectedMode: mode };

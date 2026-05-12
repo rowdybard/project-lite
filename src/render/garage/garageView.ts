@@ -143,7 +143,13 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
       distance = lerp(distance, targetDistance, 1 - Math.pow(0.0005, dt));
 
       if (performance.now() > pauseAutoSpinUntil) car.heading += dt * 0.18;
-      car.bodyRoll = Math.sin(performance.now() * 0.0012) * 0.05;
+      const t = performance.now() * 0.001;
+      car.bodyRoll = Math.sin(t * 1.2) * 0.015;
+      car.bodyPitch = Math.sin(t * 0.9) * 0.01;
+      car.suspensionFL = 0.5 + Math.sin(t * 1.1) * 0.08;
+      car.suspensionFR = 0.5 + Math.sin(t * 1.1 + 0.3) * 0.08;
+      car.suspensionRL = 0.5 + Math.sin(t * 0.9) * 0.08;
+      car.suspensionRR = 0.5 + Math.sin(t * 0.9 + 0.3) * 0.08;
       carView.sync(car);
 
       const height = 1.8 + pitch * 3.2;

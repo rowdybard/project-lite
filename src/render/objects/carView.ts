@@ -1,7 +1,7 @@
 import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, PointLight } from "three";
 import { paintColors, underglowColors, wheelColors, type CarCustomization } from "../../game/customization";
 import type { CarState } from "../../game/types";
-import { createImportedCarModel, isImportedCar, type ImportedWheel } from "./importedCars";
+import { createImportedCarModel, getAttachments, isImportedCar, type ImportedCarAttachments, type ImportedCarModel, type ImportedWheel } from "./importedCars";
 
 type WheelCorner = "fl" | "fr" | "rl" | "rr";
 type CarProfileId = "lite-coupe" | "street-sedan";
@@ -86,6 +86,7 @@ export function createCarView(scale = 1) {
   let activeImportedCarId = "";
   let importedWheels: ImportedWheel[] = [];
   let importedReady: Promise<void> = Promise.resolve();
+  importedRoot.scale.setScalar(1.15);
   const paintMaterial = new MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.5, metalness: 0.12 });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });
@@ -245,6 +246,110 @@ export function createCarView(scale = 1) {
     underglowRight,
   );
 
+  function repositionKit(att: ImportedCarAttachments) {
+    ducktail.position.set(0, att.rearDeckY, att.rearDeckZ);
+    ducktail.scale.x = att.bodyWidth / 1.62;
+
+    streetBlade.position.set(0, att.roofY + 0.02, att.rearDeckZ - 0.05);
+    streetBlade.scale.x = att.bodyWidth / 1.72;
+    streetPostL.position.set(-att.bodyWidth * 0.32, att.roofY - 0.2, att.rearDeckZ + 0.06);
+    streetPostR.position.set(att.bodyWidth * 0.32, att.roofY - 0.2, att.rearDeckZ + 0.06);
+
+    gtBlade.position.set(0, att.roofY + 0.2, att.rearDeckZ - 0.04);
+    gtBlade.scale.x = att.bodyWidth / 2.15;
+    gtEndL.position.set(-att.bodyWidth * 0.52, att.roofY + 0.2, att.rearDeckZ - 0.04);
+    gtEndR.position.set(att.bodyWidth * 0.52, att.roofY + 0.2, att.rearDeckZ - 0.04);
+    gtPostL.position.set(-att.bodyWidth * 0.33, att.roofY - 0.1, att.rearDeckZ + 0.06);
+    gtPostR.position.set(att.bodyWidth * 0.33, att.roofY - 0.1, att.rearDeckZ + 0.06);
+
+    streetLip.position.set(0, att.frontBumperY, att.frontBumperZ);
+    streetLip.scale.x = att.bodyWidth / 1.86;
+    splitter.position.set(0, att.frontBumperY - 0.05, att.frontBumperZ + 0.06);
+    splitter.scale.x = att.bodyWidth / 2.12;
+
+    streetSkirtL.position.set(-att.skirtX, att.skirtY, att.skirtZ);
+    streetSkirtR.position.set(att.skirtX, att.skirtY, att.skirtZ);
+    streetSkirtL.scale.z = att.skirtLength / 2.22;
+    streetSkirtR.scale.z = att.skirtLength / 2.22;
+    wideSkirtL.position.set(-att.skirtX - 0.06, att.skirtY - 0.01, att.skirtZ);
+    wideSkirtR.position.set(att.skirtX + 0.06, att.skirtY - 0.01, att.skirtZ);
+    wideSkirtL.scale.z = att.skirtLength / 2.48;
+    wideSkirtR.scale.z = att.skirtLength / 2.48;
+
+    underglowLeft.position.set(-att.underglowX, 0.16, 0);
+    underglowRight.position.set(att.underglowX, 0.16, 0);
+  }
+
+  function applyImportedCustomization(customization: CarCustomization, model: ImportedCarModel) {
+    const paintHex = paintColors[customization.paint] ?? paintColors.silver;
+    const wheelHex = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
+
+    console.log(`[carView] Applying paint 0x${paintHex.toString(16)} to ${model.bodyMeshes.length} body meshes`);
+
+    for (const mesh of model.bodyMeshes) {
+      const indices = model.bodyMaterialIndices.get(mesh) ?? [];
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const newMaterials = materials.map((m, i) => {
+        if (!indices.includes(i)) return m;
+        const mat = m as MeshStandardMaterial;
+        const cloned = mat.clone() as MeshStandardMaterial;
+        cloned.map = null;
+        cloned.color.setHex(paintHex);
+        cloned.roughness = 0.45;
+        cloned.metalness = 0.1;
+        cloned.needsUpdate = true;
+        return cloned;
+      });
+      mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
+    }
+    for (const mesh of model.rimMeshes) {
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const newMaterials = materials.map((m) => {
+        const mat = m as MeshStandardMaterial;
+        if (!mat || !mat.color) return m;
+        const cloned = mat.clone() as MeshStandardMaterial;
+        cloned.map = null;
+        cloned.color.setHex(wheelHex);
+        cloned.roughness = 0.5;
+        cloned.metalness = 0.08;
+        cloned.needsUpdate = true;
+        return cloned;
+      });
+      mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
+    }
+
+    stanceDrop = customization.stance === "low" ? 0.11 : customization.stance === "drift" ? 0.08 : 0;
+
+    if (customParts.parent !== importedRoot) {
+      customParts.removeFromParent();
+      importedRoot.add(customParts);
+    }
+
+    const att = getAttachments(customization.selectedCar);
+    repositionKit(att);
+
+    hide(ducktail, streetWing, gtWing, streetLip, splitter, streetSkirtL, streetSkirtR, wideSkirtL, wideSkirtR);
+    if (customization.spoiler === "ducktail") ducktail.visible = true;
+    if (customization.spoiler === "street-wing") streetWing.visible = true;
+    if (customization.spoiler === "gt-wing") gtWing.visible = true;
+    if (customization.frontLip === "street-lip") streetLip.visible = true;
+    if (customization.frontLip === "splitter") splitter.visible = true;
+    if (customization.sideSkirts === "street-skirts") {
+      streetSkirtL.visible = true;
+      streetSkirtR.visible = true;
+    }
+    if (customization.sideSkirts === "wide-skirts") {
+      wideSkirtL.visible = true;
+      wideSkirtR.visible = true;
+    }
+
+    const color = underglowColors[customization.underglow] ?? underglowColors.off;
+    underglowLeft.color.setHex(color);
+    underglowRight.color.setHex(color);
+    underglowLeft.intensity = customization.underglow === "off" ? 0 : 2.4;
+    underglowRight.intensity = customization.underglow === "off" ? 0 : 2.4;
+  }
+
   function applyCustomization(customization: CarCustomization) {
     if (isImportedCar(customization.selectedCar)) {
       const importId = customization.selectedCar;
@@ -253,12 +358,13 @@ export function createCarView(scale = 1) {
       for (const wheel of suspensionPivots) wheel.pivot.visible = false;
       importedRoot.visible = true;
       importedRoot.clear();
+      importedRoot.add(customParts);
       importedWheels = [];
       importedReady = createImportedCarModel(importId).then((model) => {
         if (!model || activeImportedCarId !== importId) return;
-        importedRoot.clear();
         importedRoot.add(model.root);
         importedWheels = model.wheels;
+        applyImportedCustomization(customization, model);
       });
       return;
     }
@@ -270,6 +376,11 @@ export function createCarView(scale = 1) {
     importedRoot.visible = false;
     bodyGroup.visible = true;
     for (const wheel of suspensionPivots) wheel.pivot.visible = true;
+
+    if (customParts.parent !== bodyGroup) {
+      customParts.removeFromParent();
+      bodyGroup.add(customParts);
+    }
 
     const profile = carProfiles[(customization.selectedCar as CarProfileId) in carProfiles ? (customization.selectedCar as CarProfileId) : "lite-coupe"];
     const paint = paintColors[customization.paint] ?? paintColors.silver;
@@ -377,11 +488,22 @@ export function createCarView(scale = 1) {
       root.position.set(car.position.x, 0, car.position.z);
       root.rotation.y = car.heading;
       if (activeImportedCarId) {
-        importedRoot.position.y = 0.02 + Math.abs(car.bodyPitch) * 0.018 + Math.abs(car.bodyRoll) * 0.012;
-        importedRoot.rotation.x = car.bodyPitch * 0.105;
-        importedRoot.rotation.z = -car.bodyRoll * 0.12;
+        importedRoot.position.y = -stanceDrop;
+        importedRoot.rotation.x = car.bodyPitch * 0.08;
+        importedRoot.rotation.z = -car.bodyRoll * 0.08;
 
         for (const wheel of importedWheels) {
+          const corner: WheelCorner = wheel.front
+            ? (wheel.left ? "fl" : "fr")
+            : (wheel.left ? "rl" : "rr");
+          const compression = ({
+            fl: car.suspensionFL,
+            fr: car.suspensionFR,
+            rl: car.suspensionRL,
+            rr: car.suspensionRR,
+          })[corner];
+          const suspOffset = (0.5 - compression) * 0.06;
+          wheel.object.position.y = wheel.baseY - suspOffset;
           wheel.object.rotation.copy(wheel.baseRotation);
           if (wheel.front) wheel.object.rotateY(car.frontWheelAngle);
           wheel.object.rotateX(wheel.front ? -car.wheelSpin : -car.rearWheelSpin);
@@ -420,6 +542,13 @@ export function createCarView(scale = 1) {
       }
     },
     applyCustomization,
+    applyAttachments(att: ImportedCarAttachments) {
+      if (!activeImportedCarId) return;
+      repositionKit(att);
+    },
+    getActiveImportedCarId() {
+      return activeImportedCarId;
+    },
     whenReady() {
       return importedReady;
     },

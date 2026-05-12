@@ -1,33 +1,67 @@
 import { Box3, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+export type ImportedCarAttachments = {
+  bodyWidth: number;
+  rearDeckY: number;
+  rearDeckZ: number;
+  roofY: number;
+  frontBumperY: number;
+  frontBumperZ: number;
+  skirtX: number;
+  skirtY: number;
+  skirtZ: number;
+  skirtLength: number;
+  underglowX: number;
+};
+
+const defaultAttachments: ImportedCarAttachments = {
+  bodyWidth: 1.9,
+  rearDeckY: 0.98,
+  rearDeckZ: -2.0,
+  roofY: 1.3,
+  frontBumperY: 0.2,
+  frontBumperZ: 2.2,
+  skirtX: 1.02,
+  skirtY: 0.23,
+  skirtZ: -0.04,
+  skirtLength: 2.2,
+  underglowX: 0.82,
+};
+
 type ImportedCarDefinition = {
   id: string;
   path: string;
   rootName: string;
   fitLength: number;
+  attachments: ImportedCarAttachments;
 };
 
 export type ImportedWheel = {
   object: Object3D;
   front: boolean;
+  left: boolean;
   baseRotation: Euler;
+  baseY: number;
 };
 
 export type ImportedCarModel = {
   root: Group;
   wheels: ImportedWheel[];
+  bodyMeshes: Mesh[];
+  rimMeshes: Mesh[];
+  bodyMaterialIndices: Map<Mesh, number[]>;
 };
 
 const packPath = "/assets/cars/imports/free_low_poly_vehicles_pack.glb";
 
 const importedCarDefinitions: Record<string, ImportedCarDefinition> = {
-  "pack-suv": { id: "pack-suv", path: packPath, rootName: "SUV", fitLength: 4.5 },
-  "pack-pickup": { id: "pack-pickup", path: packPath, rootName: "Pickup", fitLength: 4.65 },
-  "pack-hatchback": { id: "pack-hatchback", path: packPath, rootName: "Hatchback", fitLength: 4.05 },
-  "pack-sedan": { id: "pack-sedan", path: packPath, rootName: "Sedan", fitLength: 4.55 },
-  "pack-muscle": { id: "pack-muscle", path: packPath, rootName: "Muscle", fitLength: 4.75 },
-  "pack-muscle-2": { id: "pack-muscle-2", path: packPath, rootName: "Muscle 2", fitLength: 4.75 },
+  "pack-suv": { id: "pack-suv", path: packPath, rootName: "SUV", fitLength: 4.5, attachments: { ...defaultAttachments, bodyWidth: 2.05, rearDeckY: 1.55, rearDeckZ: -2.1, roofY: 1.65, frontBumperZ: 2.15, skirtX: 1.08 } },
+  "pack-pickup": { id: "pack-pickup", path: packPath, rootName: "Pickup", fitLength: 4.65, attachments: { ...defaultAttachments, bodyWidth: 1.95, rearDeckY: 1.48, rearDeckZ: -2.2, roofY: 1.55, frontBumperZ: 2.2, skirtX: 1.04 } },
+  "pack-hatchback": { id: "pack-hatchback", path: packPath, rootName: "Hatchback", fitLength: 4.05, attachments: { ...defaultAttachments, bodyWidth: 1.78, rearDeckY: 1.08, rearDeckZ: -1.85, roofY: 1.32, frontBumperZ: 1.9, skirtX: 0.94, skirtLength: 1.9 } },
+  "pack-sedan": { id: "pack-sedan", path: packPath, rootName: "Sedan", fitLength: 4.55, attachments: { ...defaultAttachments, bodyWidth: 1.88, rearDeckY: 1.05, rearDeckZ: -2.15, roofY: 1.32, frontBumperZ: 2.2, skirtX: 1.0 } },
+  "pack-muscle": { id: "pack-muscle", path: packPath, rootName: "Muscle", fitLength: 4.75, attachments: { ...defaultAttachments, bodyWidth: 2.0, rearDeckY: 0.98, rearDeckZ: -2.25, roofY: 1.22, frontBumperZ: 2.3, skirtX: 1.06 } },
+  "pack-muscle-2": { id: "pack-muscle-2", path: packPath, rootName: "Muscle 2", fitLength: 4.75, attachments: { ...defaultAttachments, bodyWidth: 2.0, rearDeckY: 0.98, rearDeckZ: -2.25, roofY: 1.22, frontBumperZ: 2.3, skirtX: 1.06 } },
 };
 
 const loader = new GLTFLoader();
@@ -35,6 +69,14 @@ const sceneCache = new Map<string, Promise<Group>>();
 
 export function isImportedCar(id: string) {
   return id in importedCarDefinitions;
+}
+
+export function getAttachments(id: string): ImportedCarAttachments {
+  return importedCarDefinitions[id]?.attachments ?? { ...defaultAttachments };
+}
+
+export function setAttachments(id: string, attachments: ImportedCarAttachments) {
+  if (importedCarDefinitions[id]) importedCarDefinitions[id].attachments = attachments;
 }
 
 function loadScene(path: string) {
@@ -128,7 +170,7 @@ function addGeneratedWheelRig(content: Group, bounds: Box3) {
     pivot.add(rim);
 
     content.add(pivot);
-    wheels.push({ object: pivot, front: wheel.front, baseRotation: pivot.rotation.clone() });
+    wheels.push({ object: pivot, front: wheel.front, left: wheel.x < center.x, baseRotation: pivot.rotation.clone(), baseY: wheelY });
   }
 
   return wheels;
@@ -154,10 +196,13 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
   for (const wheel of wheels) {
     const pivot = createWheelPivot(wheel);
     content.add(pivot);
+    const name = normalizeName(wheel.name);
     wheelRecords.push({
       object: pivot,
-      front: normalizeName(wheel.name).includes("front"),
+      front: name.includes("front"),
+      left: name.includes("left"),
       baseRotation: pivot.rotation.clone(),
+      baseY: pivot.position.y,
     });
   }
 
@@ -165,7 +210,8 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   if (wheelRecords.length < 4) {
     const bodyBounds = new Box3().setFromObject(clone);
-    wheelRecords.push(...addGeneratedWheelRig(content, bodyBounds));
+    const generated = addGeneratedWheelRig(content, bodyBounds);
+    wheelRecords.push(...generated);
     content.updateMatrixWorld(true);
   }
 
@@ -179,5 +225,69 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
   root.scale.setScalar(definition.fitLength / footprint);
   root.add(content);
 
-  return { root, wheels: wheelRecords };
+  const bodyMeshes: Mesh[] = [];
+  const rimMeshes: Mesh[] = [];
+  const bodyMaterialIndices: Map<Mesh, number[]> = new Map();
+
+  const glassKeywords = ["glass", "window", "windshield", "windscreen"];
+  const lightKeywords = ["light", "lamp", "headlight", "taillight", "brake", "signal", "emit", "lens"];
+  const mirrorKeywords = ["mirror", "chrome"];
+  const tireKeywords = ["tire", "tyre", "rubber"];
+  const plateKeywords = ["plate", "license", "number"];
+
+  content.traverse((node) => {
+    if (!(node instanceof Mesh)) return;
+
+    const isWheelChild = wheelRecords.some((w) => {
+      let parent: Object3D | null = node;
+      while (parent) { if (parent === w.object) return true; parent = parent.parent; }
+      return false;
+    });
+
+    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    const nodeName = node.name.toLowerCase();
+
+    console.log(`[importedCars] mesh: "${node.name}" materials: ${materials.length} isWheel: ${isWheelChild}`);
+
+    if (isWheelChild) {
+      const isTire = tireKeywords.some((kw) => nodeName.includes(kw));
+      if (!isTire) rimMeshes.push(node);
+      return;
+    }
+
+    const isPlate = plateKeywords.some((kw) => nodeName.includes(kw));
+    if (isPlate) return;
+
+    const validIndices: number[] = [];
+    for (let i = 0; i < materials.length; i++) {
+      const mat = materials[i] as MeshStandardMaterial;
+      if (!mat || !mat.color) continue;
+      const matName = (mat.name || "").toLowerCase();
+      const combined = nodeName + " " + matName;
+
+      const isGlass = glassKeywords.some((kw) => combined.includes(kw));
+      const isLight = lightKeywords.some((kw) => combined.includes(kw));
+      const isMirror = mirrorKeywords.some((kw) => combined.includes(kw));
+
+      if (isGlass || isLight || isMirror) continue;
+
+      const isBodyByName = combined.includes("body");
+      const isTrimBlack = combined.includes("body_black") || combined.includes("black");
+      const isAccentWhite = combined.includes("body_white") || combined.includes("white");
+
+      if (isBodyByName && !isTrimBlack && !isAccentWhite) {
+        validIndices.push(i);
+        console.log(`[importedCars]   mat[${i}] "${mat.name}" → BODY (paintable)`);
+      }
+    }
+
+    if (validIndices.length > 0) {
+      bodyMeshes.push(node);
+      bodyMaterialIndices.set(node, validIndices);
+    }
+  });
+
+  console.log(`[importedCars] ${id}: ${bodyMeshes.length} body meshes, ${rimMeshes.length} rim meshes`);
+
+  return { root, wheels: wheelRecords, bodyMeshes, rimMeshes, bodyMaterialIndices };
 }
