@@ -51,6 +51,7 @@ async function boot() {
   const drift = createDriftState();
   const hud = createHud();
   hud.setCarName(carEntry.name);
+  hud.root.hidden = true;
 
   const garageView = createGarageView(canvas, renderer, customization);
   const runLength = 90;
@@ -85,6 +86,7 @@ async function boot() {
     activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
     appState = "event";
     results.hide();
+    hud.root.hidden = false;
     garageUi.hide();
     resetEvent();
     hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");

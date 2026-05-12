@@ -40,6 +40,10 @@ canvas {
   z-index: 5;
 }
 
+.hud[hidden] {
+  display: none;
+}
+
 .hud__strip,
 .hud__hint,
 .hud__warning,
