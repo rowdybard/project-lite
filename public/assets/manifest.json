@@ -4,6 +4,7 @@
   "cars": {
     "starter-coupe": {
       "name": "S13 240SX Drift Coupe",
+      "model": "/assets/cars/altima/altima_2010_style.glb",
       "tuning": "/assets/cars/starter/tuning.json",
       "scale": 1
     }
