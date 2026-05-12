@@ -1,6 +1,13 @@
 import "./style.css";
 import { Clock } from "three";
-import { applyTuningPreset, loadCustomization, saveCustomization, type CarCustomization, type ModeId } from "./game/customization";
+import {
+  applyTuningPreset,
+  carOptions,
+  loadCustomization,
+  saveCustomization,
+  type CarCustomization,
+  type ModeId,
+} from "./game/customization";
 import { loadJson, loadManifest } from "./game/content/manifest";
 import { bindInput, readInput } from "./game/input/inputMap";
 import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
@@ -50,7 +57,10 @@ async function boot() {
   const car = createCarState(track);
   const drift = createDriftState();
   const hud = createHud();
-  hud.setCarName(carEntry.name);
+  const setHudCarName = () => {
+    hud.setCarName(carOptions.find((option) => option.id === customization.selectedCar)?.label ?? carEntry.name);
+  };
+  setHudCarName();
   hud.root.hidden = true;
 
   const garageView = createGarageView(canvas, renderer, customization);
@@ -89,6 +99,7 @@ async function boot() {
     hud.root.hidden = false;
     garageUi.hide();
     resetEvent();
+    setHudCarName();
     hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");
     canvas.focus();
   };

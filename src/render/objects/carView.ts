@@ -3,9 +3,58 @@ import { paintColors, underglowColors, wheelColors, type CarCustomization } from
 import type { CarState } from "../../game/types";
 
 type WheelCorner = "fl" | "fr" | "rl" | "rr";
+type CarProfileId = "lite-coupe" | "street-hatch";
+
+const carProfiles: Record<
+  CarProfileId,
+  {
+    body: { width: number; length: number; height: number; y: number };
+    hood: { width: number; length: number; height: number; y: number; z: number };
+    rearDeck: { width: number; length: number; height: number; y: number; z: number; visible: boolean };
+    cabin: { width: number; length: number; height: number; y: number; z: number };
+    hatchRoof: { width: number; length: number; height: number; y: number; z: number; rotation: number; visible: boolean };
+    frontBumperZ: number;
+    rearBumperZ: number;
+    wheelbaseFront: number;
+    wheelbaseRear: number;
+    wheelTrack: number;
+    wheelRadius: number;
+  }
+> = {
+  "lite-coupe": {
+    body: { width: 1.96, length: 4.62, height: 0.52, y: 0.56 },
+    hood: { width: 1.78, length: 1.34, height: 0.13, y: 0.9, z: 0.95 },
+    rearDeck: { width: 1.78, length: 0.9, height: 0.15, y: 0.86, z: -1.42, visible: true },
+    cabin: { width: 1.28, length: 1.36, height: 0.54, y: 0.98, z: -0.36 },
+    hatchRoof: { width: 1.46, length: 1.02, height: 0.22, y: 0.9, z: -1.12, rotation: -0.2, visible: false },
+    frontBumperZ: 2.18,
+    rearBumperZ: -2.18,
+    wheelbaseFront: 1.34,
+    wheelbaseRear: -1.48,
+    wheelTrack: 1.08,
+    wheelRadius: 0.38,
+  },
+  "street-hatch": {
+    body: { width: 1.82, length: 3.82, height: 0.62, y: 0.58 },
+    hood: { width: 1.58, length: 1.0, height: 0.15, y: 0.92, z: 0.92 },
+    rearDeck: { width: 1.48, length: 0.32, height: 0.14, y: 0.88, z: -1.68, visible: false },
+    cabin: { width: 1.36, length: 1.58, height: 0.68, y: 1.04, z: -0.55 },
+    hatchRoof: { width: 1.52, length: 1.2, height: 0.28, y: 0.94, z: -1.18, rotation: -0.34, visible: true },
+    frontBumperZ: 1.86,
+    rearBumperZ: -1.86,
+    wheelbaseFront: 1.1,
+    wheelbaseRear: -1.22,
+    wheelTrack: 1.0,
+    wheelRadius: 0.34,
+  },
+};
 
 const hide = (...objects: (Mesh | Group | PointLight | null)[]) => {
   for (const object of objects) if (object) object.visible = false;
+};
+
+const setBox = (mesh: Mesh, width: number, height: number, depth: number) => {
+  mesh.scale.set(width, height, depth);
 };
 
 export function createCarView(scale = 1) {
@@ -35,19 +84,20 @@ export function createCarView(scale = 1) {
     return mesh;
   };
 
-  addBodyPart(new Mesh(new BoxGeometry(1.96, 0.52, 4.62), paintMaterial)).position.y = 0.56;
-  addBodyPart(new Mesh(new BoxGeometry(1.78, 0.13, 1.34), paintMaterial)).position.set(0, 0.9, 0.95);
-  addBodyPart(new Mesh(new BoxGeometry(1.78, 0.15, 0.9), paintMaterial)).position.set(0, 0.86, -1.42);
-  addBodyPart(new Mesh(new BoxGeometry(1.98, 0.34, 0.48), paintMaterial)).position.set(0, 0.42, 2.18);
-  addBodyPart(new Mesh(new BoxGeometry(1.98, 0.34, 0.42), paintMaterial)).position.set(0, 0.42, -2.18);
+  const body = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
+  const hood = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
+  const rearDeck = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
+  const frontBumper = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
+  const rearBumper = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
 
   const cabin = new Mesh(
-    new BoxGeometry(1.28, 0.54, 1.36),
+    new BoxGeometry(1, 1, 1),
     new MeshStandardMaterial({ color: 0x1d2733, roughness: 0.32, metalness: 0.08 }),
   );
-  cabin.position.set(0, 0.98, -0.36);
   cabin.castShadow = true;
   bodyGroup.add(cabin);
+
+  const hatchRoof = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
 
   const headlightMaterial = new MeshStandardMaterial({ color: 0xf4efe0, emissive: 0x332816, roughness: 0.4 });
   const tailMaterial = new MeshStandardMaterial({ color: 0xb42732, emissive: 0x2c0507, roughness: 0.45 });
@@ -154,12 +204,39 @@ export function createCarView(scale = 1) {
   );
 
   function applyCustomization(customization: CarCustomization) {
+    const profile = carProfiles[(customization.selectedCar as CarProfileId) in carProfiles ? (customization.selectedCar as CarProfileId) : "lite-coupe"];
     const paint = paintColors[customization.paint] ?? paintColors.silver;
     const wheel = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
     paintMaterial.color.setHex(paint);
     wheelSideMaterial.color.setHex(wheel);
     for (const part of bodyParts) part.material = paintMaterial;
     for (const rim of rimParts) rim.material = wheelSideMaterial;
+
+    setBox(body, profile.body.width, profile.body.height, profile.body.length);
+    body.position.y = profile.body.y;
+    setBox(hood, profile.hood.width, profile.hood.height, profile.hood.length);
+    hood.position.set(0, profile.hood.y, profile.hood.z);
+    setBox(rearDeck, profile.rearDeck.width, profile.rearDeck.height, profile.rearDeck.length);
+    rearDeck.position.set(0, profile.rearDeck.y, profile.rearDeck.z);
+    rearDeck.visible = profile.rearDeck.visible;
+    setBox(frontBumper, profile.body.width + 0.02, 0.34, 0.48);
+    frontBumper.position.set(0, 0.42, profile.frontBumperZ);
+    setBox(rearBumper, profile.body.width + 0.02, 0.34, 0.42);
+    rearBumper.position.set(0, 0.42, profile.rearBumperZ);
+    setBox(cabin, profile.cabin.width, profile.cabin.height, profile.cabin.length);
+    cabin.position.set(0, profile.cabin.y, profile.cabin.z);
+    setBox(hatchRoof, profile.hatchRoof.width, profile.hatchRoof.height, profile.hatchRoof.length);
+    hatchRoof.position.set(0, profile.hatchRoof.y, profile.hatchRoof.z);
+    hatchRoof.rotation.x = profile.hatchRoof.rotation;
+    hatchRoof.visible = profile.hatchRoof.visible;
+
+    for (let index = 0; index < suspensionPivots.length; index += 1) {
+      const wheelPosition = wheelPositions[index];
+      const pivot = suspensionPivots[index].pivot;
+      pivot.position.x = (wheelPosition.x < 0 ? -1 : 1) * profile.wheelTrack;
+      pivot.position.z = wheelPosition.front ? profile.wheelbaseFront : profile.wheelbaseRear;
+      pivot.scale.setScalar(profile.wheelRadius / 0.38);
+    }
 
     stanceDrop = customization.stance === "low" ? 0.11 : customization.stance === "drift" ? 0.08 : 0;
 
@@ -187,6 +264,7 @@ export function createCarView(scale = 1) {
 
   applyCustomization({
     paint: "silver",
+    selectedCar: "lite-coupe",
     wheelColor: "dark-alloy",
     stance: "stock",
     spoiler: "none",
@@ -223,12 +301,12 @@ export function createCarView(scale = 1) {
       }
 
       for (const wheel of frontWheelMeshes) {
-        wheel.rotation.x = car.wheelSpin;
+        wheel.rotation.x = -car.wheelSpin;
         wheel.rotation.z = Math.PI / 2;
       }
 
       for (const wheel of rearWheelMeshes) {
-        wheel.rotation.x = car.rearWheelSpin;
+        wheel.rotation.x = -car.rearWheelSpin;
         wheel.rotation.z = Math.PI / 2;
       }
     },

@@ -2,6 +2,7 @@ import type { CarTuning } from "./types";
 
 export type ModeId = "drift-attack" | "free-drive" | "drag-race" | "lap-race";
 export type CustomizationSlot =
+  | "selectedCar"
   | "paint"
   | "wheelColor"
   | "stance"
@@ -12,6 +13,7 @@ export type CustomizationSlot =
   | "tuningPreset";
 
 export type CarCustomization = {
+  selectedCar: string;
   paint: string;
   wheelColor: string;
   stance: string;
@@ -40,6 +42,7 @@ export type CustomizationCategory = {
 const storageKey = "projectLite.customization.v1";
 
 export const defaultCustomization: CarCustomization = {
+  selectedCar: "lite-coupe",
   paint: "silver",
   wheelColor: "dark-alloy",
   stance: "stock",
@@ -50,6 +53,13 @@ export const defaultCustomization: CarCustomization = {
   tuningPreset: "balanced",
   selectedMode: "drift-attack",
 };
+
+export const carOptions: CustomizationOption[] = [
+  { id: "lite-coupe", label: "Lite Coupe" },
+  { id: "street-hatch", label: "Street Hatch" },
+  { id: "slot-3", label: "Empty Bay", disabled: true },
+  { id: "slot-4", label: "Empty Bay", disabled: true },
+];
 
 export const modeOptions: CustomizationOption[] = [
   { id: "drift-attack", label: "Drift Attack" },

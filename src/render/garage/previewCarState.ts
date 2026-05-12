@@ -1,0 +1,38 @@
+import type { CarState } from "../../game/types";
+
+export function createPreviewCarState(): CarState {
+  return {
+    position: { x: 0, z: 0 },
+    heading: 0,
+    velocity: { x: 0, z: 0 },
+    speed: 0,
+    yawVelocity: 0,
+    slipAmount: 0,
+    slipAngle: 0,
+    frontSlipAngle: 0,
+    rearSlipAngle: 0,
+    gripAmount: 1,
+    handbrakeAmount: 0,
+    driftAmount: 0,
+    driftDirection: 1,
+    frontWheelAngle: 0,
+    wheelSpin: 0,
+    rearWheelSpin: 0,
+    bodyPitch: 0,
+    bodyRoll: 0,
+    weightForward: 0.5,
+    weightRight: 0.5,
+    suspensionFL: 0.5,
+    suspensionFR: 0.5,
+    suspensionRL: 0.5,
+    suspensionRR: 0.5,
+    gear: 1,
+    rpm: 850,
+    shiftCooldown: 0,
+    tireHeat: 0,
+    rearSlipVisual: 0,
+    steerAxis: 0,
+    throttleAxis: 0,
+    brakeAxis: 0,
+  };
+}

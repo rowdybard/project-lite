@@ -11,48 +11,11 @@ import {
   WebGLRenderer,
 } from "three";
 import type { CarCustomization } from "../../game/customization";
-import type { CarState } from "../../game/types";
 import { createCarView } from "../objects/carView";
+import { createPreviewCarState } from "./previewCarState";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const lerp = (from: number, to: number, t: number) => from + (to - from) * t;
-
-function createPreviewCarState(): CarState {
-  return {
-    position: { x: 0, z: 0 },
-    heading: 0,
-    velocity: { x: 0, z: 0 },
-    speed: 0,
-    yawVelocity: 0,
-    slipAmount: 0,
-    slipAngle: 0,
-    frontSlipAngle: 0,
-    rearSlipAngle: 0,
-    gripAmount: 1,
-    handbrakeAmount: 0,
-    driftAmount: 0,
-    driftDirection: 1,
-    frontWheelAngle: 0,
-    wheelSpin: 0,
-    rearWheelSpin: 0,
-    bodyPitch: 0,
-    bodyRoll: 0,
-    weightForward: 0.5,
-    weightRight: 0.5,
-    suspensionFL: 0.5,
-    suspensionFR: 0.5,
-    suspensionRL: 0.5,
-    suspensionRR: 0.5,
-    gear: 1,
-    rpm: 850,
-    shiftCooldown: 0,
-    tireHeat: 0,
-    rearSlipVisual: 0,
-    steerAxis: 0,
-    throttleAxis: 0,
-    brakeAxis: 0,
-  };
-}
 
 export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRenderer, customization: CarCustomization) {
   const scene = new Scene();
@@ -125,8 +88,14 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   let pitch = targetPitch;
   let targetDistance = 7.2;
   let distance = targetDistance;
+  let pauseAutoSpinUntil = 0;
+
+  const pauseAutoSpin = () => {
+    pauseAutoSpinUntil = performance.now() + 22000;
+  };
 
   const onPointerDown = (event: PointerEvent) => {
+    pauseAutoSpin();
     dragging = true;
     lastX = event.clientX;
     lastY = event.clientY;
@@ -135,6 +104,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   const onPointerMove = (event: PointerEvent) => {
     if (!dragging) return;
     event.preventDefault();
+    pauseAutoSpin();
     targetYaw += (event.clientX - lastX) * 0.008;
     targetPitch = clamp(targetPitch + (event.clientY - lastY) * 0.003, -0.22, 0.42);
     lastX = event.clientX;
@@ -146,6 +116,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   };
   const onWheel = (event: WheelEvent) => {
     event.preventDefault();
+    pauseAutoSpin();
     targetDistance = clamp(targetDistance + event.deltaY * 0.006, 4.8, 9.5);
   };
 
@@ -171,7 +142,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
       pitch = lerp(pitch, targetPitch, 1 - Math.pow(0.0005, dt));
       distance = lerp(distance, targetDistance, 1 - Math.pow(0.0005, dt));
 
-      car.heading += dt * 0.18;
+      if (performance.now() > pauseAutoSpinUntil) car.heading += dt * 0.18;
       car.bodyRoll = Math.sin(performance.now() * 0.0012) * 0.05;
       carView.sync(car);
 
