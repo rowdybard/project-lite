@@ -21,7 +21,7 @@ function optionButton(option: { id: string; label: string; color?: number; disab
   button.disabled = !!option.disabled;
   button.innerHTML = option.color
     ? `<span class="garage-option__swatch" style="--swatch:#${option.color.toString(16).padStart(6, "0")}"></span>${option.label}`
-    : option.label;
+    : `<span>${option.label}</span>`;
   return button;
 }
 
@@ -40,8 +40,10 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
       <header class="garage-header">
         <p>Project Lite</p>
         <h1>Garage</h1>
+        <span>Build, tune, launch</span>
       </header>
       <aside class="garage-mode">
+        <p class="garage-kicker">Event</p>
         <h2>Mode Select</h2>
         <div data-modes></div>
         <button class="garage-start" type="button">Start Event</button>
