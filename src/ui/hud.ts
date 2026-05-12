@@ -38,7 +38,7 @@ export function createHud() {
       </div>
       <div class="drift-score__callout" data-callout hidden>Drift</div>
     </div>
-    <div class="hud__hint">WASD/Arrows drive - Space/Shift/E handbrake - R reset - T tune</div>
+    <div class="hud__hint">WASD/Arrows drive - Space/Shift/E handbrake - R restart</div>
   `;
   document.body.append(root);
 
@@ -73,7 +73,7 @@ export function createHud() {
   };
 }
 
-export function createSessionOverlay(onPlay: () => void, onRestart: () => void) {
+export function createSessionOverlay(onPlay: () => void, onRestart: () => void, tunePanel: HTMLElement) {
   const root = document.createElement("div");
   root.className = "session-overlay";
   root.innerHTML = `
@@ -81,7 +81,19 @@ export function createSessionOverlay(onPlay: () => void, onRestart: () => void) 
       <p class="session-card__eyebrow">Project Lite</p>
       <h1>Training Circuit</h1>
       <p>90 seconds. Link clean drifts, stay on the asphalt, bank the biggest combo you can.</p>
-      <button data-play type="button">Play</button>
+      <div class="session-card__actions">
+        <button data-play type="button">Play</button>
+        <button class="session-card__secondary" data-options type="button">Options</button>
+      </div>
+    </section>
+    <section class="session-card session-card--options" data-options-panel hidden>
+      <p class="session-card__eyebrow">Garage</p>
+      <h1>Options</h1>
+      <div data-tune-slot></div>
+      <div class="session-card__actions">
+        <button data-options-play type="button">Play</button>
+        <button class="session-card__secondary" data-options-back type="button">Back</button>
+      </div>
     </section>
     <section class="session-card session-card--end" data-end hidden>
       <p class="session-card__eyebrow">Run Complete</p>
@@ -90,21 +102,51 @@ export function createSessionOverlay(onPlay: () => void, onRestart: () => void) 
         <span>Best combo <strong data-final-combo>0</strong></span>
         <span>Best run <strong data-final-best>0</strong></span>
       </div>
-      <button data-restart type="button">Restart</button>
+      <div class="session-card__actions">
+        <button data-restart type="button">Restart</button>
+        <button class="session-card__secondary" data-end-options type="button">Options</button>
+      </div>
     </section>
   `;
   document.body.append(root);
 
   const menu = root.querySelector("[data-menu]") as HTMLElement;
+  const options = root.querySelector("[data-options-panel]") as HTMLElement;
   const end = root.querySelector("[data-end]") as HTMLElement;
+  const tuneSlot = root.querySelector("[data-tune-slot]") as HTMLElement;
+  tunePanel.hidden = false;
+  tuneSlot.append(tunePanel);
   root.querySelector("[data-play]")!.addEventListener("click", onPlay);
+  root.querySelector("[data-options-play]")!.addEventListener("click", onPlay);
   root.querySelector("[data-restart]")!.addEventListener("click", onRestart);
+  root.querySelector("[data-options]")!.addEventListener("click", () => {
+    menu.hidden = true;
+    options.hidden = false;
+    end.hidden = true;
+  });
+  root.querySelector("[data-options-back]")!.addEventListener("click", () => {
+    menu.hidden = false;
+    options.hidden = true;
+    end.hidden = true;
+  });
+  root.querySelector("[data-end-options]")!.addEventListener("click", () => {
+    menu.hidden = true;
+    options.hidden = false;
+    end.hidden = true;
+  });
 
   return {
     root,
     showMenu() {
       root.hidden = false;
       menu.hidden = false;
+      options.hidden = true;
+      end.hidden = true;
+    },
+    showOptions() {
+      root.hidden = false;
+      menu.hidden = true;
+      options.hidden = false;
       end.hidden = true;
     },
     hide() {
@@ -113,6 +155,7 @@ export function createSessionOverlay(onPlay: () => void, onRestart: () => void) 
     showEnd(finalScore: number, bestCombo: number, bestRun: number) {
       root.hidden = false;
       menu.hidden = true;
+      options.hidden = true;
       end.hidden = false;
       root.querySelector("[data-final-score]")!.textContent = formatScore(finalScore);
       root.querySelector("[data-final-combo]")!.textContent = formatScore(bestCombo);

@@ -165,6 +165,12 @@ canvas {
   backdrop-filter: blur(14px);
 }
 
+.session-card--options {
+  width: min(760px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+}
+
 .session-card[hidden] {
   display: none;
 }
@@ -193,6 +199,13 @@ canvas {
   line-height: 1.45;
 }
 
+.session-card__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .session-card button {
   width: 100%;
   min-height: 46px;
@@ -206,8 +219,18 @@ canvas {
   cursor: pointer;
 }
 
+.session-card .session-card__secondary {
+  color: #f7f0df;
+  background: rgb(255 255 255 / 10%);
+  border: 1px solid rgb(255 255 255 / 14%);
+}
+
 .session-card button:hover {
   background: #f4d06b;
+}
+
+.session-card .session-card__secondary:hover {
+  background: rgb(255 255 255 / 16%);
 }
 
 .session-card__stats {
@@ -359,6 +382,15 @@ canvas {
   overflow: auto;
   padding: 16px;
   border-radius: 8px;
+}
+
+.session-card .tune-panel {
+  position: static;
+  width: 100%;
+  max-height: min(52vh, 460px);
+  margin-top: 16px;
+  box-shadow: none;
+  background: rgb(255 255 255 / 5%);
 }
 
 .tune-panel h2 {

@@ -78,7 +78,7 @@ async function boot() {
     overlay.showEnd(finalScore, drift.bestCombo, drift.bestRun);
   };
 
-  const overlay = createSessionOverlay(startRun, startRun);
+  const overlay = createSessionOverlay(startRun, startRun, tunePanel);
   overlay.showMenu();
 
   const onResize = () => {
@@ -98,7 +98,7 @@ async function boot() {
     const dt = Math.min(clock.getDelta(), 1 / 30);
     const input = readInput();
 
-    if (input.debug) tunePanel.hidden = !tunePanel.hidden;
+    if (input.debug && sessionState !== "running") overlay.showOptions();
     if (input.reset) {
       if (sessionState === "running") {
         startRun();
@@ -118,24 +118,34 @@ async function boot() {
       }
     }
 
-    const driveInput = isRunning ? input : { ...input, throttle: 0, brake: 1, steer: 0, handbrake: false };
-    const substeps = Math.max(1, Math.ceil(dt / (1 / 120)));
-    for (let i = 0; i < substeps; i++) {
-      updateCar(car, driveInput, tuning, dt / substeps, isOnTrack(car.position, track));
+    if (isRunning) {
+      const substeps = Math.max(1, Math.ceil(dt / (1 / 120)));
+      for (let i = 0; i < substeps; i++) {
+        updateCar(car, input, tuning, dt / substeps, isOnTrack(car.position, track));
+      }
     }
+
     const onTrack = isOnTrack(car.position, track);
-    const impact = keepCarNearTrack(car, track);
-    if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
-    if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
-    if (isRunning) updateDriftScore(drift, car, dt, onTrack, getDriftZone(car.position, track));
-    tireTracks.update(car, onTrack);
-    tireSmoke.update(car, onTrack, dt);
+    if (isRunning) {
+      const impact = keepCarNearTrack(car, track);
+      if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
+      if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
+      updateDriftScore(drift, car, dt, onTrack, getDriftZone(car.position, track));
+      tireTracks.update(car, onTrack);
+      tireSmoke.update(car, onTrack, dt);
+    }
+
     carView.sync(car);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
     updateChaseCamera(camera, car, dt, cameraShake);
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
-    renderer.render(scene, camera);
+    hud.root.hidden = sessionState === "menu";
+    if (sessionState === "menu") {
+      renderer.clear(true, true, true);
+    } else {
+      renderer.render(scene, camera);
+    }
 
     requestAnimationFrame(frame);
   }
