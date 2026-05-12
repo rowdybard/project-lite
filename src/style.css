@@ -48,17 +48,17 @@ canvas {
 .drift-score,
 .tune-panel {
   color: #f7f0df;
-  background: linear-gradient(180deg, rgb(18 25 34 / 82%), rgb(8 12 18 / 84%));
-  border: 1px solid rgb(255 255 255 / 12%);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 28%);
-  backdrop-filter: blur(14px);
+  background: rgb(10 15 22 / 76%);
+  border: 1px solid rgb(190 210 230 / 18%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 24%);
+  backdrop-filter: blur(8px);
 }
 
 .hud__cluster {
   grid-column: 1;
   min-width: 0;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: 3px;
 }
 
 .hud__label {
@@ -102,7 +102,7 @@ canvas {
   place-items: center;
   width: 26px;
   height: 24px;
-  border-radius: 5px;
+  border-radius: 2px;
   color: #101720;
   background: #e5bf55;
   font-size: 17px;
@@ -117,7 +117,7 @@ canvas {
   height: 6px;
   margin-top: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: 1px;
   background: rgb(255 255 255 / 14%);
 }
 
@@ -138,7 +138,7 @@ canvas {
   gap: 8px;
   width: min(100%, 690px);
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 3px;
   font-size: 12px;
   color: #bac6d3;
 }
@@ -148,8 +148,9 @@ canvas {
   gap: 3px;
   min-width: 0;
   padding: 6px 8px;
-  border-radius: 6px;
-  background: rgb(255 255 255 / 5%);
+  border-left: 2px solid rgb(104 216 255 / 36%);
+  border-radius: 0;
+  background: rgb(255 255 255 / 4%);
   text-transform: uppercase;
 }
 
@@ -174,7 +175,7 @@ canvas {
   width: min(480px, calc(100vw - 36px));
   padding: 28px;
   border: 1px solid rgb(255 255 255 / 13%);
-  border-radius: 8px;
+  border-radius: 3px;
   color: #f7f0df;
   background: linear-gradient(180deg, rgb(21 29 39 / 94%), rgb(9 14 21 / 96%));
   box-shadow: 0 26px 80px rgb(0 0 0 / 44%);
@@ -227,7 +228,7 @@ canvas {
   width: 100%;
   min-height: 46px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 2px;
   color: #101720;
   background: #e5bf55;
   font: inherit;
@@ -238,8 +239,8 @@ canvas {
 
 .session-card .session-card__secondary {
   color: #f7f0df;
-  background: rgb(255 255 255 / 10%);
-  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(190 210 230 / 18%);
 }
 
 .session-card button:hover {
@@ -259,7 +260,7 @@ canvas {
 
 .session-card__stats span {
   padding: 10px;
-  border-radius: 7px;
+  border-radius: 2px;
   color: #aeb9c8;
   background: rgb(255 255 255 / 7%);
   font-size: 12px;
@@ -285,7 +286,7 @@ canvas {
   width: min(450px, 100%);
   height: 8px;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 1px;
 }
 
 .hud__slip span {
@@ -306,7 +307,7 @@ canvas {
   width: max-content;
   max-width: calc(100vw - 28px);
   padding: 10px 13px;
-  border-radius: 8px;
+  border-radius: 3px;
   color: #dbe3ec;
   font-size: 13px;
 }
@@ -317,7 +318,7 @@ canvas {
   left: 50%;
   transform: translateX(-50%);
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: 3px;
   color: #fff0c0;
   background: rgb(161 37 37 / 78%);
   font-weight: 800;
@@ -326,10 +327,10 @@ canvas {
 
 .drift-score {
   position: fixed;
-  top: 116px;
+  top: 112px;
   left: 50%;
   z-index: 6;
-  width: min(520px, calc(100vw - 340px));
+  width: min(380px, calc(100vw - 380px));
   padding: 0;
   transform: translateX(-50%);
   border: 0;
@@ -340,8 +341,8 @@ canvas {
 }
 
 .drift-score__label {
-  color: rgb(255 246 216 / 72%);
-  font-size: 12px;
+  color: rgb(214 232 255 / 72%);
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -350,29 +351,29 @@ canvas {
 
 .drift-score__total {
   margin-top: 0;
-  color: #fff4b8;
-  font-size: clamp(58px, 7.6vw, 112px);
+  color: #f7fbff;
+  font-size: clamp(42px, 4.4vw, 68px);
   line-height: 1;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   text-shadow:
-    0 3px 0 #7d4f00,
-    0 0 18px rgb(241 199 91 / 70%),
-    0 14px 32px rgb(0 0 0 / 72%);
+    0 2px 0 #26394f,
+    0 0 14px rgb(104 216 255 / 58%),
+    0 10px 24px rgb(0 0 0 / 72%);
 }
 
 .drift-score__combo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 12px;
   margin-top: 0;
-  padding: 6px 14px;
-  border-radius: 999px;
-  color: #f1c75b;
-  background: rgb(7 10 14 / 62%);
-  border: 1px solid rgb(255 255 255 / 12%);
-  font-size: 22px;
+  padding: 4px 11px;
+  border-radius: 2px;
+  color: #f5d262;
+  background: rgb(7 10 14 / 48%);
+  border: 1px solid rgb(104 216 255 / 20%);
+  font-size: 18px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   text-shadow: 0 2px 12px rgb(0 0 0 / 90%);
@@ -380,7 +381,7 @@ canvas {
 
 .drift-score__combo strong {
   color: #68d8ff;
-  font-size: 26px;
+  font-size: 21px;
   text-shadow: 0 0 16px rgb(104 216 255 / 70%);
 }
 
@@ -400,16 +401,17 @@ canvas {
 
 .drift-score__callout {
   width: max-content;
-  margin: 8px auto 0;
-  padding: 7px 13px;
-  border-radius: 999px;
-  color: #101720;
-  background: linear-gradient(180deg, #ffe177, #d7a832);
-  font-size: 13px;
+  margin: 5px auto 0;
+  padding: 5px 10px;
+  border-radius: 2px;
+  color: #101820;
+  background: #d9f0ff;
+  border-left: 3px solid #f5d262;
+  font-size: 12px;
   font-weight: 900;
   text-align: center;
   text-transform: uppercase;
-  box-shadow: 0 0 18px rgb(229 191 85 / 42%);
+  box-shadow: 0 0 12px rgb(104 216 255 / 30%);
 }
 
 .tune-panel {
@@ -420,7 +422,7 @@ canvas {
   max-height: calc(100vh - 36px);
   overflow: auto;
   padding: 16px;
-  border-radius: 8px;
+  border-radius: 3px;
 }
 
 .session-card .tune-panel {
@@ -429,7 +431,7 @@ canvas {
   max-height: min(52vh, 460px);
   margin-top: 16px;
   box-shadow: none;
-  background: rgb(255 255 255 / 5%);
+  background: rgb(255 255 255 / 4%);
 }
 
 .tune-panel h2 {
