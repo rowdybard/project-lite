@@ -1,7 +1,5 @@
 import {
-  carOptions,
   customizationCategories,
-  getCarLabel,
   importedCarOptions,
   modeOptions,
   type CarCustomization,
@@ -9,7 +7,6 @@ import {
   type CustomizationSlot,
   type ModeId,
 } from "../game/customization";
-import { renderMiniCarPreview } from "../render/garage/miniCarPreview";
 
 type GarageUiCallbacks = {
   onCustomizationChange: (slot: CustomizationSlot, value: string) => void;
@@ -99,34 +96,7 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
     });
 
     const cars = root.querySelector("[data-cars]")!;
-    const secondBay = customization.selectedCar === "street-sedan" ? carOptions[0] : carOptions[1];
-    const bayOptions = [
-      { id: customization.selectedCar, label: getCarLabel(customization.selectedCar) },
-      secondBay,
-      carOptions[2],
-      carOptions[3],
-    ];
-    for (const car of bayOptions) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = customization.selectedCar === car.id ? "garage-car-card is-active" : "garage-car-card";
-      button.disabled = !!car.disabled;
-
-      const image = document.createElement("img");
-      image.className = "garage-car-card__canvas";
-      image.alt = `${car.label} preview`;
-      const label = document.createElement("span");
-      label.textContent = car.label;
-      button.append(image, label);
-
-      if (!car.disabled) {
-        button.addEventListener("click", () => callbacks.onCustomizationChange("selectedCar", car.id));
-      }
-      cars.append(button);
-
-      const previewCustomization = { ...customization, selectedCar: car.disabled ? "lite-coupe" : car.id };
-      renderMiniCarPreview(image, previewCustomization);
-    }
+    cars.innerHTML = "";
 
     const tabs = root.querySelector("[data-tabs]")!;
     for (const category of customizationCategories.filter((item) => tabCategoryIds.has(item.id))) {

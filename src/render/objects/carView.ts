@@ -471,7 +471,7 @@ export function createCarView(scale = 1) {
 
   applyCustomization({
     paint: "silver",
-    selectedCar: "lite-coupe",
+    selectedCar: "pack-suv",
     wheelColor: "dark-alloy",
     stance: "stock",
     spoiler: "none",
@@ -503,7 +503,7 @@ export function createCarView(scale = 1) {
             rr: car.suspensionRR,
           })[corner];
           const suspOffset = (0.5 - compression) * 0.06;
-          wheel.object.position.y = wheel.baseY - suspOffset;
+          wheel.object.position.y = wheel.baseY + stanceDrop - suspOffset;
           wheel.object.rotation.copy(wheel.baseRotation);
           if (wheel.front) wheel.object.rotateY(car.frontWheelAngle);
           wheel.object.rotateX(wheel.front ? -car.wheelSpin : -car.rearWheelSpin);

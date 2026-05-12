@@ -29,16 +29,23 @@ export function createAttachmentTuner(onChange: (attachments: ImportedCarAttachm
   let activeCarId = "";
   let live: ImportedCarAttachments = { ...getAttachments("") };
 
+  let collapsed = true;
+
   function render() {
     live = { ...getAttachments(activeCarId) };
     root.innerHTML = `
-      <div class="attachment-tuner__header">
+      <div class="attachment-tuner__header" data-toggle>
         <strong>Kit Tuner</strong>
         <span>${activeCarId}</span>
-        <button data-copy type="button">Copy JSON</button>
-        <button data-copy-all type="button">Copy All</button>
+        <button data-toggle-btn type="button">${collapsed ? "▶" : "▼"}</button>
       </div>
-      <div data-sliders></div>
+      <div data-body style="display:${collapsed ? "none" : "block"}">
+        <div data-sliders></div>
+        <div class="attachment-tuner__actions">
+          <button data-copy type="button">Copy JSON</button>
+          <button data-copy-all type="button">Copy All</button>
+        </div>
+      </div>
     `;
 
     const container = root.querySelector("[data-sliders]")!;
@@ -81,6 +88,12 @@ export function createAttachmentTuner(onChange: (attachments: ImportedCarAttachm
         () => alert("Copied ALL to clipboard!"),
         () => prompt("Copy this:", json),
       );
+    });
+
+    root.querySelector("[data-toggle]")!.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-copy], [data-copy-all]")) return;
+      collapsed = !collapsed;
+      render();
     });
   }
 

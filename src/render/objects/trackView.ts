@@ -19,11 +19,15 @@ import {
 import type { TrackConfig } from "../../game/types";
 import { loadGltf } from "../loaders/loadGltf";
 
-export async function createTrackView(scene: Scene, track: TrackConfig) {
+export type TrackViewResult = {
+  coneMeshes: Mesh[];
+};
+
+export async function createTrackView(scene: Scene, track: TrackConfig): Promise<TrackViewResult> {
   const imported = await loadGltf(track.model);
   if (imported) {
     scene.add(imported);
-    return;
+    return { coneMeshes: [] };
   }
 
   const grass = new Mesh(
@@ -36,9 +40,12 @@ export async function createTrackView(scene: Scene, track: TrackConfig) {
   scene.add(grass);
 
   if (track.roadPath && track.roadPath.length >= 4) {
-    scene.add(createRoadFromPath(track));
+    const { group, coneMeshes } = createRoadFromPath(track);
+    scene.add(group);
+    return { coneMeshes };
   } else {
     scene.add(createRingRoad(track));
+    return { coneMeshes: [] };
   }
 
 }
@@ -79,9 +86,10 @@ function createRoadFromPath(track: TrackConfig) {
 
   group.add(createCornerPoles(track, roadWidth));
   group.add(createCurbs(samples, roadWidth));
-  group.add(createTracksideDepth(samples, roadWidth));
+  const trackside = createTracksideDepth(samples, roadWidth);
+  group.add(trackside.group);
   group.add(createTrainingCircuitDressing(track, samples, roadWidth));
-  return group;
+  return { group, coneMeshes: trackside.coneMeshes };
 }
 
 function createRingRoad(track: TrackConfig) {
@@ -201,6 +209,7 @@ function createCurbs(samples: Vector3[], roadWidth: number) {
 
 function createTracksideDepth(samples: Vector3[], roadWidth: number) {
   const group = new Group();
+  const coneMeshes: Mesh[] = [];
   const coneMaterial = new MeshStandardMaterial({ color: 0xe68a2e, roughness: 0.7 });
   const postMaterial = new MeshStandardMaterial({ color: 0xd8d2bd, roughness: 0.74 });
 
@@ -216,6 +225,7 @@ function createTracksideDepth(samples: Vector3[], roadWidth: number) {
       cone.position.y = 0.4;
       cone.castShadow = true;
       group.add(cone);
+      coneMeshes.push(cone);
     }
   }
 
@@ -231,7 +241,7 @@ function createTracksideDepth(samples: Vector3[], roadWidth: number) {
     group.add(post);
   }
 
-  return group;
+  return { group, coneMeshes };
 }
 
 function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], roadWidth: number) {

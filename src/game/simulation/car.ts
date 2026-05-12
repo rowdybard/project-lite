@@ -172,7 +172,8 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const safeForwardSpeed = Math.max(Math.abs(forwardSpeed), 1.8);
   const frontPatchSideSpeed = sideSpeed + car.yawVelocity * tuning.frontAxle;
   const rearPatchSideSpeed = sideSpeed - car.yawVelocity * tuning.rearAxle;
-  const frontSlip = Math.atan2(frontPatchSideSpeed, safeForwardSpeed) - car.frontWheelAngle;
+  const physicsWheelAngle = forwardSpeed < -0.5 ? -car.frontWheelAngle : car.frontWheelAngle;
+  const frontSlip = Math.atan2(frontPatchSideSpeed, safeForwardSpeed) - physicsWheelAngle;
   const rearSlip = Math.atan2(rearPatchSideSpeed, safeForwardSpeed);
   const counterSteering = signed(car.frontWheelAngle) !== 0 && signed(car.frontWheelAngle) === signed(sideSpeed);
   const counterSteerQuality = counterSteering ? clamp(Math.abs(car.frontWheelAngle) / (maxSteer * 0.72), 0, 1) : 0;

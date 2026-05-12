@@ -2,7 +2,9 @@ import "./style.css";
 import { Clock } from "three";
 import {
   applyTuningPreset,
+  carTuningPaths,
   getCarLabel,
+  loadCarCustomization,
   loadCustomization,
   saveCustomization,
   type CarCustomization,
@@ -26,6 +28,10 @@ import { createGarageUi } from "./ui/garageUi";
 import { createHud, createResultsOverlay } from "./ui/hud";
 import { createAttachmentTuner } from "./ui/attachmentTuner";
 import { isImportedCar } from "./render/objects/importedCars";
+import { createEngineSound } from "./audio/engineSound";
+import { createTrackColliders, updateTrackCollision } from "./game/simulation/trackCollision";
+import type { Cone } from "./game/simulation/trackCollision";
+import type { Mesh } from "three";
 
 type AppState = "garage" | "event" | "results";
 
@@ -45,11 +51,22 @@ async function boot() {
   const manifest = await loadManifest();
   const carEntry = manifest.cars[manifest.activeCar];
   const track = manifest.tracks[manifest.activeTrack];
-  const baseTuning = await loadJson<CarTuning>(carEntry.tuning);
-  let activeTuning = applyTuningPreset(baseTuning, "balanced");
+  const tuningCache = new Map<string, CarTuning>();
+  async function loadCarTuning(carId: string): Promise<CarTuning> {
+    const cached = tuningCache.get(carId);
+    if (cached) return cached;
+    const path = carTuningPaths[carId] ?? carEntry.tuning;
+    const tuning = await loadJson<CarTuning>(path);
+    tuningCache.set(carId, tuning);
+    return tuning;
+  }
   let customization: CarCustomization = loadCustomization();
+  let baseTuning = await loadCarTuning(customization.selectedCar);
+  let activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
 
-  await createTrackView(gameScene, track);
+  const trackView = await createTrackView(gameScene, track);
+  const colliders = createTrackColliders(track);
+  const coneMeshes = trackView.coneMeshes;
   const carView = createCarView(carEntry.scale ?? 1);
   carView.applyCustomization(customization);
   const tireTracks = createTireTracks();
@@ -99,9 +116,10 @@ async function boot() {
     else attachmentTuner.hide();
   };
 
-  const startEvent = () => {
+  const startEvent = async () => {
     if (customization.selectedMode === "drag-race" || customization.selectedMode === "lap-race") return;
     activeMode = customization.selectedMode;
+    baseTuning = await loadCarTuning(customization.selectedCar);
     activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
     appState = "event";
     results.hide();
@@ -125,7 +143,14 @@ async function boot() {
 
   const garageUi = createGarageUi(customization, {
     onCustomizationChange(slot, value) {
-      customization = { ...customization, [slot]: value };
+      if (slot === "selectedCar") {
+        // Load saved per-car customization for the new car
+        const saved = loadCarCustomization(value);
+        customization = { ...customization, ...saved, selectedCar: value };
+        loadCarTuning(value).then((t) => { baseTuning = t; });
+      } else {
+        customization = { ...customization, [slot]: value };
+      }
       saveCustomization(customization);
       garageUi.update(customization);
       garageView.applyCustomization(customization);
@@ -160,7 +185,22 @@ async function boot() {
     document.body.classList.add("context-lost");
   });
 
+  const engineSound = createEngineSound();
+
   bindInput();
+
+  function syncConeMeshes(meshes: Mesh[], cones: Cone[]) {
+    for (let i = 0; i < meshes.length && i < cones.length; i++) {
+      const cone = cones[i];
+      const mesh = meshes[i];
+      mesh.position.x = cone.x;
+      mesh.position.z = cone.z;
+      if (cone.knocked) {
+        mesh.rotation.x += cone.spin * 0.016;
+        mesh.rotation.z += cone.spin * 0.012;
+      }
+    }
+  }
 
   function updateEvent(dt: number) {
     const input = readInput();
@@ -196,9 +236,12 @@ async function boot() {
       updateDriftScore(drift, car, dt, scoringSurface, getDriftZone(car.position, track));
     }
 
+    updateTrackCollision(car, colliders, dt);
+    syncConeMeshes(coneMeshes, colliders.cones);
     tireTracks.update(car, onTrack);
     tireSmoke.update(car, onTrack, dt);
     carView.sync(car);
+    engineSound.update(car, activeTuning);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
     updateChaseCamera(gameCamera, car, dt, cameraShake);
     hud.update(car, drift);
@@ -207,8 +250,15 @@ async function boot() {
     renderer.render(gameScene, gameCamera);
   }
 
+  let prevAppState: AppState = appState;
   function frame() {
     const dt = Math.min(clock.getDelta(), 1 / 30);
+
+    if (appState !== prevAppState) {
+      if (appState === "event") engineSound.resume();
+      else engineSound.suspend();
+      prevAppState = appState;
+    }
 
     if (appState === "garage") {
       garageView.update(dt);

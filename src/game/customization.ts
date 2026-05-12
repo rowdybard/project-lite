@@ -39,10 +39,11 @@ export type CustomizationCategory = {
   options: CustomizationOption[];
 };
 
-const storageKey = "projectLite.customization.v1";
+const storageKeyPrefix = "projectLite.car.";
+const globalStorageKey = "projectLite.global.v2";
 
 export const defaultCustomization: CarCustomization = {
-  selectedCar: "lite-coupe",
+  selectedCar: "pack-suv",
   paint: "silver",
   wheelColor: "dark-alloy",
   stance: "stock",
@@ -54,12 +55,7 @@ export const defaultCustomization: CarCustomization = {
   selectedMode: "drift-attack",
 };
 
-export const carOptions: CustomizationOption[] = [
-  { id: "lite-coupe", label: "Lite Coupe" },
-  { id: "street-sedan", label: "Street Sedan" },
-  { id: "slot-3", label: "Empty Bay", disabled: true },
-  { id: "slot-4", label: "Empty Bay", disabled: true },
-];
+export const carOptions: CustomizationOption[] = [];
 
 export const importedCarOptions: CustomizationOption[] = [
   { id: "pack-suv", label: "Pack SUV" },
@@ -75,6 +71,15 @@ export const allSelectableCarOptions = [...carOptions.filter((option) => !option
 export function getCarLabel(id: string) {
   return allSelectableCarOptions.find((option) => option.id === id)?.label ?? "Lite Coupe";
 }
+
+export const carTuningPaths: Record<string, string> = {
+  "pack-suv": "/assets/cars/imports/suv-tuning.json",
+  "pack-pickup": "/assets/cars/imports/pickup-tuning.json",
+  "pack-hatchback": "/assets/cars/imports/hatchback-tuning.json",
+  "pack-sedan": "/assets/cars/imports/sedan-tuning.json",
+  "pack-muscle": "/assets/cars/imports/muscle-tuning.json",
+  "pack-muscle-2": "/assets/cars/imports/muscle2-tuning.json",
+};
 
 export const modeOptions: CustomizationOption[] = [
   { id: "drift-attack", label: "Drift Attack" },
@@ -188,20 +193,41 @@ export const underglowColors: Record<string, number> = {
 };
 
 export function loadCustomization(): CarCustomization {
-  const raw = window.localStorage.getItem(storageKey);
-  if (!raw) return { ...defaultCustomization };
-
+  const global = window.localStorage.getItem(globalStorageKey);
+  let selectedCar = defaultCustomization.selectedCar;
+  let selectedMode = defaultCustomization.selectedMode;
+  if (global) {
+    try {
+      const g = JSON.parse(global);
+      if (g.selectedCar && allSelectableCarOptions.some((o) => o.id === g.selectedCar)) selectedCar = g.selectedCar;
+      if (g.selectedMode) selectedMode = g.selectedMode;
+    } catch { /* ignore */ }
+  }
+  const perCar = window.localStorage.getItem(storageKeyPrefix + selectedCar);
+  if (!perCar) return { ...defaultCustomization, selectedCar, selectedMode };
   try {
-    const loaded = { ...defaultCustomization, ...JSON.parse(raw) };
-    if (loaded.selectedCar === "street-hatch") loaded.selectedCar = "street-sedan";
-    return loaded;
+    return { ...defaultCustomization, ...JSON.parse(perCar), selectedCar, selectedMode };
+  } catch {
+    return { ...defaultCustomization, selectedCar, selectedMode };
+  }
+}
+
+export function loadCarCustomization(carId: string): Omit<CarCustomization, "selectedCar" | "selectedMode"> {
+  const raw = window.localStorage.getItem(storageKeyPrefix + carId);
+  if (!raw) return { ...defaultCustomization };
+  try {
+    return { ...defaultCustomization, ...JSON.parse(raw) };
   } catch {
     return { ...defaultCustomization };
   }
 }
 
 export function saveCustomization(customization: CarCustomization) {
-  window.localStorage.setItem(storageKey, JSON.stringify(customization));
+  // Save per-car visual settings
+  const { selectedCar, selectedMode, ...perCar } = customization;
+  window.localStorage.setItem(storageKeyPrefix + selectedCar, JSON.stringify(perCar));
+  // Save global state (which car is selected, which mode)
+  window.localStorage.setItem(globalStorageKey, JSON.stringify({ selectedCar, selectedMode }));
 }
 
 export function applyTuningPreset(base: CarTuning, preset: string): CarTuning {
