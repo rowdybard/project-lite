@@ -1,4 +1,4 @@
-import { Box3, Group, Object3D, Vector3, type Euler } from "three";
+import { Box3, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 type ImportedCarDefinition = {
@@ -56,28 +56,47 @@ function findByName(root: Object3D, name: string): Object3D | null {
 
 function collectVehicleNodes(source: Group, rootName: string) {
   const body = findByName(source, rootName);
-  const wheels: Object3D[] = [];
-  const wheelRootPattern = new RegExp(`^${rootName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} wheel (front|rear) (left|right)( 2)?$`);
-  source.traverse((object) => {
-    if (wheelRootPattern.test(object.name)) wheels.push(object);
-  });
-  return { body, wheels };
+  return { body };
 }
 
-function createWheelPivot(sourceWheel: Object3D) {
-  const wheel = sourceWheel.clone(true);
-  wheel.position.copy(sourceWheel.getWorldPosition(new Vector3()));
-  wheel.quaternion.copy(sourceWheel.getWorldQuaternion(wheel.quaternion));
-  wheel.scale.copy(sourceWheel.getWorldScale(new Vector3()));
-  wheel.updateMatrixWorld(true);
-
-  const bounds = new Box3().setFromObject(wheel);
+function addGeneratedWheelRig(content: Group, bounds: Box3) {
+  const size = bounds.getSize(new Vector3());
   const center = bounds.getCenter(new Vector3());
-  const pivot = new Group();
-  pivot.position.copy(center);
-  wheel.position.sub(center);
-  pivot.add(wheel);
-  return pivot;
+  const radius = Math.max(0.28, Math.min(size.y * 0.28, size.z * 0.1));
+  const width = radius * 0.78;
+  const track = Math.max(size.x * 0.45, radius * 2.4);
+  const frontZ = bounds.max.z - size.z * 0.23;
+  const rearZ = bounds.min.z + size.z * 0.23;
+  const wheelY = bounds.min.y + radius * 0.92;
+  const tireMaterial = new MeshStandardMaterial({ color: 0x111111, roughness: 0.86 });
+  const rimMaterial = new MeshStandardMaterial({ color: 0x54606b, roughness: 0.42, metalness: 0.22 });
+  const wheelGeometry = new CylinderGeometry(radius, radius, width, 20);
+  const rimGeometry = new CylinderGeometry(radius * 0.5, radius * 0.5, width * 1.08, 16);
+  const wheels: ImportedWheel[] = [];
+
+  for (const wheel of [
+    { x: center.x - track, z: frontZ, front: true },
+    { x: center.x + track, z: frontZ, front: true },
+    { x: center.x - track, z: rearZ, front: false },
+    { x: center.x + track, z: rearZ, front: false },
+  ]) {
+    const pivot = new Group();
+    pivot.position.set(wheel.x, wheelY, wheel.z);
+
+    const tire = new Mesh(wheelGeometry, tireMaterial);
+    tire.rotation.z = Math.PI / 2;
+    tire.castShadow = true;
+    pivot.add(tire);
+
+    const rim = new Mesh(rimGeometry, rimMaterial);
+    rim.rotation.z = Math.PI / 2;
+    pivot.add(rim);
+
+    content.add(pivot);
+    wheels.push({ object: pivot, front: wheel.front, baseRotation: pivot.rotation.clone() });
+  }
+
+  return wheels;
 }
 
 export async function createImportedCarModel(id: string): Promise<ImportedCarModel | null> {
@@ -86,38 +105,33 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   const sourceScene = await loadScene(definition.path);
   sourceScene.updateMatrixWorld(true);
-  const { body, wheels } = collectVehicleNodes(sourceScene, definition.rootName);
+  const { body } = collectVehicleNodes(sourceScene, definition.rootName);
   if (!body) return null;
 
-  const raw = new Group();
-  const wheelRecords: ImportedWheel[] = [];
+  const content = new Group();
+  const bodyModel = new Group();
   const clone = body.clone(true);
   clone.position.copy(body.getWorldPosition(new Vector3()));
   clone.quaternion.copy(body.getWorldQuaternion(clone.quaternion));
   clone.scale.copy(body.getWorldScale(new Vector3()));
-  raw.add(clone);
+  bodyModel.add(clone);
+  bodyModel.rotation.x = -Math.PI / 2;
+  content.add(bodyModel);
+  content.updateMatrixWorld(true);
 
-  for (const wheel of wheels) {
-    const pivot = createWheelPivot(wheel);
-    raw.add(pivot);
-    wheelRecords.push({
-      object: pivot,
-      front: wheel.name.includes("front"),
-      baseRotation: pivot.rotation.clone(),
-    });
-  }
+  const bodyBounds = new Box3().setFromObject(bodyModel);
+  const wheelRecords = addGeneratedWheelRig(content, bodyBounds);
+  content.updateMatrixWorld(true);
 
-  const finalBounds = new Box3().setFromObject(raw);
+  const finalBounds = new Box3().setFromObject(content);
   const center = finalBounds.getCenter(new Vector3());
   const size = finalBounds.getSize(new Vector3());
-  raw.position.set(-center.x, -finalBounds.min.y, -center.z);
+  content.position.set(-center.x, -finalBounds.min.y, -center.z);
 
   const root = new Group();
-  const sourceForwardIsX = size.x > size.z;
-  if (sourceForwardIsX) raw.rotation.y = -Math.PI / 2;
   const footprint = Math.max(size.x, size.z, 0.001);
   root.scale.setScalar(definition.fitLength / footprint);
-  root.add(raw);
+  root.add(content);
 
   return { root, wheels: wheelRecords };
 }
