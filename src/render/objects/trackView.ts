@@ -80,6 +80,7 @@ function createRoadFromPath(track: TrackConfig) {
   group.add(createCornerPoles(track, roadWidth));
   group.add(createCurbs(samples, roadWidth));
   group.add(createTracksideDepth(samples, roadWidth));
+  group.add(createTrainingCircuitDressing(track, samples, roadWidth));
   return group;
 }
 
@@ -228,6 +229,112 @@ function createTracksideDepth(samples: Vector3[], roadWidth: number) {
     post.position.y = 1.3;
     post.castShadow = true;
     group.add(post);
+  }
+
+  return group;
+}
+
+function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], roadWidth: number) {
+  const group = new Group();
+  const barrierMaterial = new MeshStandardMaterial({ color: 0x9fa7ad, roughness: 0.64, metalness: 0.18 });
+  const darkBarrierMaterial = new MeshStandardMaterial({ color: 0x29313a, roughness: 0.7, metalness: 0.08 });
+  const signMaterial = new MeshStandardMaterial({ color: 0x1b2836, roughness: 0.58, metalness: 0.05 });
+  const yellowMaterial = new MeshStandardMaterial({ color: 0xe5bf55, emissive: 0x322000, roughness: 0.52 });
+  const lightMaterial = new MeshStandardMaterial({ color: 0xf6edd2, emissive: 0xe5bf55, roughness: 0.35 });
+  const buildingMaterial = new MeshStandardMaterial({ color: 0x4a5662, roughness: 0.82 });
+
+  const first = samples[0];
+  const second = samples[1];
+  const tangent = second.clone().sub(first).normalize();
+  const normal = new Vector3(-tangent.z, 0, tangent.x);
+  const angle = Math.atan2(tangent.x, tangent.z);
+
+  const gantry = new Group();
+  for (const side of [-1, 1]) {
+    const post = new Mesh(new BoxGeometry(0.42, 5.2, 0.42), darkBarrierMaterial);
+    post.position.copy(first.clone().addScaledVector(normal, side * (roadWidth / 2 + 1.8)));
+    post.position.y = 2.6;
+    post.castShadow = true;
+    gantry.add(post);
+  }
+  const crossbar = new Mesh(new BoxGeometry(roadWidth + 4.8, 0.72, 0.58), signMaterial);
+  crossbar.position.copy(first);
+  crossbar.position.y = 5.05;
+  crossbar.rotation.y = angle + Math.PI / 2;
+  crossbar.castShadow = true;
+  gantry.add(crossbar);
+  group.add(gantry);
+
+  for (let i = 4; i < samples.length; i += 18) {
+    const previous = samples[(i - 1 + samples.length) % samples.length];
+    const next = samples[(i + 1) % samples.length];
+    const localTangent = next.clone().sub(previous).normalize();
+    const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
+    const localAngle = Math.atan2(localTangent.x, localTangent.z);
+
+    for (const side of [-1, 1]) {
+      const barrier = new Mesh(new BoxGeometry(5.2, 0.72, 0.38), i % 36 === 4 ? yellowMaterial : barrierMaterial);
+      barrier.position.copy(samples[i].clone().addScaledVector(localNormal, side * (roadWidth / 2 + 1.7)));
+      barrier.position.y = 0.42;
+      barrier.rotation.y = localAngle;
+      barrier.castShadow = true;
+      barrier.receiveShadow = true;
+      group.add(barrier);
+    }
+  }
+
+  for (let i = 14; i < samples.length; i += 44) {
+    const previous = samples[(i - 1 + samples.length) % samples.length];
+    const next = samples[(i + 1) % samples.length];
+    const localTangent = next.clone().sub(previous).normalize();
+    const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
+    const localAngle = Math.atan2(localTangent.x, localTangent.z);
+    const side = i % 88 === 14 ? 1 : -1;
+
+    const billboard = new Mesh(new BoxGeometry(7.5, 2.1, 0.24), signMaterial);
+    billboard.position.copy(samples[i].clone().addScaledVector(localNormal, side * (roadWidth / 2 + 7.4)));
+    billboard.position.y = 2.5;
+    billboard.rotation.y = localAngle;
+    billboard.castShadow = true;
+    group.add(billboard);
+
+    const stripe = new Mesh(new BoxGeometry(6.5, 0.22, 0.28), yellowMaterial);
+    stripe.position.copy(billboard.position);
+    stripe.position.y += 0.45;
+    stripe.rotation.y = billboard.rotation.y;
+    group.add(stripe);
+  }
+
+  for (let i = 22; i < samples.length; i += 58) {
+    const previous = samples[(i - 1 + samples.length) % samples.length];
+    const next = samples[(i + 1) % samples.length];
+    const localTangent = next.clone().sub(previous).normalize();
+    const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
+
+    const pole = new Mesh(new CylinderGeometry(0.16, 0.2, 7.6, 12), darkBarrierMaterial);
+    pole.position.copy(samples[i].clone().addScaledVector(localNormal, roadWidth / 2 + 10.5));
+    pole.position.y = 3.8;
+    pole.castShadow = true;
+    group.add(pole);
+
+    const lamp = new Mesh(new BoxGeometry(1.3, 0.34, 0.72), lightMaterial);
+    lamp.position.copy(pole.position);
+    lamp.position.y = 7.35;
+    lamp.castShadow = true;
+    group.add(lamp);
+  }
+
+  for (const pad of [
+    { x: track.start.x - 15, z: track.start.z - 18, sx: 11, sz: 6 },
+    { x: track.start.x - 28, z: track.start.z - 23, sx: 8, sz: 5 },
+    { x: track.start.x - 40, z: track.start.z - 14, sx: 13, sz: 7 },
+  ]) {
+    const building = new Mesh(new BoxGeometry(pad.sx, 3.2, pad.sz), buildingMaterial);
+    building.position.set(pad.x, 1.6, pad.z);
+    building.rotation.y = -0.35;
+    building.castShadow = true;
+    building.receiveShadow = true;
+    group.add(building);
   }
 
   return group;

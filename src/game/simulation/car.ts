@@ -265,7 +265,7 @@ export function keepCarNearTrack(car: CarState, track: TrackConfig) {
   const limit = (track.roadPath ? track.roadWidth + 34 : track.roadWidth) + track.boundaryMargin;
   const distance = Math.hypot(car.position.x, car.position.z);
 
-  if (distance < limit) return;
+  if (distance < limit) return 0;
 
   const normal = { x: car.position.x / distance, z: car.position.z / distance };
   car.position.x = normal.x * limit;
@@ -276,4 +276,6 @@ export function keepCarNearTrack(car: CarState, track: TrackConfig) {
     car.velocity.x -= normal.x * outwardSpeed * 1.35;
     car.velocity.z -= normal.z * outwardSpeed * 1.35;
   }
+
+  return Math.min(1, Math.abs(outwardSpeed) / 20);
 }

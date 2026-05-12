@@ -63,6 +63,20 @@ export function resetDrift(state: DriftState) {
   state.onTrack = true;
 }
 
+export function finishDriftRun(state: DriftState) {
+  const finalScore = state.totalScore + state.comboScore;
+  state.bestCombo = Math.max(state.bestCombo, state.comboScore);
+  state.bestRun = Math.max(state.bestRun, finalScore);
+  saveBestRun(state.bestRun);
+  state.totalScore = finalScore;
+  state.comboScore = 0;
+  state.active = false;
+  state.grace = 0;
+  state.multiplier = 1;
+  state.driftTime = 0;
+  return finalScore;
+}
+
 export function updateDriftScore(state: DriftState, car: CarState, dt: number, onTrack: boolean, zoneIndex: number) {
   const speedMph = car.speed * mph;
   const angle = car.slipAngle;
