@@ -60,10 +60,12 @@ export function createTireSmoke() {
       }
     },
     update(car: CarState, onTrack: boolean, dt: number) {
-      const strength = Math.max(car.tireHeat * 0.9, car.rearSlipVisual * 0.65) * (onTrack ? 1 : 0.35);
-      spawnDebt += strength * car.speed * dt * 0.22;
+      const activeSlide = Math.max(0, car.rearSlipVisual - 0.18);
+      const heatBoost = 0.72 + car.tireHeat * 0.48;
+      const strength = activeSlide * heatBoost * 1.18 * (onTrack ? 1 : 0.35);
+      spawnDebt += strength * car.speed * dt * 0.3;
 
-      while (spawnDebt > 1 && strength > 0.18) {
+      while (spawnDebt > 1 && strength > 0.12) {
         spawn(car, strength);
         spawnDebt -= 1;
       }
