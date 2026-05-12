@@ -175,6 +175,7 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const frontSlip = Math.atan2(frontPatchSideSpeed, safeForwardSpeed) - car.frontWheelAngle;
   const rearSlip = Math.atan2(rearPatchSideSpeed, safeForwardSpeed);
   const counterSteering = signed(car.frontWheelAngle) !== 0 && signed(car.frontWheelAngle) === signed(sideSpeed);
+  const counterSteerQuality = counterSteering ? clamp(Math.abs(car.frontWheelAngle) / (maxSteer * 0.72), 0, 1) : 0;
   const throttleGripLoss =
     car.throttleAxis *
     tuning.throttleGripLoss *
@@ -185,14 +186,14 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const throttleTransfer = car.throttleAxis * clamp(Math.abs(forwardSpeed) / 18, 0, 1);
   const frontLoad = 1 + brakeTransfer * 0.14 - throttleTransfer * 0.05;
   const rearLoad = 1 + throttleTransfer * 0.08 - brakeTransfer * 0.2;
-  const lateralRelease = rearLockIntent * clamp(0.22 + Math.abs(car.steerAxis) * 0.55 + Math.abs(rearSlip) / (46 * degToRad), 0, 1);
+  const lateralRelease = rearLockIntent * clamp(0.25 + Math.abs(car.steerAxis) * 0.5 + Math.abs(rearSlip) / (44 * degToRad), 0, 1);
   const handbrakeCurve = Math.pow(lateralRelease, 0.82);
   const frontGrip =
     tuning.frontGrip * surfaceGrip * frontLoad * (1 - Math.abs(car.frontWheelAngle / maxSteer) * speed01 * 0.08);
   const baseRearGrip = lerp(tuning.rearGrip * rearLoad, tuning.handbrakeRearGrip, handbrakeCurve);
   const rearGrip = Math.max(
     tuning.handbrakeRearGrip * surfaceGrip,
-    baseRearGrip * surfaceGrip * (1 - throttleGripLoss) + (counterSteering ? tuning.counterSteerAssist : 0),
+    baseRearGrip * surfaceGrip * (1 - throttleGripLoss) + tuning.counterSteerAssist * counterSteerQuality,
   );
   const frontLateralAcceleration = tireAcceleration(frontSlip, tuning.frontCorneringStiffness, frontGrip);
   const rearLateralAcceleration = tireAcceleration(rearSlip, tuning.rearCorneringStiffness, rearGrip);
@@ -241,7 +242,7 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   car.wheelSpin += (forwardSpeed / tuning.wheelRadius) * dt;
   const rearSpinTarget = car.wheelSpin * (1 - rearLockIntent);
   car.rearWheelSpin = lerp(car.rearWheelSpin + (forwardSpeed / tuning.wheelRadius) * dt * (1 - rearLockIntent), rearSpinTarget, smooth(20 * rearLockIntent, dt));
-  car.rearSlipVisual = lerp(car.rearSlipVisual, clamp(Math.abs(rearSlip) / (30 * degToRad), 0, 1), smooth(10, dt));
+  car.rearSlipVisual = lerp(car.rearSlipVisual, clamp(Math.abs(rearSlip) / (26 * degToRad), 0, 1), smooth(10, dt));
   const heatTarget = clamp(car.rearSlipVisual * 0.78 + car.handbrakeAmount * 0.35 + car.throttleAxis * car.driftAmount * 0.25, 0, 1);
   car.tireHeat = lerp(car.tireHeat, heatTarget, smooth(heatTarget > car.tireHeat ? 1.8 : 0.34, dt));
 
