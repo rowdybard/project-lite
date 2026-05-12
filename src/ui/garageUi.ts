@@ -37,12 +37,8 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
 
   let activeCategory: CustomizationCategory = customizationCategories[0];
   let activeBodySlot: CustomizationSlot = "spoiler";
-  let miniPreviewCleanups: (() => void)[] = [];
 
   function render() {
-    for (const cleanup of miniPreviewCleanups) cleanup();
-    miniPreviewCleanups = [];
-
     root.innerHTML = `
       <header class="garage-header">
         <p>Project Lite</p>
@@ -88,11 +84,12 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
       button.className = customization.selectedCar === car.id ? "garage-car-card is-active" : "garage-car-card";
       button.disabled = !!car.disabled;
 
-      const canvas = document.createElement("canvas");
-      canvas.className = "garage-car-card__canvas";
+      const image = document.createElement("img");
+      image.className = "garage-car-card__canvas";
+      image.alt = `${car.label} preview`;
       const label = document.createElement("span");
       label.textContent = car.label;
-      button.append(canvas, label);
+      button.append(image, label);
 
       if (!car.disabled) {
         button.addEventListener("click", () => callbacks.onCustomizationChange("selectedCar", car.id));
@@ -100,7 +97,7 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
       cars.append(button);
 
       const previewCustomization = { ...customization, selectedCar: car.disabled ? "lite-coupe" : car.id };
-      miniPreviewCleanups.push(renderMiniCarPreview(canvas, previewCustomization));
+      renderMiniCarPreview(image, previewCustomization);
     }
 
     const tabs = root.querySelector("[data-tabs]")!;

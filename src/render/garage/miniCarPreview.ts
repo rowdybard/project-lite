@@ -13,13 +13,22 @@ import type { CarCustomization } from "../../game/customization";
 import { createCarView } from "../objects/carView";
 import { createPreviewCarState } from "./previewCarState";
 
-export function renderMiniCarPreview(canvas: HTMLCanvasElement, customization: CarCustomization) {
-  const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
-  const width = Math.max(120, canvas.clientWidth);
-  const height = Math.max(76, canvas.clientHeight);
+let thumbnailRenderer: WebGLRenderer | null = null;
+
+function getThumbnailRenderer() {
+  if (!thumbnailRenderer) {
+    thumbnailRenderer = new WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    thumbnailRenderer.setClearColor(new Color(0x000000), 0);
+  }
+  return thumbnailRenderer;
+}
+
+export function renderMiniCarPreview(image: HTMLImageElement, customization: CarCustomization) {
+  const renderer = getThumbnailRenderer();
+  const width = 220;
+  const height = 126;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(width, height, false);
-  renderer.setClearColor(new Color(0x000000), 0);
 
   const scene = new Scene();
   const camera = new PerspectiveCamera(34, width / height, 0.1, 40);
@@ -47,5 +56,5 @@ export function renderMiniCarPreview(canvas: HTMLCanvasElement, customization: C
   scene.add(carView.root);
   renderer.render(scene, camera);
 
-  return () => renderer.dispose();
+  image.src = renderer.domElement.toDataURL("image/png");
 }
