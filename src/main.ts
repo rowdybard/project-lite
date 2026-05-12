@@ -109,12 +109,13 @@ async function boot() {
       }
     }
 
-    const isRunning = sessionState === "running";
+    let isRunning = sessionState === "running";
     if (isRunning) {
       sessionTime -= dt;
       if (sessionTime <= 0) {
         sessionTime = 0;
         finishRun();
+        isRunning = false;
       }
     }
 
@@ -140,7 +141,7 @@ async function boot() {
     updateChaseCamera(camera, car, dt, cameraShake);
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
-    hud.root.hidden = sessionState === "menu";
+    hud.root.hidden = sessionState !== "running";
     if (sessionState === "menu") {
       renderer.clear(true, true, true);
     } else {

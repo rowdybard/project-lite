@@ -13,16 +13,13 @@ export function createHud() {
       <div class="hud__gear"><span data-gear>1</span><strong data-rpm>850</strong> rpm</div>
       <div class="hud__rpm"><span data-rpm-bar></span></div>
     </div>
-      <div class="hud__strip">
-        <span>Car <strong>240SX</strong></span>
-      <span>Mode <strong>Training Circuit</strong></span>
+    <div class="hud__strip">
       <span>Time <strong data-time>90.0s</strong></span>
       <span>Surface <strong data-surface>Track</strong></span>
       <span>Grip <strong data-grip>100%</strong></span>
       <span>Heat <strong data-heat>0%</strong></span>
       <span>Load <strong data-load>50F/50R</strong></span>
       <span>Angle <strong data-angle>0 deg</strong></span>
-      <span>Drift <strong data-total-drift>0.0s</strong></span>
     </div>
     <div class="hud__slip"><span data-slip></span></div>
     <div class="drift-score">
@@ -38,7 +35,7 @@ export function createHud() {
       </div>
       <div class="drift-score__callout" data-callout hidden>Drift</div>
     </div>
-    <div class="hud__hint">WASD/Arrows drive - Space/Shift/E handbrake - R restart</div>
+    <div class="hud__hint">R restart</div>
   `;
   document.body.append(root);
 
@@ -80,7 +77,7 @@ export function createSessionOverlay(onPlay: () => void, onRestart: () => void, 
     <section class="session-card" data-menu>
       <p class="session-card__eyebrow">Project Lite</p>
       <h1>Training Circuit</h1>
-      <p>90 seconds. Link clean drifts, stay on the asphalt, bank the biggest combo you can.</p>
+      <p>90 seconds. Stay on asphalt, link clean angle, bank the biggest combo.</p>
       <div class="session-card__actions">
         <button data-play type="button">Play</button>
         <button class="session-card__secondary" data-options type="button">Options</button>
@@ -97,6 +94,7 @@ export function createSessionOverlay(onPlay: () => void, onRestart: () => void, 
     </section>
     <section class="session-card session-card--end" data-end hidden>
       <p class="session-card__eyebrow">Run Complete</p>
+      <div class="session-card__score-label">Final score</div>
       <h1 data-final-score>0</h1>
       <div class="session-card__stats">
         <span>Best combo <strong data-final-combo>0</strong></span>
