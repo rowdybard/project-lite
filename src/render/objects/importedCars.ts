@@ -1,4 +1,4 @@
-import { Box3, Group, Object3D, Vector3, type Euler } from "three";
+import { Box3, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 type ImportedCarDefinition = {
@@ -46,7 +46,7 @@ function loadScene(path: string) {
   return cached;
 }
 
-function findByName(root: Object3D, name: string) {
+function findByName(root: Object3D, name: string): Object3D | null {
   let found: Object3D | null = null;
   root.traverse((object) => {
     if (!found && object.name === name) found = object;
@@ -57,10 +57,50 @@ function findByName(root: Object3D, name: string) {
 function collectVehicleNodes(source: Group, rootName: string) {
   const body = findByName(source, rootName);
   const wheels: Object3D[] = [];
+  const wheelRootPattern = new RegExp(`^${rootName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} wheel (front|rear) (left|right)( 2)?$`);
   source.traverse((object) => {
-    if (object.name.startsWith(`${rootName} wheel `)) wheels.push(object);
+    if (wheelRootPattern.test(object.name)) wheels.push(object);
   });
   return { body, wheels };
+}
+
+function addProceduralWheelRig(raw: Group, bounds: Box3) {
+  const size = bounds.getSize(new Vector3());
+  const tireMaterial = new MeshStandardMaterial({ color: 0x111111, roughness: 0.86 });
+  const rimMaterial = new MeshStandardMaterial({ color: 0x59636d, roughness: 0.44, metalness: 0.24 });
+  const radius = Math.max(0.22, Math.min(size.x, size.z) * 0.085);
+  const width = radius * 0.72;
+  const track = Math.max(size.x * 0.48, radius * 2.2);
+  const frontZ = bounds.min.z + size.z * 0.72;
+  const rearZ = bounds.min.z + size.z * 0.28;
+  const wheelY = bounds.min.y + radius;
+  const wheelGeometry = new CylinderGeometry(radius, radius, width, 18);
+  const rimGeometry = new CylinderGeometry(radius * 0.48, radius * 0.48, width * 1.08, 14);
+  const wheels: ImportedWheel[] = [];
+
+  for (const item of [
+    { x: -track, z: frontZ, front: true },
+    { x: track, z: frontZ, front: true },
+    { x: -track, z: rearZ, front: false },
+    { x: track, z: rearZ, front: false },
+  ]) {
+    const pivot = new Group();
+    pivot.position.set(item.x, wheelY, item.z);
+
+    const tire = new Mesh(wheelGeometry, tireMaterial);
+    tire.rotation.z = Math.PI / 2;
+    tire.castShadow = true;
+    pivot.add(tire);
+
+    const rim = new Mesh(rimGeometry, rimMaterial);
+    rim.rotation.z = Math.PI / 2;
+    pivot.add(rim);
+
+    raw.add(pivot);
+    wheels.push({ object: pivot, front: item.front, baseRotation: pivot.rotation.clone() });
+  }
+
+  return wheels;
 }
 
 export async function createImportedCarModel(id: string): Promise<ImportedCarModel | null> {
@@ -69,32 +109,24 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   const sourceScene = await loadScene(definition.path);
   sourceScene.updateMatrixWorld(true);
-  const { body, wheels } = collectVehicleNodes(sourceScene, definition.rootName);
+  const { body } = collectVehicleNodes(sourceScene, definition.rootName);
   if (!body) return null;
 
   const raw = new Group();
   const wheelRecords: ImportedWheel[] = [];
-  const sourceNodes = [body, ...wheels];
-  for (const sourceNode of sourceNodes) {
-    const clone = sourceNode.clone(true);
-    clone.position.copy(sourceNode.getWorldPosition(new Vector3()));
-    clone.quaternion.copy(sourceNode.getWorldQuaternion(clone.quaternion));
-    clone.scale.copy(sourceNode.getWorldScale(new Vector3()));
-    raw.add(clone);
-
-    if (sourceNode.name.includes(" wheel ")) {
-      wheelRecords.push({
-        object: clone,
-        front: sourceNode.name.includes("front"),
-        baseRotation: clone.rotation.clone(),
-      });
-    }
-  }
+  const clone = body.clone(true);
+  clone.position.copy(body.getWorldPosition(new Vector3()));
+  clone.quaternion.copy(body.getWorldQuaternion(clone.quaternion));
+  clone.scale.copy(body.getWorldScale(new Vector3()));
+  raw.add(clone);
 
   const bounds = new Box3().setFromObject(raw);
-  const center = bounds.getCenter(new Vector3());
-  const size = bounds.getSize(new Vector3());
-  raw.position.set(-center.x, -bounds.min.y, -center.z);
+  wheelRecords.push(...addProceduralWheelRig(raw, bounds));
+
+  const finalBounds = new Box3().setFromObject(raw);
+  const center = finalBounds.getCenter(new Vector3());
+  const size = finalBounds.getSize(new Vector3());
+  raw.position.set(-center.x, -finalBounds.min.y, -center.z);
 
   const root = new Group();
   const footprint = Math.max(size.x, size.z, 0.001);
