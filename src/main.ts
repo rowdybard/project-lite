@@ -1,21 +1,24 @@
 import "./style.css";
 import { Clock } from "three";
-import { createCamera, updateChaseCamera } from "./render/app/camera";
-import { createRenderer } from "./render/app/createRenderer";
-import { createScene } from "./render/app/createScene";
-import { createTrackView } from "./render/objects/trackView";
-import { createCarView } from "./render/objects/carView";
-import { createTireTracks } from "./render/objects/tireTracks";
-import { createTireSmoke } from "./render/objects/tireSmoke";
-import { loadGltf } from "./render/loaders/loadGltf";
-import { bindInput, readInput } from "./game/input/inputMap";
+import { applyTuningPreset, loadCustomization, saveCustomization, type CarCustomization, type ModeId } from "./game/customization";
 import { loadJson, loadManifest } from "./game/content/manifest";
+import { bindInput, readInput } from "./game/input/inputMap";
 import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
-import { createHud, createSessionOverlay, createTunePanel } from "./ui/hud";
-import { hydrateTuningPanel } from "./ui/tuningPanel";
 import type { CarTuning } from "./game/types";
+import { createCamera, updateChaseCamera } from "./render/app/camera";
+import { createRenderer } from "./render/app/createRenderer";
+import { createScene } from "./render/app/createScene";
+import { createGarageView } from "./render/garage/garageView";
+import { createCarView } from "./render/objects/carView";
+import { createTireSmoke } from "./render/objects/tireSmoke";
+import { createTireTracks } from "./render/objects/tireTracks";
+import { createTrackView } from "./render/objects/trackView";
+import { createGarageUi } from "./ui/garageUi";
+import { createHud, createResultsOverlay } from "./ui/hud";
+
+type AppState = "garage" | "event" | "results";
 
 async function boot() {
   document.querySelector<HTMLDivElement>("#app")!.innerHTML = '<canvas id="game"></canvas>';
@@ -24,135 +27,171 @@ async function boot() {
   canvas.tabIndex = 0;
   canvas.addEventListener("pointerdown", () => canvas.focus());
   canvas.focus();
+
   const renderer = createRenderer(canvas);
-  const scene = createScene();
-  const camera = createCamera();
+  const gameScene = createScene();
+  const gameCamera = createCamera();
   const clock = new Clock();
 
   const manifest = await loadManifest();
   const carEntry = manifest.cars[manifest.activeCar];
   const track = manifest.tracks[manifest.activeTrack];
-  const tuning = await loadJson<CarTuning>(carEntry.tuning);
+  const baseTuning = await loadJson<CarTuning>(carEntry.tuning);
+  let activeTuning = applyTuningPreset(baseTuning, "balanced");
+  let customization: CarCustomization = loadCustomization();
 
-  await createTrackView(scene, track);
-  const carModel = await loadGltf(carEntry.model);
-  const carView = createCarView(carModel, carEntry.scale ?? 1);
+  await createTrackView(gameScene, track);
+  const carView = createCarView(carEntry.scale ?? 1);
+  carView.applyCustomization(customization);
   const tireTracks = createTireTracks();
   const tireSmoke = createTireSmoke();
-  scene.add(tireTracks.root);
-  scene.add(tireSmoke.root);
-  scene.add(carView.root);
+  gameScene.add(tireTracks.root, tireSmoke.root, carView.root);
 
   const car = createCarState(track);
   const drift = createDriftState();
   const hud = createHud();
+  hud.setCarName(carEntry.name);
+
+  const garageView = createGarageView(canvas, renderer, customization);
   const runLength = 90;
-  let sessionState: "menu" | "running" | "ended" = "menu";
+  let appState: AppState = "garage";
+  let activeMode: ModeId = customization.selectedMode;
   let sessionTime = runLength;
   let cameraShake = 0;
   let runoffTime = 0;
-  const tunePanel = createTunePanel();
-  hydrateTuningPanel(tunePanel, tuning);
-  bindInput();
 
-  const resetRun = () => {
+  const resetEvent = () => {
     resetCar(car, track);
     resetDrift(drift);
     tireTracks.reset();
     tireSmoke.reset();
-    sessionTime = runLength;
+    sessionTime = activeMode === "drift-attack" ? runLength : Infinity;
     cameraShake = 0;
     runoffTime = 0;
+    carView.applyCustomization(customization);
   };
 
-  const startRun = () => {
-    resetRun();
-    sessionState = "running";
-    overlay.hide();
+  const showGarage = () => {
+    appState = "garage";
+    results.hide();
+    hud.root.hidden = true;
+    garageUi.show();
+    garageView.applyCustomization(customization);
+  };
+
+  const startEvent = () => {
+    if (customization.selectedMode === "drag-race" || customization.selectedMode === "lap-race") return;
+    activeMode = customization.selectedMode;
+    activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
+    appState = "event";
+    results.hide();
+    garageUi.hide();
+    resetEvent();
+    hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");
     canvas.focus();
   };
 
   const finishRun = () => {
     const finalScore = finishDriftRun(drift);
-    sessionState = "ended";
+    appState = "results";
     car.throttleAxis = 0;
     car.brakeAxis = 0;
-    overlay.showEnd(finalScore, drift.bestCombo, drift.bestRun);
+    hud.root.hidden = true;
+    results.show(finalScore, drift.bestCombo, drift.bestRun);
   };
 
-  const overlay = createSessionOverlay(startRun, startRun, tunePanel);
-  overlay.showMenu();
+  const garageUi = createGarageUi(customization, {
+    onCustomizationChange(slot, value) {
+      customization = { ...customization, [slot]: value };
+      saveCustomization(customization);
+      garageUi.update(customization);
+      garageView.applyCustomization(customization);
+      carView.applyCustomization(customization);
+    },
+    onModeChange(mode) {
+      customization = { ...customization, selectedMode: mode };
+      saveCustomization(customization);
+      garageUi.update(customization);
+    },
+    onStart: startEvent,
+  });
+
+  const results = createResultsOverlay(startEvent, showGarage);
+  hud.root.hidden = true;
 
   const onResize = () => {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    const aspect = window.innerWidth / window.innerHeight;
+    gameCamera.aspect = aspect;
+    gameCamera.updateProjectionMatrix();
+    garageView.setAspect(aspect);
   };
   window.addEventListener("resize", onResize);
+  onResize();
 
   renderer.domElement.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
     document.body.classList.add("context-lost");
   });
 
-  function frame() {
-    const dt = Math.min(clock.getDelta(), 1 / 30);
+  bindInput();
+
+  function updateEvent(dt: number) {
     const input = readInput();
 
-    if (input.debug && sessionState !== "running") overlay.showOptions();
-    if (input.reset) {
-      if (sessionState === "running") {
-        startRun();
-      } else {
-        resetRun();
-        sessionState = "menu";
-        overlay.showMenu();
-      }
-    }
+    if (input.reset) resetEvent();
 
-    let isRunning = sessionState === "running";
-    if (isRunning) {
+    if (activeMode === "drift-attack") {
       sessionTime -= dt;
       if (sessionTime <= 0) {
         sessionTime = 0;
         finishRun();
-        isRunning = false;
+        return;
       }
     }
 
-    if (isRunning) {
-      const substeps = Math.max(1, Math.ceil(dt / (1 / 120)));
-      for (let i = 0; i < substeps; i++) {
-        updateCar(car, input, tuning, dt / substeps, isOnTrack(car.position, track));
-      }
+    const substeps = Math.max(1, Math.ceil(dt / (1 / 120)));
+    for (let i = 0; i < substeps; i++) {
+      updateCar(car, input, activeTuning, dt / substeps, isOnTrack(car.position, track));
     }
 
     const onTrack = isOnTrack(car.position, track);
-    if (isRunning) {
-      const inRunoff = isInRunoff(car.position, track);
-      if (onTrack) runoffTime = 0;
-      else if (inRunoff) runoffTime += dt;
-      else runoffTime = 999;
-      const scoringSurface = onTrack || (inRunoff && runoffTime <= 1.15);
-      const impact = keepCarNearTrack(car, track);
-      if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
-      if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
+    const inRunoff = isInRunoff(car.position, track);
+    if (onTrack) runoffTime = 0;
+    else if (inRunoff) runoffTime += dt;
+    else runoffTime = 999;
+
+    const scoringSurface = onTrack || (inRunoff && runoffTime <= 1.15);
+    const impact = keepCarNearTrack(car, track);
+    if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
+    if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
+
+    if (activeMode === "drift-attack") {
       updateDriftScore(drift, car, dt, scoringSurface, getDriftZone(car.position, track));
-      tireTracks.update(car, onTrack);
-      tireSmoke.update(car, onTrack, dt);
     }
 
+    tireTracks.update(car, onTrack);
+    tireSmoke.update(car, onTrack, dt);
     carView.sync(car);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
-    updateChaseCamera(camera, car, dt, cameraShake);
+    updateChaseCamera(gameCamera, car, dt, cameraShake);
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
-    hud.root.hidden = sessionState !== "running";
-    if (sessionState === "menu") {
-      renderer.clear(true, true, true);
+    hud.root.hidden = false;
+    renderer.render(gameScene, gameCamera);
+  }
+
+  function frame() {
+    const dt = Math.min(clock.getDelta(), 1 / 30);
+
+    if (appState === "garage") {
+      garageView.update(dt);
+      garageView.render();
+    } else if (appState === "event") {
+      updateEvent(dt);
     } else {
-      renderer.render(scene, camera);
+      renderer.render(gameScene, gameCamera);
     }
 
     requestAnimationFrame(frame);

@@ -8,7 +8,7 @@ export function createHud() {
   root.className = "hud";
   root.innerHTML = `
     <div class="hud__strip">
-      <span>Car <strong>Altima</strong></span>
+      <span>Car <strong data-car-name>Lite Coupe</strong></span>
       <span>Time <strong data-time>90.0s</strong></span>
       <span>Surface <strong data-surface>Track</strong></span>
       <span>Grip <strong data-grip>100%</strong></span>
@@ -61,7 +61,52 @@ export function createHud() {
       callout.hidden = drift.calloutTimer <= 0 && !drift.active;
     },
     updateTimer(secondsRemaining: number) {
-      root.querySelector("[data-time]")!.textContent = `${Math.max(0, secondsRemaining).toFixed(1)}s`;
+      root.querySelector("[data-time]")!.textContent = Number.isFinite(secondsRemaining)
+        ? `${Math.max(0, secondsRemaining).toFixed(1)}s`
+        : "Free";
+    },
+    setCarName(name: string) {
+      root.querySelector("[data-car-name]")!.textContent = name;
+    },
+    setMode(mode: "drift-attack" | "free-drive") {
+      root.classList.toggle("is-free-drive", mode === "free-drive");
+    },
+  };
+}
+
+export function createResultsOverlay(onRestart: () => void, onGarage: () => void) {
+  const root = document.createElement("div");
+  root.className = "session-overlay";
+  root.hidden = true;
+  root.innerHTML = `
+    <section class="session-card session-card--end">
+      <p class="session-card__eyebrow">Run Complete</p>
+      <div class="session-card__score-label">Final score</div>
+      <h1 data-final-score>0</h1>
+      <div class="session-card__stats">
+        <span>Best combo <strong data-final-combo>0</strong></span>
+        <span>Best run <strong data-final-best>0</strong></span>
+      </div>
+      <div class="session-card__actions">
+        <button data-restart type="button">Restart</button>
+        <button class="session-card__secondary" data-garage type="button">Garage</button>
+      </div>
+    </section>
+  `;
+  document.body.append(root);
+  root.querySelector("[data-restart]")!.addEventListener("click", onRestart);
+  root.querySelector("[data-garage]")!.addEventListener("click", onGarage);
+
+  return {
+    root,
+    show(finalScore: number, bestCombo: number, bestRun: number) {
+      root.hidden = false;
+      root.querySelector("[data-final-score]")!.textContent = formatScore(finalScore);
+      root.querySelector("[data-final-combo]")!.textContent = formatScore(bestCombo);
+      root.querySelector("[data-final-best]")!.textContent = formatScore(bestRun);
+    },
+    hide() {
+      root.hidden = true;
     },
   };
 }

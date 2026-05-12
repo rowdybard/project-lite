@@ -1,0 +1,130 @@
+import {
+  customizationCategories,
+  modeOptions,
+  type CarCustomization,
+  type CustomizationCategory,
+  type CustomizationSlot,
+  type ModeId,
+} from "../game/customization";
+
+type GarageUiCallbacks = {
+  onCustomizationChange: (slot: CustomizationSlot, value: string) => void;
+  onModeChange: (mode: ModeId) => void;
+  onStart: () => void;
+};
+
+function optionButton(option: { id: string; label: string; color?: number; disabled?: boolean }, active: boolean) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.option = option.id;
+  button.className = active ? "garage-option is-active" : "garage-option";
+  button.disabled = !!option.disabled;
+  button.innerHTML = option.color
+    ? `<span class="garage-option__swatch" style="--swatch:#${option.color.toString(16).padStart(6, "0")}"></span>${option.label}`
+    : option.label;
+  return button;
+}
+
+const tabCategoryIds = new Set(["paint", "wheelColor", "stance", "spoiler", "tuningPreset", "decals"]);
+const bodySlotIds: CustomizationSlot[] = ["spoiler", "frontLip", "sideSkirts", "underglow"];
+
+export function createGarageUi(customization: CarCustomization, callbacks: GarageUiCallbacks) {
+  const root = document.createElement("div");
+  root.className = "garage-ui";
+  document.body.append(root);
+
+  let activeCategory: CustomizationCategory = customizationCategories[0];
+
+  function render() {
+    root.innerHTML = `
+      <header class="garage-header">
+        <p>Project Lite</p>
+        <h1>Garage</h1>
+      </header>
+      <aside class="garage-mode">
+        <h2>Mode Select</h2>
+        <div data-modes></div>
+        <button class="garage-start" type="button">Start Event</button>
+      </aside>
+      <section class="garage-panel">
+        <nav class="garage-tabs" data-tabs></nav>
+        <div class="garage-panel__title">
+          <h2>${activeCategory.label}</h2>
+          ${activeCategory.comingSoon ? "<span>Coming Soon</span>" : ""}
+        </div>
+        <div class="garage-options" data-options></div>
+      </section>
+    `;
+
+    const modes = root.querySelector("[data-modes]")!;
+    for (const mode of modeOptions) {
+      const button = optionButton(mode, customization.selectedMode === mode.id);
+      button.classList.add("garage-mode__button");
+      if (mode.disabled) button.innerHTML += "<small>Coming Soon</small>";
+      button.addEventListener("click", () => callbacks.onModeChange(mode.id as ModeId));
+      modes.append(button);
+    }
+
+    const tabs = root.querySelector("[data-tabs]")!;
+    for (const category of customizationCategories.filter((item) => tabCategoryIds.has(item.id))) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = category.id === activeCategory.id ? "is-active" : "";
+      button.textContent =
+        category.id === "spoiler" ? "Body" : category.comingSoon ? `${category.label} Coming Soon` : category.label;
+      button.addEventListener("click", () => {
+        activeCategory = category;
+        render();
+      });
+      tabs.append(button);
+    }
+
+    const options = root.querySelector("[data-options]")!;
+    if (activeCategory.id === "spoiler") {
+      for (const slot of bodySlotIds) {
+        const category = customizationCategories.find((item) => item.id === slot)!;
+        const group = document.createElement("section");
+        group.className = "garage-option-group";
+        group.innerHTML = `<h3>${category.label}</h3>`;
+        for (const option of category.options) {
+          const active = customization[slot] === option.id;
+          const button = optionButton(option, active);
+          button.addEventListener("click", () => callbacks.onCustomizationChange(slot, option.id));
+          group.append(button);
+        }
+        options.append(group);
+      }
+    } else if (!activeCategory.comingSoon) {
+      for (const option of activeCategory.options) {
+        const slot = activeCategory.id as CustomizationSlot;
+        const active = customization[slot] === option.id;
+        const button = optionButton(option, active);
+        button.addEventListener("click", () => callbacks.onCustomizationChange(slot, option.id));
+        options.append(button);
+      }
+    } else {
+      const soon = document.createElement("p");
+      soon.className = "garage-soon";
+      soon.textContent = "Decals will arrive after the first gameplay loop is locked.";
+      options.append(soon);
+    }
+
+    root.querySelector(".garage-start")!.addEventListener("click", callbacks.onStart);
+  }
+
+  render();
+
+  return {
+    root,
+    update(next: CarCustomization) {
+      Object.assign(customization, next);
+      render();
+    },
+    show() {
+      root.hidden = false;
+    },
+    hide() {
+      root.hidden = true;
+    },
+  };
+}

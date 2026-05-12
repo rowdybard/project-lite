@@ -3,8 +3,7 @@
   "activeTrack": "drift-switchback",
   "cars": {
     "starter-coupe": {
-      "name": "Altima Test Mule",
-      "model": "/assets/cars/altima/altima_2010_style.glb",
+      "name": "Project Lite Coupe",
       "tuning": "/assets/cars/starter/tuning.json",
       "scale": 1
     }
