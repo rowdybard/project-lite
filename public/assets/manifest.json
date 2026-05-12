@@ -3,7 +3,7 @@
   "activeTrack": "drift-switchback",
   "cars": {
     "starter-coupe": {
-      "name": "S13 240SX Drift Coupe",
+      "name": "Altima Test Mule",
       "model": "/assets/cars/altima/altima_2010_style.glb",
       "tuning": "/assets/cars/starter/tuning.json",
       "scale": 1

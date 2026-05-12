@@ -1,7 +1,40 @@
-import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D } from "three";
+import { Box3, BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3 } from "three";
 import type { CarState } from "../../game/types";
 
 type WheelCorner = "fl" | "fr" | "rl" | "rr";
+
+function prepareImportedCar(imported: Object3D, scale: number) {
+  const paint = new MeshStandardMaterial({ color: 0x8f1f2d, roughness: 0.46, metalness: 0.16 });
+  const glass = new MeshStandardMaterial({ color: 0x101923, roughness: 0.22, metalness: 0.04 });
+  const tire = new MeshStandardMaterial({ color: 0x101010, roughness: 0.92 });
+  const light = new MeshStandardMaterial({ color: 0xf2efe2, emissive: 0x2a2417, roughness: 0.38 });
+  const trim = new MeshStandardMaterial({ color: 0x252d34, roughness: 0.62, metalness: 0.08 });
+
+  imported.traverse((node) => {
+    if (!(node instanceof Mesh)) return;
+
+    const name = node.name.toLowerCase();
+    if (name.includes("glass") || name.includes("window") || name.includes("windshield")) node.material = glass;
+    else if (name.includes("tire") || name.includes("wheel")) node.material = tire;
+    else if (name.includes("light") || name.includes("lamp")) node.material = light;
+    else if (name.includes("grille") || name.includes("trim") || name.includes("mirror")) node.material = trim;
+    else node.material = paint;
+
+    node.castShadow = true;
+    node.receiveShadow = true;
+  });
+
+  imported.updateMatrixWorld(true);
+  const box = new Box3().setFromObject(imported);
+  const size = new Vector3();
+  const center = new Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  const fitScale = size.z > 0 ? 4.55 / size.z : 1;
+  imported.scale.setScalar(fitScale * scale);
+  imported.position.set(-center.x * fitScale * scale, -box.min.y * fitScale * scale + 0.08, -center.z * fitScale * scale);
+}
 
 export function createCarView(imported: Object3D | null, scale = 1) {
   const root = new Group();
@@ -15,7 +48,7 @@ export function createCarView(imported: Object3D | null, scale = 1) {
   const loadBars: { mesh: Mesh; corner: WheelCorner }[] = [];
 
   if (imported) {
-    imported.scale.setScalar(scale);
+    prepareImportedCar(imported, scale);
     bodyGroup.add(imported);
   } else {
     const body = new Mesh(

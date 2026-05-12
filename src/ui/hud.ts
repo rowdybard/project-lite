@@ -8,12 +8,12 @@ export function createHud() {
   root.className = "hud";
   root.innerHTML = `
     <div class="hud__strip">
+      <span>Car <strong>Altima</strong></span>
       <span>Time <strong data-time>90.0s</strong></span>
       <span>Surface <strong data-surface>Track</strong></span>
       <span>Grip <strong data-grip>100%</strong></span>
       <span>Heat <strong data-heat>0%</strong></span>
       <span>Load <strong data-load>50F/50R</strong></span>
-      <span>Angle <strong data-angle>0 deg</strong></span>
     </div>
     <div class="drift-score">
       <div class="drift-score__label">Drift score</div>
@@ -50,7 +50,6 @@ export function createHud() {
       root.querySelector("[data-heat]")!.textContent = `${Math.round(car.tireHeat * 100)}%`;
       root.querySelector("[data-load]")!.textContent =
         `${Math.round(car.weightForward * 100)}F/${Math.round((1 - car.weightForward) * 100)}R`;
-      root.querySelector("[data-angle]")!.textContent = `${Math.round(car.slipAngle)} deg`;
       root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore + drift.comboScore);
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
       root.querySelector("[data-multiplier]")!.textContent = `x${drift.multiplier.toFixed(1)}`;
