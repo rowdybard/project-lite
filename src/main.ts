@@ -12,7 +12,7 @@ import { bindInput, readInput } from "./game/input/inputMap";
 import { loadJson, loadManifest } from "./game/content/manifest";
 import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
-import { getDriftZone, isOnTrack } from "./game/simulation/trackSurface";
+import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
 import { createHud, createSessionOverlay, createTunePanel } from "./ui/hud";
 import { hydrateTuningPanel } from "./ui/tuningPanel";
 import type { CarTuning } from "./game/types";
@@ -50,6 +50,7 @@ async function boot() {
   let sessionState: "menu" | "running" | "ended" = "menu";
   let sessionTime = runLength;
   let cameraShake = 0;
+  let runoffTime = 0;
   const tunePanel = createTunePanel();
   hydrateTuningPanel(tunePanel, tuning);
   bindInput();
@@ -61,6 +62,7 @@ async function boot() {
     tireSmoke.reset();
     sessionTime = runLength;
     cameraShake = 0;
+    runoffTime = 0;
   };
 
   const startRun = () => {
@@ -128,10 +130,15 @@ async function boot() {
 
     const onTrack = isOnTrack(car.position, track);
     if (isRunning) {
+      const inRunoff = isInRunoff(car.position, track);
+      if (onTrack) runoffTime = 0;
+      else if (inRunoff) runoffTime += dt;
+      else runoffTime = 999;
+      const scoringSurface = onTrack || (inRunoff && runoffTime <= 1.15);
       const impact = keepCarNearTrack(car, track);
       if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
       if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
-      updateDriftScore(drift, car, dt, onTrack, getDriftZone(car.position, track));
+      updateDriftScore(drift, car, dt, scoringSurface, getDriftZone(car.position, track));
       tireTracks.update(car, onTrack);
       tireSmoke.update(car, onTrack, dt);
     }

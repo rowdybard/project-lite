@@ -13,9 +13,18 @@ const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2) => {
 };
 
 export function isOnTrack(point: Vec2, track: TrackConfig) {
+  return getTrackDistance(point, track) <= 12;
+}
+
+export function isInRunoff(point: Vec2, track: TrackConfig) {
+  const distance = getTrackDistance(point, track);
+  return distance > 12 && distance <= 15.5;
+}
+
+export function getTrackDistance(point: Vec2, track: TrackConfig) {
   if (!track.roadPath || track.roadPath.length < 2) {
     const radius = Math.hypot(point.x, point.z);
-    return Math.abs(radius - track.roadWidth) <= 10;
+    return Math.abs(radius - track.roadWidth);
   }
 
   let nearest = Infinity;
@@ -25,7 +34,7 @@ export function isOnTrack(point: Vec2, track: TrackConfig) {
     nearest = Math.min(nearest, distanceToSegment(point, current, next));
   }
 
-  return nearest <= 12;
+  return nearest;
 }
 
 export function getDriftZone(point: Vec2, track: TrackConfig) {
