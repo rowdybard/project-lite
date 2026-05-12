@@ -61,6 +61,21 @@ export const carOptions: CustomizationOption[] = [
   { id: "slot-4", label: "Empty Bay", disabled: true },
 ];
 
+export const importedCarOptions: CustomizationOption[] = [
+  { id: "pack-suv", label: "Pack SUV" },
+  { id: "pack-pickup", label: "Pack Pickup" },
+  { id: "pack-hatchback", label: "Pack Hatchback" },
+  { id: "pack-sedan", label: "Pack Sedan" },
+  { id: "pack-muscle", label: "Pack Muscle" },
+  { id: "pack-muscle-2", label: "Pack Muscle 2" },
+];
+
+export const allSelectableCarOptions = [...carOptions.filter((option) => !option.disabled), ...importedCarOptions];
+
+export function getCarLabel(id: string) {
+  return allSelectableCarOptions.find((option) => option.id === id)?.label ?? "Lite Coupe";
+}
+
 export const modeOptions: CustomizationOption[] = [
   { id: "drift-attack", label: "Drift Attack" },
   { id: "free-drive", label: "Free Drive" },
@@ -177,7 +192,9 @@ export function loadCustomization(): CarCustomization {
   if (!raw) return { ...defaultCustomization };
 
   try {
-    return { ...defaultCustomization, ...JSON.parse(raw) };
+    const loaded = { ...defaultCustomization, ...JSON.parse(raw) };
+    if (loaded.selectedCar === "street-hatch") loaded.selectedCar = "street-sedan";
+    return loaded;
   } catch {
     return { ...defaultCustomization };
   }

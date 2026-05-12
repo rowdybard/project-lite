@@ -2,7 +2,7 @@ import "./style.css";
 import { Clock } from "three";
 import {
   applyTuningPreset,
-  carOptions,
+  getCarLabel,
   loadCustomization,
   saveCustomization,
   type CarCustomization,
@@ -58,7 +58,7 @@ async function boot() {
   const drift = createDriftState();
   const hud = createHud();
   const setHudCarName = () => {
-    hud.setCarName(carOptions.find((option) => option.id === customization.selectedCar)?.label ?? carEntry.name);
+    hud.setCarName(getCarLabel(customization.selectedCar) ?? carEntry.name);
   };
   setHudCarName();
   hud.root.hidden = true;

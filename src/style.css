@@ -557,6 +557,34 @@ canvas {
   text-transform: uppercase;
 }
 
+.garage-cars__header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.garage-import {
+  display: grid;
+  gap: 4px;
+  min-width: 118px;
+  color: #91a0af;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.garage-import select {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid rgb(190 210 230 / 16%);
+  color: #f7f0df;
+  background: rgb(7 12 18 / 92%);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .garage-car-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

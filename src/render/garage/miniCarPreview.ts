@@ -54,7 +54,14 @@ export function renderMiniCarPreview(image: HTMLImageElement, customization: Car
   carView.applyCustomization(customization);
   carView.sync(car);
   scene.add(carView.root);
-  renderer.render(scene, camera);
+  const renderThumbnail = () => {
+    renderer.render(scene, camera);
+    image.src = renderer.domElement.toDataURL("image/png");
+  };
 
-  image.src = renderer.domElement.toDataURL("image/png");
+  renderThumbnail();
+  void carView.whenReady().then(() => {
+    carView.sync(car);
+    renderThumbnail();
+  });
 }

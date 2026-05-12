@@ -1,6 +1,7 @@
 import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, PointLight } from "three";
 import { paintColors, underglowColors, wheelColors, type CarCustomization } from "../../game/customization";
 import type { CarState } from "../../game/types";
+import { createImportedCarModel, isImportedCar, type ImportedWheel } from "./importedCars";
 
 type WheelCorner = "fl" | "fr" | "rl" | "rr";
 type CarProfileId = "lite-coupe" | "street-sedan";
@@ -78,8 +79,13 @@ export function createCarView(scale = 1) {
   const rimParts: Mesh[] = [];
   const customParts = new Group();
   bodyGroup.add(customParts);
+  const importedRoot = new Group();
+  root.add(importedRoot);
 
   let stanceDrop = 0;
+  let activeImportedCarId = "";
+  let importedWheels: ImportedWheel[] = [];
+  let importedReady: Promise<void> = Promise.resolve();
   const paintMaterial = new MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.5, metalness: 0.12 });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });
@@ -240,6 +246,31 @@ export function createCarView(scale = 1) {
   );
 
   function applyCustomization(customization: CarCustomization) {
+    if (isImportedCar(customization.selectedCar)) {
+      const importId = customization.selectedCar;
+      activeImportedCarId = importId;
+      bodyGroup.visible = false;
+      for (const wheel of suspensionPivots) wheel.pivot.visible = false;
+      importedRoot.visible = true;
+      importedRoot.clear();
+      importedWheels = [];
+      importedReady = createImportedCarModel(importId).then((model) => {
+        if (!model || activeImportedCarId !== importId) return;
+        importedRoot.clear();
+        importedRoot.add(model.root);
+        importedWheels = model.wheels;
+      });
+      return;
+    }
+
+    activeImportedCarId = "";
+    importedWheels = [];
+    importedReady = Promise.resolve();
+    importedRoot.clear();
+    importedRoot.visible = false;
+    bodyGroup.visible = true;
+    for (const wheel of suspensionPivots) wheel.pivot.visible = true;
+
     const profile = carProfiles[(customization.selectedCar as CarProfileId) in carProfiles ? (customization.selectedCar as CarProfileId) : "lite-coupe"];
     const paint = paintColors[customization.paint] ?? paintColors.silver;
     const wheel = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
@@ -345,6 +376,19 @@ export function createCarView(scale = 1) {
     sync(car: CarState) {
       root.position.set(car.position.x, 0, car.position.z);
       root.rotation.y = car.heading;
+      if (activeImportedCarId) {
+        importedRoot.position.y = 0.02 + Math.abs(car.bodyPitch) * 0.018 + Math.abs(car.bodyRoll) * 0.012;
+        importedRoot.rotation.x = car.bodyPitch * 0.105;
+        importedRoot.rotation.z = -car.bodyRoll * 0.12;
+
+        for (const wheel of importedWheels) {
+          wheel.object.rotation.copy(wheel.baseRotation);
+          if (wheel.front) wheel.object.rotateY(car.frontWheelAngle);
+          wheel.object.rotateX(wheel.front ? -car.wheelSpin : -car.rearWheelSpin);
+        }
+        return;
+      }
+
       bodyGroup.position.y = 0.02 - stanceDrop + Math.abs(car.bodyPitch) * 0.018 + Math.abs(car.bodyRoll) * 0.012;
       bodyGroup.rotation.x = car.bodyPitch * 0.105;
       bodyGroup.rotation.z = -car.bodyRoll * 0.12;
@@ -376,5 +420,8 @@ export function createCarView(scale = 1) {
       }
     },
     applyCustomization,
+    whenReady() {
+      return importedReady;
+    },
   };
 }

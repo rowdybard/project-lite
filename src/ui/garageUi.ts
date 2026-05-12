@@ -1,6 +1,8 @@
 import {
   carOptions,
   customizationCategories,
+  getCarLabel,
+  importedCarOptions,
   modeOptions,
   type CarCustomization,
   type CustomizationCategory,
@@ -50,9 +52,15 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
         <h2>Mode Select</h2>
         <div data-modes></div>
         <section class="garage-cars">
-          <div>
+          <div class="garage-cars__header">
+            <div>
             <p class="garage-kicker">Car Select</p>
             <h2>Garage Bays</h2>
+            </div>
+            <label class="garage-import">
+              <span>Import</span>
+              <select data-import-cars></select>
+            </label>
           </div>
           <div class="garage-car-grid" data-cars></div>
         </section>
@@ -77,8 +85,28 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
       modes.append(button);
     }
 
+    const importedSelect = root.querySelector<HTMLSelectElement>("[data-import-cars]")!;
+    importedSelect.innerHTML = `<option value="">Choose car</option>`;
+    for (const car of importedCarOptions) {
+      const option = document.createElement("option");
+      option.value = car.id;
+      option.textContent = car.label;
+      option.selected = customization.selectedCar === car.id;
+      importedSelect.append(option);
+    }
+    importedSelect.addEventListener("change", () => {
+      if (importedSelect.value) callbacks.onCustomizationChange("selectedCar", importedSelect.value);
+    });
+
     const cars = root.querySelector("[data-cars]")!;
-    for (const car of carOptions) {
+    const secondBay = customization.selectedCar === "street-sedan" ? carOptions[0] : carOptions[1];
+    const bayOptions = [
+      { id: customization.selectedCar, label: getCarLabel(customization.selectedCar) },
+      secondBay,
+      carOptions[2],
+      carOptions[3],
+    ];
+    for (const car of bayOptions) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = customization.selectedCar === car.id ? "garage-car-card is-active" : "garage-car-card";
