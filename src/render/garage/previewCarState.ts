@@ -34,5 +34,6 @@ export function createPreviewCarState(): CarState {
     steerAxis: 0,
     throttleAxis: 0,
     brakeAxis: 0,
+    reverseEngageTimer: 0,
   };
 }

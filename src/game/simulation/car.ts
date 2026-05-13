@@ -53,6 +53,7 @@ export function createCarState(track: TrackConfig): CarState {
     steerAxis: 0,
     throttleAxis: 0,
     brakeAxis: 0,
+    reverseEngageTimer: 0,
   };
 }
 
@@ -91,6 +92,7 @@ export function resetCar(car: CarState, track: TrackConfig) {
   car.steerAxis = 0;
   car.throttleAxis = 0;
   car.brakeAxis = 0;
+  car.reverseEngageTimer = 0;
 }
 
 export function updateCar(car: CarState, input: InputState, tuning: CarTuning, dt: number, onTrack = true) {
@@ -120,7 +122,10 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const rpmTarget = clamp(lerp(Math.max(tuning.idleRpm, coupledRpm), freeRevRpm, launchSlip), tuning.idleRpm, tuning.redlineRpm);
 
   car.shiftCooldown = Math.max(0, car.shiftCooldown - dt);
-  car.rpm = lerp(car.rpm, rpmTarget, smooth(car.shiftCooldown > 0 ? 18 : 10, dt));
+  // Drivetrain inertia: RPM responds more slowly than wheel speed (flywheel effect)
+  const clutchSlip = Math.abs(car.rpm - coupledRpm) / tuning.redlineRpm;
+  const inertiaRate = car.shiftCooldown > 0 ? 16 : lerp(3.5, 8, clutchSlip);
+  car.rpm = lerp(car.rpm, rpmTarget, smooth(inertiaRate, dt));
 
   if (car.shiftCooldown <= 0) {
     const nextRatio = tuning.gearRatios[car.gear] ?? 0;
@@ -161,8 +166,12 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
     tuning.engineTorque *
     shiftTorque *
     (1 - rearLockIntent * 0.72);
+  // Reverse lockout: must brake to near-stop and hold for engagement delay
+  const reverseReady = Math.abs(forwardSpeed) < 2.0;
+  const reverseActive = reverseReady && car.brakeAxis > 0.9 && car.reverseEngageTimer >= 0.12;
   if (car.brakeAxis > 0 && forwardSpeed > 0.5) drive -= tuning.brakeForce * car.brakeAxis;
-  if (car.brakeAxis > 0 && forwardSpeed <= 0.5) drive -= tuning.reverseAcceleration * car.brakeAxis;
+  if (reverseActive && forwardSpeed <= 0.5) drive -= tuning.reverseAcceleration * car.brakeAxis;
+  car.reverseEngageTimer = reverseReady && car.brakeAxis > 0.9 ? car.reverseEngageTimer + dt : 0;
 
   const handbrakeDrag = rearLockIntent * tuning.handbrakeDrag * Math.sign(forwardSpeed) * Math.min(Math.abs(forwardSpeed), 28);
   const rolling = tuning.rollingResistance * Math.sign(forwardSpeed) * clamp(Math.abs(forwardSpeed), 0, 1);
@@ -183,10 +192,10 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
     clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 24, 0, 1) *
     clamp(gearTorque * enginePull * tuning.engineTorque, 0.45, 1.85);
   const surfaceGrip = onTrack ? 1 : tuning.offTrackGrip;
-  const brakeTransfer = clamp(car.brakeAxis * 0.75 + rearLockIntent * 0.45, 0, 1);
-  const throttleTransfer = car.throttleAxis * clamp(Math.abs(forwardSpeed) / 18, 0, 1);
-  const frontLoad = 1 + brakeTransfer * 0.14 - throttleTransfer * 0.05;
-  const rearLoad = 1 + throttleTransfer * 0.08 - brakeTransfer * 0.2;
+  const brakeTransfer = clamp(car.brakeAxis * 1.1 + rearLockIntent * 0.55, 0, 1);
+  const throttleTransfer = car.throttleAxis * clamp(Math.abs(forwardSpeed) / 12, 0, 1);
+  const frontLoad = 1 + brakeTransfer * 0.22 - throttleTransfer * 0.08;
+  const rearLoad = 1 + throttleTransfer * 0.14 - brakeTransfer * 0.28;
   const lateralRelease = rearLockIntent * clamp(0.25 + Math.abs(car.steerAxis) * 0.5 + Math.abs(rearSlip) / (44 * degToRad), 0, 1);
   const handbrakeCurve = Math.pow(lateralRelease, 0.82);
   const frontGrip =

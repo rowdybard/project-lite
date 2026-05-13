@@ -26,13 +26,13 @@
   "handbrakeRearGrip": 3.1,
   "frontCorneringStiffness": 58,
   "rearCorneringStiffness": 40,
-  "throttleGripLoss": 0.24,
-  "counterSteerAssist": 3.7,
+  "throttleGripLoss": 0.14,
+  "counterSteerAssist": 1.85,
   "offTrackGrip": 0.48,
   "offTrackDrag": 1.55,
   "driftMinSpeed": 5,
   "driftDrag": 0.005,
-  "slideDrag": 0.013,
+  "slideDrag": 0.021,
   "handbrakeDrag": 0.72,
-  "yawDamping": 1.12
+  "yawDamping": 1.46
 }
