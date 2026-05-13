@@ -14,9 +14,10 @@ function tireAcceleration(slipAngle: number, stiffness: number, gripLimit: numbe
 
 function torqueCurve(rpm: number, tuning: CarTuning) {
   const normalized = clamp((rpm - tuning.idleRpm) / (tuning.redlineRpm - tuning.idleRpm), 0, 1);
-  const lowEnd = 0.42 + normalized * 0.78;
-  const topEndFalloff = 1 - Math.max(0, normalized - 0.72) * 1.15;
-  return clamp(Math.min(lowEnd, topEndFalloff), 0.38, 1.05);
+  // Torque builds from idle, peaks ~65% of rev range, falls off toward redline
+  const buildUp = 1 - Math.exp(-normalized * 4.2);
+  const topEndFalloff = 1 - Math.max(0, normalized - 0.65) * 1.45;
+  return clamp(Math.min(buildUp, topEndFalloff), 0.28, 1.05);
 }
 
 export function createCarState(track: TrackConfig): CarState {
@@ -117,14 +118,27 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const currentRatio = tuning.gearRatios[car.gear - 1] ?? tuning.gearRatios[0];
   const wheelRpm = (Math.abs(forwardSpeed) / (2 * Math.PI * tuning.wheelRadius)) * 60;
   const coupledRpm = wheelRpm * currentRatio * tuning.finalDrive;
+
+  // Free-rev: throttle lifts RPM up to redline when wheels are slipping at launch
   const launchSlip = clamp(1 - Math.abs(forwardSpeed) / 5, 0, 1) * car.throttleAxis;
-  const freeRevRpm = tuning.idleRpm + car.throttleAxis * (tuning.redlineRpm - tuning.idleRpm) * 0.5;
-  const rpmTarget = clamp(lerp(Math.max(tuning.idleRpm, coupledRpm), freeRevRpm, launchSlip), tuning.idleRpm, tuning.redlineRpm);
+  const freeRevRpm = tuning.idleRpm + car.throttleAxis * (tuning.redlineRpm - tuning.idleRpm) * 0.82;
+
+  // Rev limiter: bounce RPM back from redline with a small kick
+  const nearRedline = car.rpm > tuning.redlineRpm * 0.985 && car.throttleAxis > 0.5;
+  const limiterTarget = nearRedline ? tuning.redlineRpm * 0.93 : tuning.redlineRpm;
+
+  const rpmTarget = clamp(
+    lerp(Math.max(tuning.idleRpm, coupledRpm), Math.min(freeRevRpm, limiterTarget), launchSlip),
+    tuning.idleRpm,
+    limiterTarget,
+  );
 
   car.shiftCooldown = Math.max(0, car.shiftCooldown - dt);
-  // Drivetrain inertia: RPM responds more slowly than wheel speed (flywheel effect)
-  const clutchSlip = Math.abs(car.rpm - coupledRpm) / tuning.redlineRpm;
-  const inertiaRate = car.shiftCooldown > 0 ? 16 : lerp(3.5, 8, clutchSlip);
+  // Drivetrain inertia: RPM follows wheel speed with flywheel lag
+  // During a shift the clutch is open — RPM floats freely and drops quickly
+  const clutchEngaged = car.shiftCooldown <= 0;
+  const clutchSlip = Math.abs(car.rpm - coupledRpm) / Math.max(tuning.redlineRpm, 1);
+  const inertiaRate = clutchEngaged ? lerp(4.5, 9, 1 - clutchSlip) : 22;
   car.rpm = lerp(car.rpm, rpmTarget, smooth(inertiaRate, dt));
 
   if (car.shiftCooldown <= 0) {
@@ -132,31 +146,45 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
     const previousRatio = tuning.gearRatios[car.gear - 2] ?? 0;
     const nextGearRpm = wheelRpm * nextRatio * tuning.finalDrive;
     const previousGearRpm = wheelRpm * previousRatio * tuning.finalDrive;
-    const shouldUpshift = car.rpm > tuning.shiftUpRpm && car.gear < maxGear && nextGearRpm > tuning.shiftDownRpm * 0.75;
+
+    // Upshift when RPM hits shift point and next gear stays above stall
+    const shouldUpshift = car.rpm > tuning.shiftUpRpm && car.gear < maxGear && nextGearRpm > tuning.shiftDownRpm * 0.65;
+
+    // Kickdown: full throttle demands lower gear for acceleration
     const shouldKickdown =
-      car.throttleAxis > 0.82 &&
+      car.throttleAxis > 0.78 &&
       car.gear > 1 &&
-      previousGearRpm < tuning.redlineRpm * 0.94 &&
-      car.rpm < tuning.shiftDownRpm + 900;
+      previousGearRpm < tuning.redlineRpm * 0.96 &&
+      car.rpm < tuning.shiftDownRpm + 1200;
+
+    // Downshift when lugging or kickdown requested
     const shouldDownshift =
-      car.gear > 1 && Math.abs(forwardSpeed) > 2.5 && (car.rpm < tuning.shiftDownRpm || shouldKickdown);
+      car.gear > 1 && Math.abs(forwardSpeed) > 2.0 && (car.rpm < tuning.shiftDownRpm || shouldKickdown);
 
     if (shouldUpshift) {
       car.gear += 1;
-      car.shiftCooldown = 0.2;
-      car.rpm = Math.max(tuning.idleRpm, nextGearRpm);
+      car.shiftCooldown = 0.22;
+      // RPM drops to match new gear ratio — clutch re-engagement thud
+      car.rpm = clamp(nextGearRpm, tuning.idleRpm, tuning.redlineRpm * 0.88);
     } else if (shouldDownshift) {
       car.gear -= 1;
-      car.shiftCooldown = shouldKickdown ? 0.14 : 0.18;
+      car.shiftCooldown = shouldKickdown ? 0.13 : 0.19;
       car.rpm = clamp(previousGearRpm, tuning.idleRpm, tuning.redlineRpm);
     }
   }
 
   const gearRatio = tuning.gearRatios[car.gear - 1] ?? currentRatio;
-  const gearTorque = (gearRatio * tuning.finalDrive) / 12;
+  // Normalise torque to gear 1 so lower gears give real mechanical advantage
+  const topRatio = tuning.gearRatios[0] ?? 1;
+  const gearTorque = (gearRatio * tuning.finalDrive) / (topRatio * tuning.finalDrive);
   const enginePull = torqueCurve(car.rpm, tuning);
 
-  const shiftTorque = car.shiftCooldown > 0 ? 0.58 : 1;
+  // Engine braking: lift off throttle at speed drags RPM and adds resistance
+  const engineBraking = (1 - car.throttleAxis) * clamp(Math.abs(forwardSpeed) / 28, 0, 1) * 0.12;
+
+  // Shift torque: ramp from cut to full over the shift duration for a smooth re-engagement
+  const shiftProgress = car.shiftCooldown > 0 ? clamp(1 - car.shiftCooldown / 0.22, 0, 1) : 1;
+  const shiftTorque = lerp(0.42, 1, shiftProgress);
   const rearLockIntent = car.handbrakeAmount * clamp((speed - 3) / 14, 0, 1);
   let drive =
     tuning.acceleration *
@@ -176,7 +204,8 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const handbrakeDrag = rearLockIntent * tuning.handbrakeDrag * Math.sign(forwardSpeed) * Math.min(Math.abs(forwardSpeed), 28);
   const rolling = tuning.rollingResistance * Math.sign(forwardSpeed) * clamp(Math.abs(forwardSpeed), 0, 1);
   const aero = tuning.drag * forwardSpeed * Math.abs(forwardSpeed);
-  const longitudinalAcceleration = drive - handbrakeDrag - rolling - aero;
+  const engineBrakingForce = engineBraking * Math.sign(forwardSpeed) * Math.min(Math.abs(forwardSpeed), 30);
+  const longitudinalAcceleration = drive - handbrakeDrag - rolling - aero - engineBrakingForce;
 
   const safeForwardSpeed = Math.max(Math.abs(forwardSpeed), 1.8);
   const frontPatchSideSpeed = sideSpeed + car.yawVelocity * tuning.frontAxle;

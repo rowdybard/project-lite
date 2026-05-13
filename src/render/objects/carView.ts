@@ -489,8 +489,8 @@ export function createCarView(scale = 1) {
       root.rotation.y = car.heading;
       if (activeImportedCarId) {
         importedRoot.position.y = -stanceDrop;
-        importedRoot.rotation.x = car.bodyPitch * 0.08;
-        importedRoot.rotation.z = -car.bodyRoll * 0.08;
+        importedRoot.rotation.x = car.bodyPitch * 0.055;
+        importedRoot.rotation.z = -car.bodyRoll * 0.055;
 
         for (const wheel of importedWheels) {
           const corner: WheelCorner = wheel.front
@@ -511,9 +511,9 @@ export function createCarView(scale = 1) {
         return;
       }
 
-      bodyGroup.position.y = 0.02 - stanceDrop + Math.abs(car.bodyPitch) * 0.018 + Math.abs(car.bodyRoll) * 0.012;
-      bodyGroup.rotation.x = car.bodyPitch * 0.105;
-      bodyGroup.rotation.z = -car.bodyRoll * 0.12;
+      bodyGroup.position.y = 0.02 - stanceDrop + Math.abs(car.bodyPitch) * 0.006 + Math.abs(car.bodyRoll) * 0.004;
+      bodyGroup.rotation.x = car.bodyPitch * 0.06;
+      bodyGroup.rotation.z = -car.bodyRoll * 0.07;
 
       const compressionByCorner: Record<WheelCorner, number> = {
         fl: car.suspensionFL,
@@ -524,7 +524,7 @@ export function createCarView(scale = 1) {
 
       for (const wheel of suspensionPivots) {
         const compression = compressionByCorner[wheel.corner];
-        wheel.pivot.position.y = wheel.baseY + (0.5 - compression) * 0.09 - stanceDrop * 0.35;
+        wheel.pivot.position.y = wheel.baseY + (0.5 - compression) * 0.04 - stanceDrop * 0.35;
       }
 
       for (const pivot of frontWheelPivots) {

@@ -1,13 +1,13 @@
 import { PerspectiveCamera, Vector3 } from "three";
 import type { CarState } from "../../game/types";
 
-const cameraOffset = new Vector3(0, 6.7, -17.6);
-const lookOffset = new Vector3(0, 1.9, 7.2);
+const cameraOffset = new Vector3(0, 5.4, -14.8);
+const lookOffset = new Vector3(0, 1.4, 6.0);
 let smoothOrbit = 0;
 
 export function createCamera() {
   const camera = new PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 700);
-  camera.position.set(0, 7.0, -18.2);
+  camera.position.set(0, 5.6, -15.2);
   return camera;
 }
 

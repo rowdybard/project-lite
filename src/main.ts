@@ -34,7 +34,7 @@ import type { Cone } from "./game/simulation/trackCollision";
 import type { Mesh } from "three";
 
 type AppState = "garage" | "event" | "results";
-const eventCarScale = 1.38;
+const eventCarScale = 1.55;
 
 async function boot() {
   document.querySelector<HTMLDivElement>("#app")!.innerHTML = '<canvas id="game"></canvas>';
