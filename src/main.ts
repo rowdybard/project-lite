@@ -11,7 +11,7 @@ import {
   type ModeId,
 } from "./game/customization";
 import { loadJson, loadManifest } from "./game/content/manifest";
-import { bindInput, readInput } from "./game/input/inputMap";
+import { bindInput, readInput, getCameraOrbit } from "./game/input/inputMap";
 import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
@@ -207,6 +207,7 @@ async function boot() {
     const input = readInput();
 
     if (input.reset) resetEvent();
+    if (input.menu) { showGarage(); return; }
 
     if (activeMode === "drift-attack") {
       sessionTime -= dt;
@@ -244,7 +245,7 @@ async function boot() {
     carView.sync(car);
     engineSound.update(car, activeTuning);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
-    updateChaseCamera(gameCamera, car, dt, cameraShake);
+    updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit());
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
     hud.root.hidden = false;

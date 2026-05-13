@@ -85,6 +85,7 @@ export type InputState = {
   handbrake: boolean;
   reset: boolean;
   debug: boolean;
+  menu: boolean;
 };
 
 export type TrackConfig = {
