@@ -24,6 +24,8 @@ export type TrackViewResult = {
   coneMeshes: Mesh[];
 };
 
+const yawForTangentX = (tangent: Vector3) => Math.atan2(-tangent.z, tangent.x);
+
 export async function createTrackView(scene: Scene, track: TrackConfig): Promise<TrackViewResult> {
   const imported = await loadGltf(track.model);
   if (imported) {
@@ -34,7 +36,7 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
   const bounds = getTrackBounds(track);
   const grass = new Mesh(
     new PlaneGeometry(bounds.width, bounds.depth),
-    new MeshStandardMaterial({ color: 0x34523d, map: createGrassTexture(), roughness: 0.96 }),
+    new MeshStandardMaterial({ color: 0x324f39, map: createGrassTexture(), roughness: 0.92 }),
   );
   grass.rotation.x = -Math.PI / 2;
   grass.position.set(bounds.centerX, -0.02, bounds.centerZ);
@@ -80,7 +82,7 @@ function createRoadFromPath(track: TrackConfig) {
 
   const road = new Mesh(
     new ExtrudeGeometry(roadShape, { depth: 0.06, bevelEnabled: false }),
-    new MeshStandardMaterial({ color: 0x2e3138, map: createRoadTexture(), roughness: 0.88 }),
+    new MeshStandardMaterial({ color: 0x2b2d31, map: createRoadTexture(), roughness: 0.76, metalness: 0.03 }),
   );
   road.rotation.x = Math.PI / 2;
   road.position.y = 0.02;
@@ -88,6 +90,9 @@ function createRoadFromPath(track: TrackConfig) {
   group.add(road);
 
   group.add(createCornerPoles(track, roadWidth));
+  group.add(createPaintedLines(samples, roadWidth));
+  group.add(createRacingLine(samples));
+  group.add(createRunoffPatches(track, samples, roadWidth));
   group.add(createCurbs(track, samples, roadWidth));
   const trackside = createTracksideDepth(track, samples, roadWidth);
   group.add(trackside.group);
@@ -153,53 +158,160 @@ function createCornerPoles(track: TrackConfig, roadWidth: number): Object3D {
 
 function createRoadTexture() {
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 256;
+  canvas.width = 512;
+  canvas.height = 512;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#2b2e34";
+  ctx.fillStyle = "#2b2d31";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (let i = 0; i < 900; i++) {
-    const shade = 38 + Math.random() * 38;
-    ctx.fillStyle = `rgba(${shade}, ${shade + 2}, ${shade + 7}, ${0.12 + Math.random() * 0.18})`;
-    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1 + Math.random() * 2);
+  for (let i = 0; i < 3000; i++) {
+    const shade = 32 + Math.random() * 42;
+    ctx.fillStyle = `rgba(${shade}, ${shade + 1}, ${shade + 4}, ${0.1 + Math.random() * 0.16})`;
+    ctx.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 3, 1 + Math.random() * 3);
   }
 
-  for (let y = 0; y < 256; y += 28) {
-    ctx.fillStyle = "rgba(255,255,255,0.035)";
-    ctx.fillRect(0, y, 256, 1);
+  for (let y = 0; y < 512; y += 34) {
+    ctx.fillStyle = "rgba(255,255,255,0.025)";
+    ctx.fillRect(0, y, 512, 1);
   }
 
-  const texture = new CanvasTexture(canvas);
-  texture.wrapS = RepeatWrapping;
-  texture.wrapT = RepeatWrapping;
-  texture.repeat.set(18, 16);
-  return texture;
-}
-
-function createGrassTexture() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#34523d";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let i = 0; i < 1300; i++) {
-    const green = 58 + Math.random() * 52;
-    ctx.strokeStyle = `rgba(${22 + Math.random() * 28}, ${green}, ${34 + Math.random() * 28}, 0.24)`;
+  for (let i = 0; i < 80; i++) {
+    ctx.strokeStyle = `rgba(8, 10, 12, ${0.05 + Math.random() * 0.08})`;
+    ctx.lineWidth = 1 + Math.random() * 2;
     ctx.beginPath();
-    const x = Math.random() * 256;
-    const y = Math.random() * 256;
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
     ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.random() * 8 - 4, y + Math.random() * 8 - 4);
+    ctx.lineTo(x + 40 + Math.random() * 120, y + Math.random() * 10 - 5);
     ctx.stroke();
   }
 
   const texture = new CanvasTexture(canvas);
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
-  texture.repeat.set(34, 30);
+  texture.repeat.set(24, 22);
+  return texture;
+}
+
+function createGrassTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#324f39";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let i = 0; i < 3400; i++) {
+    const green = 52 + Math.random() * 54;
+    ctx.strokeStyle = `rgba(${18 + Math.random() * 26}, ${green}, ${30 + Math.random() * 28}, 0.22)`;
+    ctx.beginPath();
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.random() * 12 - 6, y + Math.random() * 12 - 6);
+    ctx.stroke();
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.repeat.set(42, 38);
+  return texture;
+}
+
+function createPaintedLines(samples: Vector3[], roadWidth: number) {
+  const group = new Group();
+  const edgeMaterial = new MeshStandardMaterial({ color: 0xd7d4c8, roughness: 0.7 });
+  const seamMaterial = new MeshStandardMaterial({ color: 0x1f2227, roughness: 0.88 });
+
+  for (let i = 0; i < samples.length; i += 6) {
+    const previous = samples[(i - 1 + samples.length) % samples.length];
+    const next = samples[(i + 1) % samples.length];
+    const tangent = next.clone().sub(previous).normalize();
+    const normal = new Vector3(-tangent.z, 0, tangent.x);
+    const angle = yawForTangentX(tangent);
+
+    for (const side of [-1, 1]) {
+      const line = new Mesh(new BoxGeometry(2.7, 0.018, 0.12), edgeMaterial);
+      line.position.copy(samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 - 0.72)));
+      line.position.y = 0.085;
+      line.rotation.y = angle;
+      group.add(line);
+    }
+
+    if (i % 18 === 0) {
+      const seam = new Mesh(new BoxGeometry(2.2, 0.012, 0.06), seamMaterial);
+      seam.position.copy(samples[i]);
+      seam.position.y = 0.087;
+      seam.rotation.y = angle;
+      group.add(seam);
+    }
+  }
+
+  return group;
+}
+
+function createRacingLine(samples: Vector3[]) {
+  const group = new Group();
+  const rubberMaterial = new MeshStandardMaterial({ color: 0x171a1e, roughness: 0.92, transparent: true, opacity: 0.5 });
+
+  for (let i = 0; i < samples.length; i += 5) {
+    const previous = samples[(i - 1 + samples.length) % samples.length];
+    const next = samples[(i + 1) % samples.length];
+    const tangent = next.clone().sub(previous).normalize();
+    const angle = yawForTangentX(tangent);
+    const rubber = new Mesh(new BoxGeometry(2.6, 0.014, 2.2), rubberMaterial);
+    rubber.position.copy(samples[i]);
+    rubber.position.y = 0.095;
+    rubber.rotation.y = angle;
+    group.add(rubber);
+  }
+
+  return group;
+}
+
+function createRunoffPatches(track: TrackConfig, samples: Vector3[], roadWidth: number) {
+  const group = new Group();
+  const gravelMaterial = new MeshStandardMaterial({ color: 0x6d6755, map: createGravelTexture(), roughness: 0.98 });
+
+  for (let i = 12; i < samples.length; i += 40) {
+    const previous = samples[(i - 1 + samples.length) % samples.length];
+    const next = samples[(i + 1) % samples.length];
+    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
+
+    const tangent = next.clone().sub(previous).normalize();
+    const normal = new Vector3(-tangent.z, 0, tangent.x);
+    const angle = yawForTangentX(tangent);
+    const side = i % 80 === 12 ? 1 : -1;
+    const runoff = new Mesh(new BoxGeometry(18, 0.02, 8.5), gravelMaterial);
+    runoff.position.copy(samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 + 6.2)));
+    runoff.position.y = 0.005;
+    runoff.rotation.y = angle;
+    runoff.receiveShadow = true;
+    group.add(runoff);
+  }
+
+  return group;
+}
+
+function createGravelTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#6d6755";
+  ctx.fillRect(0, 0, 256, 256);
+
+  for (let i = 0; i < 1800; i++) {
+    const shade = 80 + Math.random() * 62;
+    ctx.fillStyle = `rgba(${shade}, ${shade - 6}, ${shade - 22}, ${0.18 + Math.random() * 0.28})`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 3, 1 + Math.random() * 3);
+  }
+
+  const texture = new CanvasTexture(canvas);
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.repeat.set(5, 3);
   return texture;
 }
 
@@ -215,7 +327,7 @@ function createCurbs(track: TrackConfig, samples: Vector3[], roadWidth: number) 
 
     const tangent = next.clone().sub(previous).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
-    const angle = Math.atan2(tangent.x, tangent.z);
+    const angle = yawForTangentX(tangent);
 
     for (const side of [-1, 1]) {
       const curb = new Mesh(new BoxGeometry(1.85, 0.1, 0.72), (i / 10) % 2 === 0 ? red : white);
@@ -284,7 +396,7 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
 
     const localTangent = next.clone().sub(previous).normalize();
     const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
-    const localAngle = Math.atan2(localTangent.x, localTangent.z);
+    const localAngle = yawForTangentX(localTangent);
 
     for (const side of [-1, 1]) {
       const barrier = new Mesh(new BoxGeometry(5.2, 0.72, 0.38), i % 36 === 4 ? yellowMaterial : barrierMaterial);
@@ -304,7 +416,7 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
 
     const localTangent = next.clone().sub(previous).normalize();
     const localNormal = new Vector3(-localTangent.z, 0, localTangent.x);
-    const localAngle = Math.atan2(localTangent.x, localTangent.z);
+    const localAngle = yawForTangentX(localTangent);
     const side = i % 88 === 14 ? 1 : -1;
 
     const billboard = new Mesh(new BoxGeometry(7.5, 2.1, 0.24), signMaterial);
@@ -354,13 +466,13 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
   const roofMaterial = new MeshStandardMaterial({ color: 0x17202a, roughness: 0.66 });
   const standMaterial = new MeshStandardMaterial({ color: 0x4e5b65, roughness: 0.72, metalness: 0.12 });
   const seatMaterial = new MeshStandardMaterial({ color: 0xb63a3a, roughness: 0.68 });
-  const startMaterial = new MeshStandardMaterial({ color: 0x10151b, roughness: 0.52, metalness: 0.12 });
+  const startMaterial = new MeshStandardMaterial({ color: 0x10151b, roughness: 0.48, metalness: 0.18 });
   const stripeMaterial = new MeshStandardMaterial({ color: 0xf0ede1, roughness: 0.58 });
 
   const start = new Vector3(track.start.x, 0, track.start.z);
   const tangent = samples[2].clone().sub(samples[0]).normalize();
   const normal = new Vector3(-tangent.z, 0, tangent.x);
-  const angle = Math.atan2(tangent.x, tangent.z);
+  const angle = yawForTangentX(tangent);
 
   const pitLane = new Mesh(new BoxGeometry(96, 0.035, 7.4), asphaltMaterial);
   pitLane.position.copy(start.clone().addScaledVector(normal, -(roadWidth / 2 + 8.5)));
@@ -369,9 +481,9 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
   pitLane.receiveShadow = true;
   group.add(pitLane);
 
-  const pitWall = new Mesh(new BoxGeometry(92, 0.82, 0.36), wallMaterial);
-  pitWall.position.copy(start.clone().addScaledVector(normal, -(roadWidth / 2 + 3.9)));
-  pitWall.position.y = 0.43;
+  const pitWall = new Mesh(new BoxGeometry(88, 0.45, 0.28), wallMaterial);
+  pitWall.position.copy(start.clone().addScaledVector(normal, -(roadWidth / 2 + 5.4)));
+  pitWall.position.y = 0.24;
   pitWall.rotation.y = angle;
   pitWall.castShadow = true;
   group.add(pitWall);
@@ -429,12 +541,20 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
   beam.rotation.y = angle + Math.PI / 2;
   gantry.add(beam);
 
-  for (let i = -4; i <= 4; i++) {
-    const grid = new Mesh(new BoxGeometry(2.8, 0.035, 0.5), stripeMaterial);
-    grid.position.copy(start).addScaledVector(tangent, i * 4.2 - 12).addScaledVector(normal, i % 2 === 0 ? -2.2 : 2.2);
-    grid.position.y = 0.08;
-    grid.rotation.y = angle;
-    group.add(grid);
+  for (let side = -1; side <= 1; side += 2) {
+    const startLine = new Mesh(new BoxGeometry(roadWidth * 0.42, 0.035, 0.34), stripeMaterial);
+    startLine.position.copy(start).addScaledVector(normal, side * (roadWidth * 0.23));
+    startLine.position.y = 0.11;
+    startLine.rotation.y = angle + Math.PI / 2;
+    group.add(startLine);
+  }
+
+  for (let i = -3; i <= 3; i++) {
+    const box = new Mesh(new BoxGeometry(1.6, 0.028, 2.2), i % 2 === 0 ? stripeMaterial : startMaterial);
+    box.position.copy(start).addScaledVector(tangent, -10 + i * 2.2).addScaledVector(normal, 0.9);
+    box.position.y = 0.12;
+    box.rotation.y = angle;
+    group.add(box);
   }
 
   group.add(gantry);

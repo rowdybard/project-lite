@@ -33,6 +33,7 @@ type CollisionCircle = {
 
 const carHalfLength = 3.15;
 const carHalfWidth = 1.38;
+const yawForTangentX = (tangent: Vector3) => Math.atan2(-tangent.z, tangent.x);
 
 export function createTrackColliders(track: TrackConfig): TrackColliders {
   const barriers: Barrier[] = [];
@@ -52,7 +53,7 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
 
     const tangent = next.clone().sub(prev).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
-    const angle = Math.atan2(tangent.x, tangent.z);
+    const angle = yawForTangentX(tangent);
 
     for (const side of [-1, 1]) {
       const pos = samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 + 1.7));

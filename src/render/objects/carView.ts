@@ -87,7 +87,7 @@ export function createCarView(scale = 1) {
   let importedWheels: ImportedWheel[] = [];
   let importedReady: Promise<void> = Promise.resolve();
   importedRoot.scale.setScalar(1.15);
-  const paintMaterial = new MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.5, metalness: 0.12 });
+  const paintMaterial = new MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.34, metalness: 0.28 });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });
 
@@ -295,8 +295,8 @@ export function createCarView(scale = 1) {
         const cloned = mat.clone() as MeshStandardMaterial;
         cloned.map = null;
         cloned.color.setHex(paintHex);
-        cloned.roughness = 0.45;
-        cloned.metalness = 0.1;
+        cloned.roughness = 0.36;
+        cloned.metalness = 0.18;
         cloned.needsUpdate = true;
         return cloned;
       });
