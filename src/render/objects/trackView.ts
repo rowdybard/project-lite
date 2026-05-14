@@ -31,11 +31,13 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
     return { coneMeshes: [] };
   }
 
+  const bounds = getTrackBounds(track);
   const grass = new Mesh(
-    new PlaneGeometry(360, 320),
+    new PlaneGeometry(bounds.width, bounds.depth),
     new MeshStandardMaterial({ color: 0x34523d, map: createGrassTexture(), roughness: 0.96 }),
   );
   grass.rotation.x = -Math.PI / 2;
+  grass.position.set(bounds.centerX, -0.02, bounds.centerZ);
   grass.position.y = -0.02;
   grass.receiveShadow = true;
   scene.add(grass);
@@ -90,7 +92,24 @@ function createRoadFromPath(track: TrackConfig) {
   const trackside = createTracksideDepth(track, samples, roadWidth);
   group.add(trackside.group);
   group.add(createTrainingCircuitDressing(track, samples, roadWidth));
+  group.add(createCircuitFacilities(track, samples, roadWidth));
   return { group, coneMeshes: trackside.coneMeshes };
+}
+
+function getTrackBounds(track: TrackConfig) {
+  const points = track.roadPath && track.roadPath.length > 0 ? track.roadPath : [{ x: 0, z: 0 }];
+  const padding = Math.max(85, track.roadWidth * 5 + track.boundaryMargin);
+  const minX = Math.min(...points.map((p) => p.x)) - padding;
+  const maxX = Math.max(...points.map((p) => p.x)) + padding;
+  const minZ = Math.min(...points.map((p) => p.z)) - padding;
+  const maxZ = Math.max(...points.map((p) => p.z)) + padding;
+
+  return {
+    centerX: (minX + maxX) / 2,
+    centerZ: (minZ + maxZ) / 2,
+    width: maxX - minX,
+    depth: maxZ - minZ,
+  };
 }
 
 function createRingRoad(track: TrackConfig) {
@@ -322,5 +341,102 @@ function createTrainingCircuitDressing(track: TrackConfig, samples: Vector3[], r
     lamp.castShadow = true;
     group.add(lamp);
   }
+  return group;
+}
+
+function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWidth: number) {
+  const group = new Group();
+  if (!track.roadPath || track.id !== "harbor-grand-circuit") return group;
+
+  const asphaltMaterial = new MeshStandardMaterial({ color: 0x252a30, roughness: 0.9 });
+  const wallMaterial = new MeshStandardMaterial({ color: 0xc9c8bf, roughness: 0.74 });
+  const glassMaterial = new MeshStandardMaterial({ color: 0x4f6a7d, roughness: 0.36, metalness: 0.08 });
+  const roofMaterial = new MeshStandardMaterial({ color: 0x17202a, roughness: 0.66 });
+  const standMaterial = new MeshStandardMaterial({ color: 0x4e5b65, roughness: 0.72, metalness: 0.12 });
+  const seatMaterial = new MeshStandardMaterial({ color: 0xb63a3a, roughness: 0.68 });
+  const startMaterial = new MeshStandardMaterial({ color: 0x10151b, roughness: 0.52, metalness: 0.12 });
+  const stripeMaterial = new MeshStandardMaterial({ color: 0xf0ede1, roughness: 0.58 });
+
+  const start = new Vector3(track.start.x, 0, track.start.z);
+  const tangent = samples[2].clone().sub(samples[0]).normalize();
+  const normal = new Vector3(-tangent.z, 0, tangent.x);
+  const angle = Math.atan2(tangent.x, tangent.z);
+
+  const pitLane = new Mesh(new BoxGeometry(96, 0.035, 7.4), asphaltMaterial);
+  pitLane.position.copy(start.clone().addScaledVector(normal, -(roadWidth / 2 + 8.5)));
+  pitLane.position.y = 0.045;
+  pitLane.rotation.y = angle;
+  pitLane.receiveShadow = true;
+  group.add(pitLane);
+
+  const pitWall = new Mesh(new BoxGeometry(92, 0.82, 0.36), wallMaterial);
+  pitWall.position.copy(start.clone().addScaledVector(normal, -(roadWidth / 2 + 3.9)));
+  pitWall.position.y = 0.43;
+  pitWall.rotation.y = angle;
+  pitWall.castShadow = true;
+  group.add(pitWall);
+
+  for (let i = -3; i <= 3; i++) {
+    const garage = new Mesh(new BoxGeometry(10, 4.2, 9), roofMaterial);
+    garage.position
+      .copy(start)
+      .addScaledVector(tangent, i * 11.5)
+      .addScaledVector(normal, -(roadWidth / 2 + 17.5));
+    garage.position.y = 2.1;
+    garage.rotation.y = angle;
+    garage.castShadow = true;
+    garage.receiveShadow = true;
+    group.add(garage);
+
+    const door = new Mesh(new BoxGeometry(6.8, 2.3, 0.24), glassMaterial);
+    door.position.copy(garage.position).addScaledVector(normal, 4.62);
+    door.position.y = 1.25;
+    door.rotation.y = angle;
+    group.add(door);
+  }
+
+  for (let i = -2; i <= 2; i++) {
+    const standBase = new Mesh(new BoxGeometry(16, 2.1, 8), standMaterial);
+    standBase.position
+      .copy(start)
+      .addScaledVector(tangent, i * 18)
+      .addScaledVector(normal, roadWidth / 2 + 20);
+    standBase.position.y = 1.05;
+    standBase.rotation.y = angle;
+    standBase.castShadow = true;
+    group.add(standBase);
+
+    for (let row = 0; row < 4; row++) {
+      const seats = new Mesh(new BoxGeometry(14, 0.22, 0.9), seatMaterial);
+      seats.position.copy(standBase.position).addScaledVector(normal, row * 1.35 - 2.6);
+      seats.position.y = 2.35 + row * 0.42;
+      seats.rotation.y = angle;
+      group.add(seats);
+    }
+  }
+
+  const gantry = new Group();
+  for (const side of [-1, 1]) {
+    const post = new Mesh(new BoxGeometry(0.44, 6.2, 0.44), startMaterial);
+    post.position.copy(start.clone().addScaledVector(normal, side * (roadWidth / 2 + 1.3)));
+    post.position.y = 3.1;
+    post.rotation.y = angle;
+    gantry.add(post);
+  }
+  const beam = new Mesh(new BoxGeometry(roadWidth + 4.2, 0.75, 0.58), startMaterial);
+  beam.position.copy(start);
+  beam.position.y = 6.1;
+  beam.rotation.y = angle + Math.PI / 2;
+  gantry.add(beam);
+
+  for (let i = -4; i <= 4; i++) {
+    const grid = new Mesh(new BoxGeometry(2.8, 0.035, 0.5), stripeMaterial);
+    grid.position.copy(start).addScaledVector(tangent, i * 4.2 - 12).addScaledVector(normal, i % 2 === 0 ? -2.2 : 2.2);
+    grid.position.y = 0.08;
+    grid.rotation.y = angle;
+    group.add(grid);
+  }
+
+  group.add(gantry);
   return group;
 }

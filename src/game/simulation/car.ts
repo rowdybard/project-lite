@@ -1,4 +1,5 @@
 import type { CarState, CarTuning, InputState, TrackConfig, Vec2 } from "../types";
+import { getRoadHalfWidth } from "./trackLayout";
 
 const degToRad = Math.PI / 180;
 const radToDeg = 180 / Math.PI;
@@ -7,6 +8,25 @@ const length = (value: Vec2) => Math.hypot(value.x, value.z);
 const lerp = (from: number, to: number, t: number) => from + (to - from) * t;
 const smooth = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
 const signed = (value: number) => (Math.abs(value) < 0.001 ? 0 : Math.sign(value));
+
+function closestTrackPoint(point: Vec2, track: TrackConfig) {
+  if (!track.roadPath || track.roadPath.length < 2) return null;
+
+  let best = { x: track.roadPath[0].x, z: track.roadPath[0].z, distance: Infinity };
+  for (let i = 0; i < track.roadPath.length; i++) {
+    const a = track.roadPath[i];
+    const b = track.roadPath[(i + 1) % track.roadPath.length];
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const lengthSq = abx * abx + abz * abz;
+    const t = lengthSq === 0 ? 0 : clamp(((point.x - a.x) * abx + (point.z - a.z) * abz) / lengthSq, 0, 1);
+    const x = a.x + abx * t;
+    const z = a.z + abz * t;
+    const distance = Math.hypot(point.x - x, point.z - z);
+    if (distance < best.distance) best = { x, z, distance };
+  }
+  return best;
+}
 
 function tireAcceleration(slipAngle: number, stiffness: number, gripLimit: number) {
   return -gripLimit * Math.tanh((stiffness * slipAngle) / Math.max(gripLimit, 0.001));
@@ -301,6 +321,27 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
 }
 
 export function keepCarNearTrack(car: CarState, track: TrackConfig) {
+  const closest = closestTrackPoint(car.position, track);
+  if (closest) {
+    const limit = getRoadHalfWidth(track) + track.boundaryMargin;
+    if (closest.distance < limit) return 0;
+
+    const dx = car.position.x - closest.x;
+    const dz = car.position.z - closest.z;
+    const distance = Math.max(closest.distance, 0.001);
+    const normal = { x: dx / distance, z: dz / distance };
+    car.position.x = closest.x + normal.x * limit;
+    car.position.z = closest.z + normal.z * limit;
+
+    const outwardSpeed = car.velocity.x * normal.x + car.velocity.z * normal.z;
+    if (outwardSpeed > 0) {
+      car.velocity.x -= normal.x * outwardSpeed * 1.35;
+      car.velocity.z -= normal.z * outwardSpeed * 1.35;
+    }
+
+    return Math.min(1, Math.abs(outwardSpeed) / 20);
+  }
+
   const limit = (track.roadPath ? track.roadWidth + 34 : track.roadWidth) + track.boundaryMargin;
   const distance = Math.hypot(car.position.x, car.position.z);
 

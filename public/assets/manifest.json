@@ -1,6 +1,6 @@
 {
   "activeCar": "starter-coupe",
-  "activeTrack": "drift-switchback",
+  "activeTrack": "harbor-grand-circuit",
   "cars": {
     "starter-coupe": {
       "name": "Project Lite Coupe",
@@ -77,6 +77,101 @@
         {
           "x": -70,
           "z": -4
+        }
+      ]
+    },
+    "harbor-grand-circuit": {
+      "id": "harbor-grand-circuit",
+      "name": "Harbor Grand Circuit",
+      "start": {
+        "x": -78,
+        "z": 88,
+        "heading": 1.42
+      },
+      "roadWidth": 17,
+      "boundaryMargin": 36,
+      "roadPath": [
+        {
+          "x": -78,
+          "z": 88
+        },
+        {
+          "x": -20,
+          "z": 96
+        },
+        {
+          "x": 54,
+          "z": 88
+        },
+        {
+          "x": 96,
+          "z": 58
+        },
+        {
+          "x": 112,
+          "z": 8
+        },
+        {
+          "x": 76,
+          "z": -24
+        },
+        {
+          "x": 112,
+          "z": -66
+        },
+        {
+          "x": 60,
+          "z": -102
+        },
+        {
+          "x": 6,
+          "z": -82
+        },
+        {
+          "x": -32,
+          "z": -112
+        },
+        {
+          "x": -98,
+          "z": -88
+        },
+        {
+          "x": -120,
+          "z": -36
+        },
+        {
+          "x": -88,
+          "z": 4
+        },
+        {
+          "x": -118,
+          "z": 44
+        }
+      ],
+      "checkpoints": [
+        {
+          "x": -78,
+          "z": 88
+        },
+        {
+          "x": 78,
+          "z": 72
+        },
+        {
+          "x": 92,
+          "z": -40
+        },
+        {
+          "x": 34,
+          "z": -96
+        },
+        {
+          "x": -104,
+          "z": -64
+        },
+        {
+          "x": -104,
+          "z": 28
         }
       ]
     }
