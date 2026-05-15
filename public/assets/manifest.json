@@ -353,6 +353,145 @@
           "z": -154
         }
       ]
+    },
+    "online-lobby": {
+      "id": "online-lobby",
+      "name": "Online Cruise Lobby",
+      "start": {
+        "x": -112,
+        "z": -8,
+        "heading": 1.45
+      },
+      "roadWidth": 34,
+      "boundaryMargin": 260,
+      "roadPath": [
+        {
+          "x": -340,
+          "z": 18
+        },
+        {
+          "x": -286,
+          "z": 160
+        },
+        {
+          "x": -120,
+          "z": 244
+        },
+        {
+          "x": 82,
+          "z": 252
+        },
+        {
+          "x": 270,
+          "z": 170
+        },
+        {
+          "x": 356,
+          "z": 34
+        },
+        {
+          "x": 322,
+          "z": -126
+        },
+        {
+          "x": 166,
+          "z": -248
+        },
+        {
+          "x": -58,
+          "z": -270
+        },
+        {
+          "x": -256,
+          "z": -194
+        },
+        {
+          "x": -376,
+          "z": -72
+        }
+      ],
+      "practiceAreas": [
+        {
+          "type": "rect",
+          "x": 0,
+          "z": 0,
+          "width": 250,
+          "depth": 160,
+          "heading": 0
+        },
+        {
+          "type": "rect",
+          "x": -172,
+          "z": 62,
+          "width": 176,
+          "depth": 62,
+          "heading": 0.28
+        },
+        {
+          "type": "rect",
+          "x": 176,
+          "z": -54,
+          "width": 188,
+          "depth": 68,
+          "heading": -0.24
+        },
+        {
+          "type": "rect",
+          "x": 10,
+          "z": -164,
+          "width": 220,
+          "depth": 54,
+          "heading": 0.02
+        },
+        {
+          "type": "circle",
+          "x": 182,
+          "z": 124,
+          "radius": 58
+        },
+        {
+          "type": "circle",
+          "x": -208,
+          "z": -126,
+          "radius": 54
+        }
+      ],
+      "portals": [
+        {
+          "id": "portal-drift-attack",
+          "label": "Drift Attack",
+          "mode": "drift-attack",
+          "x": -42,
+          "z": 68,
+          "radius": 13,
+          "heading": 0,
+          "color": 15845211
+        },
+        {
+          "id": "portal-practice-grounds",
+          "label": "Practice Grounds",
+          "mode": "free-drive",
+          "x": 58,
+          "z": 68,
+          "radius": 13,
+          "heading": 0,
+          "color": 6871295
+        }
+      ],
+      "checkpoints": [
+        {
+          "x": -112,
+          "z": -8
+        },
+        {
+          "x": 58,
+          "z": 68
+        },
+        {
+          "x": -42,
+          "z": 68
+        }
+      ]
     }
   }
 }

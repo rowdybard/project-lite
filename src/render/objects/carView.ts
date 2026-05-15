@@ -1,4 +1,13 @@
-import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, PointLight } from "three";
+import {
+  BoxGeometry,
+  CircleGeometry,
+  CylinderGeometry,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PointLight,
+} from "three";
 import { paintColors, underglowColors, wheelColors, type CarCustomization } from "../../game/customization";
 import type { CarState } from "../../game/types";
 import { createImportedCarModel, getAttachments, isImportedCar, type ImportedCarAttachments, type ImportedCarModel, type ImportedWheel } from "./importedCars";
@@ -65,11 +74,28 @@ const setVisible = (visible: boolean, ...objects: (Mesh | Group)[]) => {
   for (const object of objects) object.visible = visible;
 };
 
+function prepPaintMaterial(material: MeshStandardMaterial, paintHex: number) {
+  material.color.setHex(paintHex);
+  material.map = null;
+  material.roughness = 0.48;
+  material.metalness = 0.18;
+  material.envMapIntensity = 0.48;
+  material.needsUpdate = true;
+}
+
 export function createCarView(scale = 1) {
   const root = new Group();
   root.scale.setScalar(scale);
   const bodyGroup = new Group();
   root.add(bodyGroup);
+  const contactShadow = new Mesh(
+    new CircleGeometry(1, 36),
+    new MeshBasicMaterial({ color: 0x050607, transparent: true, opacity: 0.34, depthWrite: false }),
+  );
+  contactShadow.rotation.x = -Math.PI / 2;
+  contactShadow.position.y = 0.14;
+  contactShadow.scale.set(1.25, 2.75, 1);
+  root.add(contactShadow);
 
   const frontWheelPivots: Group[] = [];
   const frontWheelMeshes: Mesh[] = [];
@@ -87,7 +113,12 @@ export function createCarView(scale = 1) {
   let importedWheels: ImportedWheel[] = [];
   let importedReady: Promise<void> = Promise.resolve();
   importedRoot.scale.setScalar(1.15);
-  const paintMaterial = new MeshStandardMaterial({ color: 0xbfc3be, roughness: 0.44, metalness: 0.22 });
+  const paintMaterial = new MeshStandardMaterial({
+    color: 0xbfc3be,
+    roughness: 0.48,
+    metalness: 0.18,
+    envMapIntensity: 0.48,
+  });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });
 
@@ -113,9 +144,9 @@ export function createCarView(scale = 1) {
 
   const hatchRoof = addBodyPart(new Mesh(new BoxGeometry(1, 1, 1), paintMaterial));
 
-  const headlightMaterial = new MeshStandardMaterial({ color: 0xf4efe0, emissive: 0x332816, roughness: 0.4 });
-  const tailMaterial = new MeshStandardMaterial({ color: 0xb42732, emissive: 0x2c0507, roughness: 0.45 });
-  const glassMaterial = new MeshStandardMaterial({ color: 0x111923, roughness: 0.28, metalness: 0.04 });
+  const headlightMaterial = new MeshStandardMaterial({ color: 0xfff2d0, emissive: 0xffd98a, emissiveIntensity: 1.45, roughness: 0.28 });
+  const tailMaterial = new MeshStandardMaterial({ color: 0xb42732, emissive: 0x2c0507, emissiveIntensity: 0.45, roughness: 0.45 });
+  const glassMaterial = new MeshStandardMaterial({ color: 0x111923, roughness: 0.24, metalness: 0.08, envMapIntensity: 0.42 });
   const cutlineMaterial = new MeshStandardMaterial({ color: 0x0a0d12, roughness: 0.72 });
   const leftHeadlight = new Mesh(new BoxGeometry(0.54, 0.08, 0.06), headlightMaterial);
   leftHeadlight.position.set(-0.55, 0.64, 2.43);
@@ -126,6 +157,27 @@ export function createCarView(scale = 1) {
   const rightTail = leftTail.clone();
   rightTail.position.x = 0.56;
   bodyGroup.add(leftHeadlight, rightHeadlight, leftTail, rightTail);
+
+  const lightRig = new Group();
+  root.add(lightRig);
+  const headGlowMaterial = new MeshStandardMaterial({
+    color: 0xfff4cf,
+    emissive: 0xffe1a2,
+    emissiveIntensity: 1.5,
+    roughness: 0.22,
+  });
+  const brakeGlowMaterial = new MeshBasicMaterial({
+    color: 0xb42732,
+    transparent: true,
+    opacity: 0.36,
+    depthWrite: false,
+  });
+  const rigHeadLeft = new Mesh(new BoxGeometry(0.46, 0.08, 0.055), headGlowMaterial);
+  const rigHeadRight = rigHeadLeft.clone();
+  const rigBrakeLeft = new Mesh(new BoxGeometry(0.66, 0.14, 0.06), brakeGlowMaterial);
+  const rigBrakeRight = rigBrakeLeft.clone();
+  const rigBrakeCenter = new Mesh(new BoxGeometry(0.72, 0.075, 0.055), brakeGlowMaterial);
+  lightRig.add(rigHeadLeft, rigHeadRight, rigBrakeLeft, rigBrakeRight, rigBrakeCenter);
 
   const windshield = new Mesh(new BoxGeometry(1.16, 0.08, 0.5), glassMaterial);
   const rearGlass = new Mesh(new BoxGeometry(1.16, 0.08, 0.48), glassMaterial);
@@ -245,6 +297,12 @@ export function createCarView(scale = 1) {
     underglowLeft,
     underglowRight,
   );
+  customParts.traverse((child) => {
+    if (child instanceof Mesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
 
   function repositionKit(att: ImportedCarAttachments) {
     ducktail.position.set(0, att.rearDeckY, att.rearDeckZ);
@@ -280,11 +338,28 @@ export function createCarView(scale = 1) {
     underglowRight.position.set(att.underglowX, 0.16, 0);
   }
 
+  function positionLightRig(width: number, frontZ: number, rearZ: number, headY: number, tailY: number) {
+    const headX = Math.min(width * 0.32, 0.78);
+    const tailX = Math.min(width * 0.34, 0.82);
+    rigHeadLeft.position.set(-headX, headY, frontZ);
+    rigHeadRight.position.set(headX, headY, frontZ);
+    rigBrakeLeft.position.set(-tailX, tailY, rearZ);
+    rigBrakeRight.position.set(tailX, tailY, rearZ);
+    rigBrakeCenter.position.set(0, tailY + 0.23, rearZ + 0.015);
+    contactShadow.scale.set(width * 0.72, Math.max(2.2, Math.abs(frontZ - rearZ) * 0.58), 1);
+  }
+
+  function updateBrakeLights(brakeAxis: number) {
+    const braking = Math.max(0, Math.min(1, brakeAxis));
+    tailMaterial.emissive.setHex(braking > 0.04 ? 0xff151c : 0x2c0507);
+    tailMaterial.emissiveIntensity = 0.35 + braking * 2.2;
+    brakeGlowMaterial.color.setHex(braking > 0.04 ? 0xff151c : 0xb42732);
+    brakeGlowMaterial.opacity = 0.32 + braking * 0.68;
+  }
+
   function applyImportedCustomization(customization: CarCustomization, model: ImportedCarModel) {
     const paintHex = paintColors[customization.paint] ?? paintColors.silver;
     const wheelHex = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
-
-    console.log(`[carView] Applying paint 0x${paintHex.toString(16)} to ${model.bodyMeshes.length} body meshes`);
 
     for (const mesh of model.bodyMeshes) {
       const indices = model.bodyMaterialIndices.get(mesh) ?? [];
@@ -293,10 +368,7 @@ export function createCarView(scale = 1) {
         if (!indices.includes(i)) return m;
         const mat = m as MeshStandardMaterial;
         const cloned = mat.clone() as MeshStandardMaterial;
-        cloned.map = null;
-        cloned.color.setHex(paintHex);
-        cloned.roughness = 0.46;
-        cloned.metalness = 0.16;
+        prepPaintMaterial(cloned, paintHex);
         cloned.needsUpdate = true;
         return cloned;
       });
@@ -327,6 +399,7 @@ export function createCarView(scale = 1) {
 
     const att = getAttachments(customization.selectedCar);
     repositionKit(att);
+    positionLightRig(att.bodyWidth, att.frontBumperZ + 0.28, att.rearDeckZ - 0.3, att.frontBumperY + 0.42, Math.max(0.62, att.rearDeckY - 0.36));
 
     hide(ducktail, streetWing, gtWing, streetLip, splitter, streetSkirtL, streetSkirtR, wideSkirtL, wideSkirtR);
     if (customization.spoiler === "ducktail") ducktail.visible = true;
@@ -363,6 +436,12 @@ export function createCarView(scale = 1) {
       importedReady = createImportedCarModel(importId).then((model) => {
         if (!model || activeImportedCarId !== importId) return;
         importedRoot.add(model.root);
+        model.root.traverse((child) => {
+          if (child instanceof Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
         importedWheels = model.wheels;
         applyImportedCustomization(customization, model);
       });
@@ -385,7 +464,7 @@ export function createCarView(scale = 1) {
     const profile = carProfiles[(customization.selectedCar as CarProfileId) in carProfiles ? (customization.selectedCar as CarProfileId) : "lite-coupe"];
     const paint = paintColors[customization.paint] ?? paintColors.silver;
     const wheel = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
-    paintMaterial.color.setHex(paint);
+    prepPaintMaterial(paintMaterial, paint);
     wheelSideMaterial.color.setHex(wheel);
     for (const part of bodyParts) part.material = paintMaterial;
     for (const rim of rimParts) rim.material = wheelSideMaterial;
@@ -436,6 +515,7 @@ export function createCarView(scale = 1) {
     rightTail.position.set(sedan ? 0.68 : 0.56, 0.62, profile.rearBumperZ - 0.25);
     sedanGrille.position.set(0, 0.55, profile.frontBumperZ + 0.26);
     coupeNoseVent.position.set(0, 0.66, profile.frontBumperZ + 0.26);
+    positionLightRig(profile.body.width, profile.frontBumperZ + 0.26, profile.rearBumperZ - 0.26, 0.65, 0.63);
 
     for (let index = 0; index < suspensionPivots.length; index += 1) {
       const wheelPosition = wheelPositions[index];
@@ -487,10 +567,14 @@ export function createCarView(scale = 1) {
     sync(car: CarState) {
       root.position.set(car.position.x, 0, car.position.z);
       root.rotation.y = car.heading;
+      updateBrakeLights(car.brakeAxis);
       if (activeImportedCarId) {
         importedRoot.position.y = -stanceDrop;
         importedRoot.rotation.x = car.bodyPitch * 0.055;
         importedRoot.rotation.z = -car.bodyRoll * 0.055;
+        lightRig.position.y = importedRoot.position.y;
+        lightRig.rotation.x = importedRoot.rotation.x;
+        lightRig.rotation.z = importedRoot.rotation.z;
 
         for (const wheel of importedWheels) {
           const corner: WheelCorner = wheel.front
@@ -514,6 +598,9 @@ export function createCarView(scale = 1) {
       bodyGroup.position.y = 0.02 - stanceDrop + Math.abs(car.bodyPitch) * 0.006 + Math.abs(car.bodyRoll) * 0.004;
       bodyGroup.rotation.x = car.bodyPitch * 0.06;
       bodyGroup.rotation.z = -car.bodyRoll * 0.07;
+      lightRig.position.y = bodyGroup.position.y;
+      lightRig.rotation.x = bodyGroup.rotation.x;
+      lightRig.rotation.z = bodyGroup.rotation.z;
 
       const compressionByCorner: Record<WheelCorner, number> = {
         fl: car.suspensionFL,

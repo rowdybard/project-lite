@@ -3,6 +3,7 @@ import type { InputState } from "../types";
 const keys = new Set<string>();
 let debugPressed = false;
 let resetPressed = false;
+let confirmPressed = false;
 let menuPressed = false;
 let zoneNextPressed = false;
 let handbrakePulseUntil = 0;
@@ -12,6 +13,7 @@ const handbrakeKeys = new Set(["Space", "ShiftLeft", "ShiftRight", "KeyE"]);
 // Gamepad state
 let cameraOrbit = 0;
 let padHandbrakePulseUntil = 0;
+let padConfirmWasPressed = false;
 
 function deadzone(value: number, threshold = 0.12): number {
   if (Math.abs(value) < threshold) return 0;
@@ -36,11 +38,12 @@ export function bindInput(): () => void {
 
     if (event.code === "KeyT") debugPressed = true;
     if (event.code === "KeyR") resetPressed = true;
+    if (event.code === "Enter") confirmPressed = true;
     if (event.code === "KeyC") zoneNextPressed = true;
     if (event.code === "Escape") menuPressed = true;
 
     if (
-      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "ShiftLeft", "ShiftRight", "KeyE", "Escape"].includes(
+      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "ShiftLeft", "ShiftRight", "KeyE", "Enter", "Escape"].includes(
         event.code,
       )
     ) {
@@ -65,10 +68,12 @@ export function resetInputState() {
   keys.clear();
   debugPressed = false;
   resetPressed = false;
+  confirmPressed = false;
   menuPressed = false;
   zoneNextPressed = false;
   handbrakePulseUntil = 0;
   padHandbrakePulseUntil = 0;
+  padConfirmWasPressed = false;
   cameraOrbit = 0;
 }
 
@@ -81,6 +86,7 @@ export function readInput(): InputState {
   let steerLeft = keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0;
   let steerRight = keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0;
   let handbrake = [...handbrakeKeys].some((code) => keys.has(code)) || handbrakePulseUntil > now;
+  let confirm = confirmPressed;
 
   // --- Gamepad ---
   const pad = getGamepad();
@@ -115,10 +121,15 @@ export function readInput(): InputState {
       handbrake = handbrake || bButton.pressed || padHandbrakePulseUntil > now;
     }
 
+    const aPressed = pad.buttons[0]?.pressed ?? false;
+    if (aPressed && !padConfirmWasPressed) confirm = true;
+    padConfirmWasPressed = aPressed;
+
     // Start (index 9) → back to menu
     if (pad.buttons[9]?.pressed) menuPressed = true;
   } else {
     cameraOrbit = 0;
+    padConfirmWasPressed = false;
   }
 
   const state: InputState = {
@@ -127,6 +138,7 @@ export function readInput(): InputState {
     steer: steerLeft - steerRight,
     handbrake,
     reset: resetPressed,
+    confirm,
     zoneNext: zoneNextPressed,
     debug: debugPressed,
     menu: menuPressed,
@@ -134,6 +146,7 @@ export function readInput(): InputState {
 
   debugPressed = false;
   resetPressed = false;
+  confirmPressed = false;
   zoneNextPressed = false;
   menuPressed = false;
   return state;

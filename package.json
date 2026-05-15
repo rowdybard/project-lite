@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "online:dev": "wrangler dev",
+    "online:deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260515.1",
     "typescript": "~6.0.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "wrangler": "^4.92.0"
   },
   "dependencies": {
     "@types/three": "^0.184.1",

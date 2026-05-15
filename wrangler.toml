@@ -1,0 +1,13 @@
+name = "project-lite-online"
+main = "worker/index.ts"
+compatibility_date = "2026-05-15"
+
+[durable_objects]
+bindings = [
+  { name = "DRIFT_ROOMS", class_name = "DriftRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DriftRoom"]
+

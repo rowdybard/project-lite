@@ -40,6 +40,11 @@ export type CarTuning = {
   slideDrag: number;
   handbrakeDrag: number;
   yawDamping: number;
+  wheelbaseScale?: number;
+  trackWidthScale?: number;
+  massScale?: number;
+  collisionLength?: number;
+  collisionWidth?: number;
 };
 
 export type CarState = {
@@ -84,6 +89,7 @@ export type InputState = {
   steer: number;
   handbrake: boolean;
   reset: boolean;
+  confirm: boolean;
   zoneNext: boolean;
   debug: boolean;
   menu: boolean;
@@ -102,6 +108,16 @@ export type TrackConfig = {
   practiceAreas?: Array<
     | (Vec2 & { type: "rect"; width: number; depth: number; heading?: number })
     | (Vec2 & { type: "circle"; radius: number })
+  >;
+  portals?: Array<
+    Vec2 & {
+      id: string;
+      label: string;
+      mode: "drift-attack" | "free-drive";
+      radius: number;
+      heading?: number;
+      color?: number;
+    }
   >;
 };
 

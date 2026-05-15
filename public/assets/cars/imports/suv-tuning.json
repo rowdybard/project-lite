@@ -34,5 +34,10 @@
   "driftDrag": 0.006,
   "slideDrag": 0.021,
   "handbrakeDrag": 0.94,
-  "yawDamping": 1.18
+  "yawDamping": 1.18,
+  "wheelbaseScale": 1.08,
+  "trackWidthScale": 1.08,
+  "massScale": 1.14,
+  "collisionLength": 5.45,
+  "collisionWidth": 2.2
 }

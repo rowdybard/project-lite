@@ -7,10 +7,12 @@ import {
   type CustomizationSlot,
   type ModeId,
 } from "../game/customization";
+import type { PlayerProfile } from "../net/profile";
 
 type GarageUiCallbacks = {
   onCustomizationChange: (slot: CustomizationSlot, value: string) => void;
   onModeChange: (mode: ModeId) => void;
+  onProfileChange: (profile: PlayerProfile) => void;
   onStart: () => void;
 };
 
@@ -29,7 +31,7 @@ function optionButton(option: { id: string; label: string; color?: number; disab
 const tabCategoryIds = new Set(["paint", "wheelColor", "stance", "spoiler", "tuningPreset", "decals"]);
 const bodySlotIds: CustomizationSlot[] = ["spoiler", "frontLip", "sideSkirts", "underglow"];
 
-export function createGarageUi(customization: CarCustomization, callbacks: GarageUiCallbacks) {
+export function createGarageUi(customization: CarCustomization, profile: PlayerProfile, callbacks: GarageUiCallbacks) {
   const root = document.createElement("div");
   root.className = "garage-ui";
   document.body.append(root);
@@ -49,6 +51,10 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
         <p>Project Lite</p>
         <h1>Garage</h1>
         <span>Build, tune, launch</span>
+        <label class="garage-profile">
+          <small>Driver</small>
+          <input data-profile-name maxlength="18" value="${profile.name}" />
+        </label>
       </header>
       <aside class="garage-mode">
         <p class="garage-kicker">Event</p>
@@ -164,14 +170,19 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
     const startButton = root.querySelector(".garage-start")!;
     startButton.addEventListener("pointerdown", requestStart);
     startButton.addEventListener("click", requestStart);
+
+    const profileName = root.querySelector<HTMLInputElement>("[data-profile-name]")!;
+    profileName.addEventListener("change", () => callbacks.onProfileChange({ name: profileName.value }));
+    profileName.addEventListener("blur", () => callbacks.onProfileChange({ name: profileName.value }));
   }
 
   render();
 
   return {
     root,
-    update(next: CarCustomization) {
+    update(next: CarCustomization, nextProfile = profile) {
       Object.assign(customization, next);
+      Object.assign(profile, nextProfile);
       render();
     },
     show() {

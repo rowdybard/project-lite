@@ -1,6 +1,6 @@
 import type { CarTuning } from "./types";
 
-export type ModeId = "drift-attack" | "free-drive" | "drag-race" | "lap-race";
+export type ModeId = "online-lobby" | "drift-attack" | "free-drive" | "drag-race" | "lap-race";
 export type CustomizationSlot =
   | "selectedCar"
   | "paint"
@@ -82,11 +82,16 @@ export const carTuningPaths: Record<string, string> = {
 };
 
 export const modeOptions: CustomizationOption[] = [
+  { id: "online-lobby", label: "Online" },
   { id: "drift-attack", label: "Drift Attack" },
   { id: "free-drive", label: "Practice Grounds" },
   { id: "drag-race", label: "Drag Race", disabled: true },
   { id: "lap-race", label: "Lap Race", disabled: true },
 ];
+
+export function isPlayableMode(mode: string): mode is ModeId {
+  return mode === "online-lobby" || mode === "drift-attack" || mode === "free-drive";
+}
 
 export const customizationCategories: CustomizationCategory[] = [
   {
@@ -200,7 +205,7 @@ export function loadCustomization(): CarCustomization {
     try {
       const g = JSON.parse(global);
       if (g.selectedCar && allSelectableCarOptions.some((o) => o.id === g.selectedCar)) selectedCar = g.selectedCar;
-      if (g.selectedMode) selectedMode = g.selectedMode;
+      if (g.selectedMode && isPlayableMode(g.selectedMode)) selectedMode = g.selectedMode;
     } catch { /* ignore */ }
   }
   const perCar = window.localStorage.getItem(storageKeyPrefix + selectedCar);
@@ -234,12 +239,17 @@ export function applyTuningPreset(base: CarTuning, preset: string): CarTuning {
   const tuning: CarTuning = { ...base, gearRatios: [...base.gearRatios] };
 
   if (preset === "grip") {
-    tuning.frontGrip *= 1.05;
-    tuning.rearGrip *= 1.03;
-    tuning.throttleGripLoss *= 0.9;
-    tuning.counterSteerAssist *= 0.92;
-    tuning.slideDrag *= 1.05;
-    tuning.yawDamping *= 1.08;
+    tuning.frontGrip *= 1.18;
+    tuning.rearGrip *= 1.22;
+    tuning.handbrakeRearGrip *= 1.12;
+    tuning.frontCorneringStiffness *= 1.1;
+    tuning.rearCorneringStiffness *= 1.12;
+    tuning.throttleGripLoss *= 0.62;
+    tuning.counterSteerAssist *= 1.18;
+    tuning.slideDrag *= 1.16;
+    tuning.driftDrag *= 1.08;
+    tuning.yawDamping *= 1.22;
+    tuning.yawInertia *= 1.08;
   }
 
   if (preset === "drift") {
@@ -251,6 +261,15 @@ export function applyTuningPreset(base: CarTuning, preset: string): CarTuning {
     tuning.counterSteerAssist *= 0.94;
     tuning.slideDrag *= 1.02;
     tuning.yawDamping *= 0.9;
+  }
+
+  if (preset === "balanced") {
+    tuning.frontGrip *= 1.06;
+    tuning.rearGrip *= 1.04;
+    tuning.counterSteerAssist *= 1.08;
+    tuning.slideDrag *= 1.06;
+    tuning.yawDamping *= 1.1;
+    tuning.yawInertia *= 1.05;
   }
 
   return tuning;

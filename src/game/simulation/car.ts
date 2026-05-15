@@ -150,6 +150,15 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   car.frontWheelAngle = car.steerAxis * effectiveMaxSteer * steerLimit;
 
   const maxGear = tuning.gearRatios.length;
+  car.gear = Math.max(1, Math.min(maxGear, Math.round(car.gear)));
+  const absForwardSpeed = Math.abs(forwardSpeed);
+  const brakingToStop = car.brakeAxis > 0.38 && forwardSpeed > -0.2;
+  const crawling = absForwardSpeed < 2.8;
+  const parking = absForwardSpeed < 1.45;
+  if (parking && car.gear !== 1) {
+    car.gear = 1;
+    car.shiftCooldown = Math.min(car.shiftCooldown, 0.04);
+  }
   const currentRatio = tuning.gearRatios[car.gear - 1] ?? tuning.gearRatios[0];
   const wheelRpm = (Math.abs(forwardSpeed) / (2 * Math.PI * tuning.wheelRadius)) * 60;
   const coupledRpm = wheelRpm * currentRatio * tuning.finalDrive;
@@ -176,6 +185,22 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const inertiaRate = clutchEngaged ? lerp(4.5, 9, 1 - clutchSlip) : 22;
   car.rpm = lerp(car.rpm, rpmTarget, smooth(inertiaRate, dt));
 
+  const rpmForGear = (gear: number) => wheelRpm * (tuning.gearRatios[gear - 1] ?? tuning.gearRatios[0]) * tuning.finalDrive;
+  const applyShift = (nextGear: number, cooldown: number, rpmCeiling = tuning.redlineRpm * 0.96) => {
+    const clampedGear = Math.max(1, Math.min(maxGear, Math.round(nextGear)));
+    if (clampedGear === car.gear) return;
+    car.gear = clampedGear;
+    car.shiftCooldown = cooldown;
+    car.rpm = clamp(rpmForGear(car.gear), tuning.idleRpm, rpmCeiling);
+  };
+  if (parking && car.gear !== 1) {
+    applyShift(1, 0.04);
+  } else if (crawling && car.gear > 1 && (brakingToStop || car.throttleAxis < 0.35)) {
+    applyShift(1, 0.07);
+  } else if (absForwardSpeed < 5.5 && car.gear > 2 && (brakingToStop || car.throttleAxis < 0.2)) {
+    applyShift(2, 0.08);
+  }
+
   if (car.shiftCooldown <= 0) {
     const nextRatio = tuning.gearRatios[car.gear] ?? 0;
     const previousRatio = tuning.gearRatios[car.gear - 2] ?? 0;
@@ -185,38 +210,51 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
       car.throttleAxis > 0.42 &&
       Math.abs(forwardSpeed) > tuning.driftMinSpeed + 2 &&
       (car.driftAmount > 0.2 || car.rearSlipVisual > 0.22 || car.slipAngle > 10);
-    const slideDownshiftWindow = car.gear <= 3 ? 750 : 1200;
+    const slideDownshiftWindow = car.gear <= 3 ? 900 : 1300;
     const slideDownshift =
       slidePowerDemand &&
       car.gear > 1 &&
       previousGearRpm < tuning.redlineRpm * 0.93 &&
       car.rpm < tuning.shiftDownRpm + slideDownshiftWindow;
-    const holdGearInSlide = slidePowerDemand && car.rpm < tuning.shiftUpRpm - 250;
+    const holdGearInSlide = slidePowerDemand && car.rpm < tuning.shiftUpRpm - 150;
+    const highLoadUpshift =
+      car.gear >= 3 &&
+      car.throttleAxis > 0.62 &&
+      car.rpm > tuning.shiftUpRpm * 0.91 &&
+      nextGearRpm > tuning.shiftDownRpm * 0.92;
 
     // Upshift when RPM hits shift point and next gear stays above stall
     const shouldUpshift =
-      !holdGearInSlide && car.rpm > tuning.shiftUpRpm && car.gear < maxGear && nextGearRpm > tuning.shiftDownRpm * 0.48;
+      !holdGearInSlide &&
+      !brakingToStop &&
+      (car.rpm > tuning.shiftUpRpm || highLoadUpshift) &&
+      car.gear < maxGear &&
+      nextGearRpm > tuning.shiftDownRpm * 0.52;
 
     // Kickdown: full throttle demands lower gear for acceleration
     const shouldKickdown =
       car.throttleAxis > 0.78 &&
       car.gear > 1 &&
       previousGearRpm < tuning.redlineRpm * 0.96 &&
-      car.rpm < tuning.shiftDownRpm + 1200;
+      car.rpm < tuning.shiftDownRpm + 1050;
 
     // Downshift when lugging or kickdown requested
     const shouldDownshift =
-      car.gear > 1 && Math.abs(forwardSpeed) > 2.0 && (car.rpm < tuning.shiftDownRpm || shouldKickdown || slideDownshift);
+      car.gear > 1 &&
+      (absForwardSpeed > 2.0 || brakingToStop || crawling) &&
+      previousGearRpm < tuning.redlineRpm * 0.96 &&
+      (car.rpm < tuning.shiftDownRpm * (brakingToStop ? 1.12 : 1) || shouldKickdown || slideDownshift);
 
     if (shouldUpshift) {
-      car.gear += 1;
-      car.shiftCooldown = slidePowerDemand ? 0.15 : 0.22;
-      // RPM drops to match new gear ratio — clutch re-engagement thud
-      car.rpm = clamp(nextGearRpm, tuning.idleRpm, tuning.redlineRpm * 0.88);
+      applyShift(car.gear + 1, slidePowerDemand ? 0.13 : 0.2, tuning.redlineRpm * 0.88);
     } else if (shouldDownshift) {
-      car.gear -= 1;
-      car.shiftCooldown = shouldKickdown || slideDownshift ? 0.13 : 0.19;
-      car.rpm = clamp(previousGearRpm, tuning.idleRpm, tuning.redlineRpm);
+      const doubleKickdown =
+        shouldKickdown &&
+        !slideDownshift &&
+        car.gear > 2 &&
+        rpmForGear(car.gear - 2) < tuning.redlineRpm * 0.94 &&
+        rpmForGear(car.gear - 2) > tuning.shiftDownRpm * 0.8;
+      applyShift(car.gear - (doubleKickdown ? 2 : 1), shouldKickdown || slideDownshift ? 0.11 : 0.15, tuning.redlineRpm);
     }
   }
 

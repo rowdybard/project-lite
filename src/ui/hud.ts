@@ -76,13 +76,22 @@ export function createHud() {
     setCarName(name: string) {
       root.querySelector("[data-car-name]")!.textContent = name;
     },
-    setMode(mode: "drift-attack" | "free-drive") {
+    setMode(mode: "online-lobby" | "drift-attack" | "free-drive") {
       root.classList.toggle("is-free-drive", mode === "free-drive");
+      root.classList.toggle("is-online-lobby", mode === "online-lobby");
       root.querySelector("[data-hint]")!.textContent =
-        mode === "free-drive" ? "R reset zone - C next zone - Esc garage" : "R restart";
+        mode === "online-lobby"
+          ? "Drive onto a trailer - Enter load - R reset - Esc garage"
+          : mode === "free-drive"
+            ? "R reset zone - C next zone - Esc garage"
+            : "R restart";
     },
     setPracticeZone(label: string) {
       root.querySelector("[data-time-label]")!.textContent = "Zone";
+      root.querySelector("[data-time]")!.textContent = label;
+    },
+    setOnlineStatus(label: string) {
+      root.querySelector("[data-time-label]")!.textContent = "Online";
       root.querySelector("[data-time]")!.textContent = label;
     },
   };

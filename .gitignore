@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Windsurf browser preview temp profiles
+.chrome-test-*/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

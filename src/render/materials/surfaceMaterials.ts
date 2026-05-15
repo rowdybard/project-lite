@@ -60,16 +60,21 @@ function createPbrMaterial({
   const material = new MeshStandardMaterial({
     color,
     map: loadTexture(texturePath(id, "Color"), repeat, true),
-    normalMap: loadTexture(texturePath(id, "NormalGL"), repeat),
     roughnessMap: loadTexture(texturePath(id, "Roughness"), repeat),
-    aoMap: id === "RoadLines001" || id === "Rubber003" ? undefined : loadTexture(texturePath(id, "AmbientOcclusion"), repeat),
-    aoMapIntensity: aoIntensity,
     roughness,
     metalness,
     transparent: opacity < 1,
     opacity,
   });
-  material.normalScale = new Vector2(normalScale, normalScale);
+  if (normalScale > 0) {
+    material.normalMap = loadTexture(texturePath(id, "NormalGL"), repeat);
+    material.normalScale = new Vector2(normalScale, normalScale);
+  }
+  const useAo = aoIntensity > 0 && id !== "RoadLines001" && id !== "Rubber003";
+  if (useAo) {
+    material.aoMap = loadTexture(texturePath(id, "AmbientOcclusion"), repeat);
+    material.aoMapIntensity = aoIntensity;
+  }
   return material;
 }
 
@@ -124,12 +129,12 @@ export function createGrassMaterial(repeat: SurfaceRepeat = { x: 48, y: 42 }) {
   const material = createPbrMaterial({
     id: "Grass001",
     repeat,
-    color: 0x394a34,
+    color: 0x5f7442,
     roughness: 1,
-    normalScale: 0.18,
-    aoIntensity: 0.72,
+    normalScale: 0,
+    aoIntensity: 0,
   });
-  material.envMapIntensity = 0.04;
+  material.envMapIntensity = 0.02;
   return material;
 }
 
@@ -139,8 +144,8 @@ export function createGravelMaterial(repeat: SurfaceRepeat = { x: 5, y: 4 }) {
     repeat,
     color: 0x736d5c,
     roughness: 0.98,
-    normalScale: 0.66,
-    aoIntensity: 0.5,
+    normalScale: 0,
+    aoIntensity: 0,
   });
 }
 
@@ -150,8 +155,8 @@ export function createConcreteMaterial(repeat: SurfaceRepeat = { x: 4, y: 3 }) {
     repeat,
     color: 0xb9b6a9,
     roughness: 0.9,
-    normalScale: 0.38,
-    aoIntensity: 0.52,
+    normalScale: 0,
+    aoIntensity: 0,
   });
 }
 
@@ -161,7 +166,7 @@ export function createRoadPaintMaterial(repeat: SurfaceRepeat = { x: 1, y: 1 }, 
     repeat,
     color: tint,
     roughness: 0.86,
-    normalScale: 0.2,
+    normalScale: 0,
     opacity,
   });
 }
@@ -172,7 +177,7 @@ export function createRubberMaterial(repeat: SurfaceRepeat = { x: 6, y: 2 }, opa
     repeat,
     color: 0x0d0f10,
     roughness: 0.94,
-    normalScale: 0.34,
+    normalScale: 0,
     opacity,
   });
 }

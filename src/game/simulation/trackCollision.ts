@@ -1,5 +1,5 @@
 import { CatmullRomCurve3, Vector3 } from "three";
-import type { CarState, TrackConfig } from "../types";
+import type { CarState, CarTuning, TrackConfig } from "../types";
 import { getRoadWidth, isTracksideClearZone } from "./trackLayout";
 
 export type Barrier = {
@@ -31,9 +31,8 @@ type CollisionCircle = {
   radius: number;
 };
 
-const carHalfLength = 3.15;
-const carHalfWidth = 1.38;
-const yawForTangentX = (tangent: Vector3) => Math.atan2(-tangent.z, tangent.x);
+const defaultCarHalfLength = 3.15;
+const defaultCarHalfWidth = 1.38;
 
 export function createTrackColliders(track: TrackConfig): TrackColliders {
   const barriers: Barrier[] = [];
@@ -45,27 +44,6 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
   const curve = new CatmullRomCurve3(points, true, "catmullrom", 0.48);
   const samples = curve.getPoints(240);
   const roadWidth = getRoadWidth(track);
-
-  for (let i = 4; i < samples.length; i += 18) {
-    const prev = samples[(i - 1 + samples.length) % samples.length];
-    const next = samples[(i + 1) % samples.length];
-    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
-
-    const tangent = next.clone().sub(prev).normalize();
-    const normal = new Vector3(-tangent.z, 0, tangent.x);
-    const angle = yawForTangentX(tangent);
-
-    for (const side of [-1, 1]) {
-      const pos = samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 + 1.7));
-      barriers.push({
-        x: pos.x,
-        z: pos.z,
-        angle,
-        halfLength: 2.6,
-        halfWidth: 0.22,
-      });
-    }
-  }
 
   for (let i = 6; i < samples.length; i += 24) {
     const prev = samples[(i - 1 + samples.length) % samples.length];
@@ -92,9 +70,11 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
   return { barriers, cones };
 }
 
-function getCarCollisionCircles(car: CarState): CollisionCircle[] {
+function getCarCollisionCircles(car: CarState, tuning?: CarTuning): CollisionCircle[] {
   const forwardX = Math.sin(car.heading);
   const forwardZ = Math.cos(car.heading);
+  const carHalfLength = Math.max(2.35, (tuning?.collisionLength ?? defaultCarHalfLength * 2) / 2);
+  const carHalfWidth = Math.max(1.08, (tuning?.collisionWidth ?? defaultCarHalfWidth * 2) / 2);
   const bumperOffset = carHalfLength * 0.7;
 
   return [
@@ -171,9 +151,9 @@ function resolveBarrierCircle(car: CarState, barrier: Barrier, circle: Collision
   }
 }
 
-export function updateTrackCollision(car: CarState, colliders: TrackColliders, dt: number) {
+export function updateTrackCollision(car: CarState, colliders: TrackColliders, dt: number, tuning?: CarTuning) {
   for (const barrier of colliders.barriers) {
-    for (const circle of getCarCollisionCircles(car)) {
+    for (const circle of getCarCollisionCircles(car, tuning)) {
       resolveBarrierCircle(car, barrier, circle);
     }
   }
@@ -182,7 +162,7 @@ export function updateTrackCollision(car: CarState, colliders: TrackColliders, d
     let bestCircle: CollisionCircle | null = null;
     let bestDistance = Infinity;
 
-    for (const circle of getCarCollisionCircles(car)) {
+    for (const circle of getCarCollisionCircles(car, tuning)) {
       const distance = Math.hypot(circle.x - cone.x, circle.z - cone.z);
       if (distance < bestDistance) {
         bestDistance = distance;
