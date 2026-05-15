@@ -2,6 +2,8 @@ import type { CarState, DriftState } from "../game/types";
 
 const formatScore = (value: number) => Math.round(value).toLocaleString("en-US");
 const formatTime = (seconds: number) => `${seconds.toFixed(1)}s`;
+const forwardSpeed = (car: CarState) =>
+  car.velocity.x * Math.sin(car.heading) + car.velocity.z * Math.cos(car.heading);
 
 export function createHud() {
   const root = document.createElement("div");
@@ -42,7 +44,8 @@ export function createHud() {
     root,
     update(car: CarState, drift: DriftState) {
       root.querySelector("[data-speed]")!.textContent = Math.round(car.speed * 2.237).toString();
-      root.querySelector("[data-gear]")!.textContent = car.gear.toString();
+      root.querySelector("[data-gear]")!.textContent =
+        car.reverseEngageTimer > 0.48 || forwardSpeed(car) < -0.5 ? "R" : car.gear.toString();
       root.querySelector("[data-rpm]")!.textContent = Math.round(car.rpm).toString();
       (root.querySelector("[data-rpm-bar]") as HTMLElement).style.transform = `scaleX(${Math.min(1, car.rpm / 6900)})`;
       root.querySelector("[data-surface]")!.textContent = drift.onTrack ? "Track" : "Off";

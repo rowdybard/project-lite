@@ -93,12 +93,12 @@ export const customizationCategories: CustomizationCategory[] = [
     id: "paint",
     label: "Paint",
     options: [
-      { id: "silver", label: "Silver", color: 0xd9dde2 },
-      { id: "red", label: "Red", color: 0x9b2430 },
-      { id: "blue", label: "Blue", color: 0x24558f },
+      { id: "silver", label: "Silver", color: 0xbfc3be },
+      { id: "red", label: "Red", color: 0x7f2429 },
+      { id: "blue", label: "Blue", color: 0x244b74 },
       { id: "black", label: "Black", color: 0x11151b },
-      { id: "green", label: "Green", color: 0x2e6b49 },
-      { id: "purple", label: "Purple", color: 0x5f3f8d },
+      { id: "green", label: "Green", color: 0x315c43 },
+      { id: "purple", label: "Purple", color: 0x514078 },
     ],
   },
   {
@@ -235,20 +235,22 @@ export function applyTuningPreset(base: CarTuning, preset: string): CarTuning {
 
   if (preset === "grip") {
     tuning.frontGrip *= 1.05;
-    tuning.rearGrip *= 1.08;
-    tuning.throttleGripLoss *= 0.82;
+    tuning.rearGrip *= 1.03;
+    tuning.throttleGripLoss *= 0.9;
     tuning.counterSteerAssist *= 0.92;
     tuning.slideDrag *= 1.05;
     tuning.yawDamping *= 1.08;
   }
 
   if (preset === "drift") {
-    tuning.rearGrip *= 0.94;
-    tuning.handbrakeRearGrip *= 0.92;
-    tuning.throttleGripLoss *= 1.1;
-    tuning.counterSteerAssist *= 1.06;
-    tuning.slideDrag *= 0.96;
-    tuning.yawDamping *= 0.94;
+    tuning.maxSteerAngle *= 1.03;
+    tuning.steeringAtSpeed *= 1.04;
+    tuning.rearGrip *= 0.88;
+    tuning.handbrakeRearGrip *= 0.82;
+    tuning.throttleGripLoss *= 1.18;
+    tuning.counterSteerAssist *= 0.94;
+    tuning.slideDrag *= 1.02;
+    tuning.yawDamping *= 0.9;
   }
 
   return tuning;

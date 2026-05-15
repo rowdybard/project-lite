@@ -76,7 +76,9 @@ export function finishDriftRun(state: DriftState) {
 export function updateDriftScore(state: DriftState, car: CarState, dt: number, onTrack: boolean, zoneIndex: number) {
   const speedMph = car.speed * mph;
   const angle = car.slipAngle;
-  const isScoring = onTrack && speedMph > 14 && angle > 6 && car.driftAmount > 0.18;
+  const rearSlip = Math.abs(car.rearSlipAngle);
+  const slipQuality = Math.min(Math.max(angle - 4, 0), Math.max(rearSlip - 6, 0) * 1.25);
+  const isScoring = onTrack && speedMph > 18 && angle > 7.5 && rearSlip > 8 && car.driftAmount > 0.24;
 
   state.calloutTimer = Math.max(0, state.calloutTimer - dt);
   state.onTrack = onTrack;
@@ -105,9 +107,10 @@ export function updateDriftScore(state: DriftState, car: CarState, dt: number, o
       state.calloutTimer = 1.1;
     }
 
-    const angleScore = Math.min(angle, 58);
+    const angleScore = Math.min(slipQuality, 58);
     const speedScore = Math.min(speedMph, 95);
-    const rate = speedScore * angleScore * 0.42 * state.multiplier;
+    const throttleBonus = 0.86 + car.throttleAxis * 0.28;
+    const rate = speedScore * angleScore * 0.38 * throttleBonus * state.multiplier;
     state.comboScore += rate * dt;
     state.bestCombo = Math.max(state.bestCombo, state.comboScore);
 
