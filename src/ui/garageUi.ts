@@ -37,6 +37,12 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
   let activeCategory: CustomizationCategory = customizationCategories[0];
   let activeBodySlot: CustomizationSlot = "spoiler";
 
+  const requestStart = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    callbacks.onStart();
+  };
+
   function render() {
     root.innerHTML = `
       <header class="garage-header">
@@ -155,7 +161,9 @@ export function createGarageUi(customization: CarCustomization, callbacks: Garag
       options.append(soon);
     }
 
-    root.querySelector(".garage-start")!.addEventListener("click", callbacks.onStart);
+    const startButton = root.querySelector(".garage-start")!;
+    startButton.addEventListener("pointerdown", requestStart);
+    startButton.addEventListener("click", requestStart);
   }
 
   render();

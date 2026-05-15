@@ -11,7 +11,7 @@ import {
   type ModeId,
 } from "./game/customization";
 import { loadJson, loadManifest } from "./game/content/manifest";
-import { bindInput, readInput, getCameraOrbit } from "./game/input/inputMap";
+import { bindInput, readInput, getCameraOrbit, resetInputState } from "./game/input/inputMap";
 import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
@@ -91,8 +91,9 @@ async function boot() {
     carView.applyAttachments(att);
     garageView.carView.applyAttachments(att);
   });
-  if (isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
   const runLength = 90;
+  const attachmentTunerEnabled = new URLSearchParams(window.location.search).has("kitTuner");
+  if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
   let appState: AppState = "garage";
   let activeMode: ModeId = customization.selectedMode;
   let sessionTime = runLength;
@@ -129,30 +130,40 @@ async function boot() {
   };
 
   const showGarage = () => {
+    resetInputState();
     appState = "garage";
     results.hide();
     hud.root.hidden = true;
+    garageUi.update(customization);
     garageUi.show();
     garageView.applyCustomization(customization);
-    if (isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
+    if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
     else attachmentTuner.hide();
   };
 
+  let startEventPending = false;
   const startEvent = async () => {
+    if (startEventPending) return;
     if (customization.selectedMode === "drag-race" || customization.selectedMode === "lap-race") return;
+    startEventPending = true;
+    resetInputState();
     activeMode = customization.selectedMode;
-    await switchTrack(getTrackForMode(activeMode));
-    baseTuning = await loadCarTuning(customization.selectedCar);
-    activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
-    appState = "event";
-    results.hide();
-    hud.root.hidden = false;
-    garageUi.hide();
-    attachmentTuner.hide();
-    resetEvent();
-    setHudCarName();
-    hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");
-    canvas.focus();
+    try {
+      await switchTrack(getTrackForMode(activeMode));
+      baseTuning = await loadCarTuning(customization.selectedCar);
+      activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
+      appState = "event";
+      results.hide();
+      hud.root.hidden = false;
+      garageUi.hide();
+      attachmentTuner.hide();
+      resetEvent();
+      setHudCarName();
+      hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");
+      canvas.focus();
+    } finally {
+      startEventPending = false;
+    }
   };
 
   const finishRun = () => {
@@ -178,7 +189,7 @@ async function boot() {
       garageUi.update(customization);
       garageView.applyCustomization(customization);
       carView.applyCustomization(customization);
-      if (isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
+      if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
       else attachmentTuner.hide();
     },
     onModeChange(mode) {

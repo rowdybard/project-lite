@@ -1,6 +1,6 @@
 {
-  "maxForwardSpeed": 52,
-  "maxReverseSpeed": 12,
+  "maxForwardSpeed": 62.6,
+  "maxReverseSpeed": 16.5,
   "acceleration": 36,
   "brakeForce": 52,
   "reverseAcceleration": 18,
@@ -16,7 +16,7 @@
   "finalDrive": 4.08,
   "wheelRadius": 0.38,
   "engineTorque": 1.05,
-  "gearRatios": [3.32, 2.05, 1.46, 1.12, 0.86],
+  "gearRatios": [3.32, 2.32, 1.72, 1.37, 1.13, 1.05],
   "maxSteerAngle": 49,
   "frontAxle": 1.24,
   "rearAxle": 1.42,
@@ -33,6 +33,6 @@
   "driftMinSpeed": 6,
   "driftDrag": 0.005,
   "slideDrag": 0.017,
-  "handbrakeDrag": 0.74,
+  "handbrakeDrag": 0.9,
   "yawDamping": 1.12
 }

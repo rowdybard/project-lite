@@ -61,6 +61,17 @@ export function bindInput(): () => void {
   };
 }
 
+export function resetInputState() {
+  keys.clear();
+  debugPressed = false;
+  resetPressed = false;
+  menuPressed = false;
+  zoneNextPressed = false;
+  handbrakePulseUntil = 0;
+  padHandbrakePulseUntil = 0;
+  cameraOrbit = 0;
+}
+
 export function readInput(): InputState {
   const now = performance.now();
 
