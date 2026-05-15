@@ -34,16 +34,19 @@ import {
 } from "../materials/surfaceMaterials";
 
 export type TrackViewResult = {
+  root: Object3D;
   coneMeshes: Mesh[];
 };
 
 const yawForTangentX = (tangent: Vector3) => Math.atan2(-tangent.z, tangent.x);
 
 export async function createTrackView(scene: Scene, track: TrackConfig): Promise<TrackViewResult> {
+  const root = new Group();
   const imported = await loadGltf(track.model);
   if (imported) {
-    scene.add(imported);
-    return { coneMeshes: [] };
+    root.add(imported);
+    scene.add(root);
+    return { root, coneMeshes: [] };
   }
 
   const bounds = getTrackBounds(track);
@@ -60,15 +63,17 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
   grass.position.set(bounds.centerX, -0.02, bounds.centerZ);
   grass.position.y = -0.02;
   grass.receiveShadow = true;
-  scene.add(grass);
+  root.add(grass);
 
   if (track.roadPath && track.roadPath.length >= 4) {
     const { group, coneMeshes } = createRoadFromPath(track, bounds);
-    scene.add(group);
-    return { coneMeshes };
+    root.add(group);
+    scene.add(root);
+    return { root, coneMeshes };
   } else {
-    scene.add(createRingRoad(track));
-    return { coneMeshes: [] };
+    root.add(createRingRoad(track));
+    scene.add(root);
+    return { root, coneMeshes: [] };
   }
 
 }
@@ -96,12 +101,78 @@ function createRoadFromPath(track: TrackConfig, bounds: TrackBounds) {
   group.add(createPaintedLines(samples, roadWidth));
   group.add(createRacingLine(samples));
   group.add(createRunoffPatches(track, samples, roadWidth));
+  group.add(createPracticeAreas(track));
   group.add(createCurbs(track, samples, roadWidth));
   const trackside = createTracksideDepth(track, samples, roadWidth);
   group.add(trackside.group);
   group.add(createTrainingCircuitDressing(track, samples, roadWidth));
   group.add(createCircuitFacilities(track, samples, roadWidth));
   return { group, coneMeshes: trackside.coneMeshes };
+}
+
+function createPracticeAreas(track: TrackConfig) {
+  const group = new Group();
+  if (!track.practiceAreas) return group;
+
+  const asphaltMaterial = createAsphaltMaterial({ x: 10, y: 5 });
+  const paintMaterial = createRoadPaintMaterial({ x: 1, y: 1 }, 0xd8d2bf, 0.68);
+  const rubberMaterial = createRubberMaterial({ x: 3, y: 2 }, 0.34);
+  const coneMaterial = new MeshStandardMaterial({ color: 0xe68a2e, roughness: 0.72 });
+
+  for (const area of track.practiceAreas) {
+    const heading = area.type === "rect" ? area.heading ?? 0 : 0;
+    const pad =
+      area.type === "circle"
+        ? new Mesh(new CylinderGeometry(area.radius, area.radius, 0.035, 96), asphaltMaterial)
+        : new Mesh(new BoxGeometry(area.width, 0.035, area.depth), asphaltMaterial);
+    pad.position.set(area.x, 0.048, area.z);
+    pad.rotation.y = heading;
+    pad.receiveShadow = true;
+    group.add(pad);
+
+    if (area.type === "circle") {
+      for (const radius of [area.radius * 0.48, area.radius * 0.82]) {
+        const ring = new Mesh(new RingGeometry(radius - 0.18, radius + 0.18, 96), paintMaterial);
+        ring.position.set(area.x, 0.082, area.z);
+        ring.rotation.x = -Math.PI / 2;
+        group.add(ring);
+      }
+    } else {
+      const outline = [
+        { x: 0, z: area.depth / 2 },
+        { x: 0, z: -area.depth / 2 },
+      ];
+      for (const edge of outline) {
+        const line = new Mesh(new BoxGeometry(area.width, 0.018, 0.22), paintMaterial);
+        line.position.set(area.x, 0.084, area.z);
+        line.rotation.y = heading;
+        line.translateZ(edge.z);
+        group.add(line);
+      }
+      for (let i = -2; i <= 2; i++) {
+        const mark = new Mesh(new BoxGeometry(5.5, 0.014, 2.2), rubberMaterial);
+        mark.position.set(area.x, 0.086, area.z);
+        mark.rotation.y = heading + i * 0.08;
+        mark.translateX(i * 8.5);
+        group.add(mark);
+      }
+    }
+  }
+
+  const gymkhana = track.practiceZones?.find((zone) => zone.id === "gymkhana");
+  if (gymkhana) {
+    for (let row = -2; row <= 2; row++) {
+      for (let col = -3; col <= 3; col++) {
+        if ((row + col) % 2 !== 0) continue;
+        const cone = new Mesh(new CylinderGeometry(0.14, 0.36, 0.78, 12), coneMaterial);
+        cone.position.set(gymkhana.x + col * 9, 0.39, gymkhana.z + row * 8);
+        cone.castShadow = true;
+        group.add(cone);
+      }
+    }
+  }
+
+  return group;
 }
 
 function createRoadGeometry(samples: Vector3[], roadWidth: number) {

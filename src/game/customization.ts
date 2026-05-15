@@ -83,7 +83,7 @@ export const carTuningPaths: Record<string, string> = {
 
 export const modeOptions: CustomizationOption[] = [
   { id: "drift-attack", label: "Drift Attack" },
-  { id: "free-drive", label: "Free Drive" },
+  { id: "free-drive", label: "Practice Grounds" },
   { id: "drag-race", label: "Drag Race", disabled: true },
   { id: "lap-race", label: "Lap Race", disabled: true },
 ];

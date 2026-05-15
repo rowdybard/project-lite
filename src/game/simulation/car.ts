@@ -91,10 +91,10 @@ export function createCarState(track: TrackConfig): CarState {
   };
 }
 
-export function resetCar(car: CarState, track: TrackConfig) {
-  car.position.x = track.start.x;
-  car.position.z = track.start.z;
-  car.heading = track.start.heading;
+export function resetCar(car: CarState, track: TrackConfig, spawn: TrackConfig["start"] = track.start) {
+  car.position.x = spawn.x;
+  car.position.z = spawn.z;
+  car.heading = spawn.heading;
   car.velocity.x = 0;
   car.velocity.z = 0;
   car.speed = 0;

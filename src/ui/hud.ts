@@ -11,11 +11,13 @@ export function createHud() {
   root.innerHTML = `
     <div class="hud__strip">
       <span>Car <strong data-car-name>Lite Coupe</strong></span>
-      <span>Time <strong data-time>90.0s</strong></span>
+      <span><em data-time-label>Time</em> <strong data-time>90.0s</strong></span>
       <span>Surface <strong data-surface>Track</strong></span>
       <span>Grip <strong data-grip>100%</strong></span>
       <span>Heat <strong data-heat>0%</strong></span>
       <span>Load <strong data-load>50F/50R</strong></span>
+      <span>Angle <strong data-angle>0 deg</strong></span>
+      <span>Rear Slip <strong data-rear-slip>0 deg</strong></span>
     </div>
     <div class="drift-score">
       <div class="drift-score__label">Drift score</div>
@@ -36,7 +38,7 @@ export function createHud() {
       <div class="speedometer__rpm-text"><strong data-rpm>850</strong> rpm</div>
       <div class="speedometer__tach"><span data-rpm-bar></span></div>
     </div>
-    <div class="hud__hint">R restart</div>
+    <div class="hud__hint" data-hint>R restart</div>
   `;
   document.body.append(root);
 
@@ -53,6 +55,8 @@ export function createHud() {
       root.querySelector("[data-heat]")!.textContent = `${Math.round(car.tireHeat * 100)}%`;
       root.querySelector("[data-load]")!.textContent =
         `${Math.round(car.weightForward * 100)}F/${Math.round((1 - car.weightForward) * 100)}R`;
+      root.querySelector("[data-angle]")!.textContent = `${Math.round(car.slipAngle)} deg`;
+      root.querySelector("[data-rear-slip]")!.textContent = `${Math.round(Math.abs(car.rearSlipAngle))} deg`;
       root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore + drift.comboScore);
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
       root.querySelector("[data-multiplier]")!.textContent = `x${drift.multiplier.toFixed(1)}`;
@@ -64,6 +68,7 @@ export function createHud() {
       callout.hidden = drift.calloutTimer <= 0 && !drift.active;
     },
     updateTimer(secondsRemaining: number) {
+      root.querySelector("[data-time-label]")!.textContent = "Time";
       root.querySelector("[data-time]")!.textContent = Number.isFinite(secondsRemaining)
         ? `${Math.max(0, secondsRemaining).toFixed(1)}s`
         : "Free";
@@ -73,6 +78,12 @@ export function createHud() {
     },
     setMode(mode: "drift-attack" | "free-drive") {
       root.classList.toggle("is-free-drive", mode === "free-drive");
+      root.querySelector("[data-hint]")!.textContent =
+        mode === "free-drive" ? "R reset zone - C next zone - Esc garage" : "R restart";
+    },
+    setPracticeZone(label: string) {
+      root.querySelector("[data-time-label]")!.textContent = "Zone";
+      root.querySelector("[data-time]")!.textContent = label;
     },
   };
 }

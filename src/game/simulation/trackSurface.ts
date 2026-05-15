@@ -13,7 +13,30 @@ const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2) => {
   return Math.hypot(point.x - closestX, point.z - closestZ);
 };
 
+function isInPracticeArea(point: Vec2, track: TrackConfig) {
+  if (!track.practiceAreas) return false;
+
+  for (const area of track.practiceAreas) {
+    if (area.type === "circle") {
+      if (Math.hypot(point.x - area.x, point.z - area.z) <= area.radius) return true;
+      continue;
+    }
+
+    const heading = area.heading ?? 0;
+    const dx = point.x - area.x;
+    const dz = point.z - area.z;
+    const cos = Math.cos(heading);
+    const sin = Math.sin(heading);
+    const localX = dx * cos + dz * sin;
+    const localZ = -dx * sin + dz * cos;
+    if (Math.abs(localX) <= area.width / 2 && Math.abs(localZ) <= area.depth / 2) return true;
+  }
+
+  return false;
+}
+
 export function isOnTrack(point: Vec2, track: TrackConfig) {
+  if (isInPracticeArea(point, track)) return true;
   return getTrackDistance(point, track) <= getRoadHalfWidth(track) + 2.5;
 }
 

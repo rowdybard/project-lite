@@ -61,9 +61,9 @@ canvas {
   grid-column: 1;
   align-self: start;
   display: grid;
-  grid-template-columns: repeat(6, minmax(72px, 1fr));
+  grid-template-columns: repeat(8, minmax(70px, 1fr));
   gap: 8px;
-  width: min(100%, 740px);
+  width: min(100%, 980px);
   padding: 10px;
   border-radius: 3px;
   font-size: 12px;
@@ -206,6 +206,10 @@ canvas {
 .hud__strip strong {
   color: #fff6d8;
   font-variant-numeric: tabular-nums;
+}
+
+.hud__strip em {
+  font-style: normal;
 }
 
 .hud__hint {

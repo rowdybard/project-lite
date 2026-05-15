@@ -84,6 +84,7 @@ export type InputState = {
   steer: number;
   handbrake: boolean;
   reset: boolean;
+  zoneNext: boolean;
   debug: boolean;
   menu: boolean;
 };
@@ -97,6 +98,11 @@ export type TrackConfig = {
   roadPath?: Vec2[];
   roadWidth: number;
   boundaryMargin: number;
+  practiceZones?: Array<Vec2 & { id: string; label: string; heading: number }>;
+  practiceAreas?: Array<
+    | (Vec2 & { type: "rect"; width: number; depth: number; heading?: number })
+    | (Vec2 & { type: "circle"; radius: number })
+  >;
 };
 
 export type RaceState = {

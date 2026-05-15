@@ -4,6 +4,7 @@ const keys = new Set<string>();
 let debugPressed = false;
 let resetPressed = false;
 let menuPressed = false;
+let zoneNextPressed = false;
 let handbrakePulseUntil = 0;
 
 const handbrakeKeys = new Set(["Space", "ShiftLeft", "ShiftRight", "KeyE"]);
@@ -35,9 +36,11 @@ export function bindInput(): () => void {
 
     if (event.code === "KeyT") debugPressed = true;
     if (event.code === "KeyR") resetPressed = true;
+    if (event.code === "KeyC") zoneNextPressed = true;
+    if (event.code === "Escape") menuPressed = true;
 
     if (
-      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "ShiftLeft", "ShiftRight", "KeyE"].includes(
+      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "ShiftLeft", "ShiftRight", "KeyE", "Escape"].includes(
         event.code,
       )
     ) {
@@ -113,12 +116,14 @@ export function readInput(): InputState {
     steer: steerLeft - steerRight,
     handbrake,
     reset: resetPressed,
+    zoneNext: zoneNextPressed,
     debug: debugPressed,
     menu: menuPressed,
   };
 
   debugPressed = false;
   resetPressed = false;
+  zoneNextPressed = false;
   menuPressed = false;
   return state;
 }

@@ -16,6 +16,7 @@ import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/si
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
 import type { CarTuning } from "./game/types";
+import type { TrackConfig } from "./game/types";
 import { createCamera, updateChaseCamera } from "./render/app/camera";
 import { createRenderer } from "./render/app/createRenderer";
 import { createScene } from "./render/app/createScene";
@@ -51,7 +52,8 @@ async function boot() {
 
   const manifest = await loadManifest();
   const carEntry = manifest.cars[manifest.activeCar];
-  const track = manifest.tracks[manifest.activeTrack];
+  const driftTrack = manifest.tracks[manifest.activeTrack];
+  const practiceTrack = manifest.tracks["practice-grounds"] ?? driftTrack;
   const tuningCache = new Map<string, CarTuning>();
   async function loadCarTuning(carId: string): Promise<CarTuning> {
     const cached = tuningCache.get(carId);
@@ -65,16 +67,17 @@ async function boot() {
   let baseTuning = await loadCarTuning(customization.selectedCar);
   let activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
 
-  const trackView = await createTrackView(gameScene, track);
-  const colliders = createTrackColliders(track);
-  const coneMeshes = trackView.coneMeshes;
+  let activeTrack: TrackConfig = driftTrack;
+  let trackView = await createTrackView(gameScene, activeTrack);
+  let colliders = createTrackColliders(activeTrack);
+  let coneMeshes = trackView.coneMeshes;
   const carView = createCarView((carEntry.scale ?? 1) * eventCarScale);
   carView.applyCustomization(customization);
   const tireTracks = createTireTracks();
   const tireSmoke = createTireSmoke();
   gameScene.add(tireTracks.root, tireSmoke.root, carView.root);
 
-  const car = createCarState(track);
+  const car = createCarState(activeTrack);
   const drift = createDriftState();
   const hud = createHud();
   const setHudCarName = () => {
@@ -95,9 +98,27 @@ async function boot() {
   let sessionTime = runLength;
   let cameraShake = 0;
   let runoffTime = 0;
+  let practiceZoneIndex = 0;
+
+  const getTrackForMode = (mode: ModeId) => (mode === "free-drive" ? practiceTrack : driftTrack);
+
+  const getPracticeSpawn = () => {
+    if (activeMode !== "free-drive") return activeTrack.start;
+    return activeTrack.practiceZones?.[practiceZoneIndex] ?? activeTrack.start;
+  };
+
+  const switchTrack = async (nextTrack: TrackConfig) => {
+    if (activeTrack.id === nextTrack.id) return;
+    gameScene.remove(trackView.root);
+    activeTrack = nextTrack;
+    trackView = await createTrackView(gameScene, activeTrack);
+    colliders = createTrackColliders(activeTrack);
+    coneMeshes = trackView.coneMeshes;
+    practiceZoneIndex = 0;
+  };
 
   const resetEvent = () => {
-    resetCar(car, track);
+    resetCar(car, activeTrack, getPracticeSpawn());
     resetDrift(drift);
     tireTracks.reset();
     tireSmoke.reset();
@@ -120,6 +141,7 @@ async function boot() {
   const startEvent = async () => {
     if (customization.selectedMode === "drag-race" || customization.selectedMode === "lap-race") return;
     activeMode = customization.selectedMode;
+    await switchTrack(getTrackForMode(activeMode));
     baseTuning = await loadCarTuning(customization.selectedCar);
     activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
     appState = "event";
@@ -206,6 +228,10 @@ async function boot() {
   function updateEvent(dt: number) {
     const input = readInput();
 
+    if (input.zoneNext && activeMode === "free-drive" && activeTrack.practiceZones?.length) {
+      practiceZoneIndex = (practiceZoneIndex + 1) % activeTrack.practiceZones.length;
+      resetEvent();
+    }
     if (input.reset) resetEvent();
     if (input.menu) { showGarage(); return; }
 
@@ -220,22 +246,22 @@ async function boot() {
 
     const substeps = Math.max(1, Math.ceil(dt / (1 / 120)));
     for (let i = 0; i < substeps; i++) {
-      updateCar(car, input, activeTuning, dt / substeps, isOnTrack(car.position, track));
+      updateCar(car, input, activeTuning, dt / substeps, isOnTrack(car.position, activeTrack));
     }
 
-    const onTrack = isOnTrack(car.position, track);
-    const inRunoff = isInRunoff(car.position, track);
+    const onTrack = isOnTrack(car.position, activeTrack);
+    const inRunoff = isInRunoff(car.position, activeTrack);
     if (onTrack) runoffTime = 0;
     else if (inRunoff) runoffTime += dt;
     else runoffTime = 999;
 
     const scoringSurface = onTrack || (inRunoff && runoffTime <= 1.15);
-    const impact = keepCarNearTrack(car, track);
+    const impact = keepCarNearTrack(car, activeTrack);
     if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
     if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
 
     if (activeMode === "drift-attack") {
-      updateDriftScore(drift, car, dt, scoringSurface, getDriftZone(car.position, track));
+      updateDriftScore(drift, car, dt, scoringSurface, getDriftZone(car.position, activeTrack));
     }
 
     updateTrackCollision(car, colliders, dt);
@@ -248,6 +274,9 @@ async function boot() {
     updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit());
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
+    if (activeMode === "free-drive") {
+      hud.setPracticeZone(activeTrack.practiceZones?.[practiceZoneIndex]?.label ?? "Practice");
+    }
     hud.root.hidden = false;
     renderer.render(gameScene, gameCamera);
   }

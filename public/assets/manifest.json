@@ -174,6 +174,185 @@
           "z": 28
         }
       ]
+    },
+    "practice-grounds": {
+      "id": "practice-grounds",
+      "name": "Practice Grounds",
+      "start": {
+        "x": -176,
+        "z": 22,
+        "heading": 1.55
+      },
+      "roadWidth": 20,
+      "boundaryMargin": 170,
+      "roadPath": [
+        {
+          "x": -176,
+          "z": 22
+        },
+        {
+          "x": -108,
+          "z": 28
+        },
+        {
+          "x": -36,
+          "z": 18
+        },
+        {
+          "x": 34,
+          "z": 52
+        },
+        {
+          "x": 112,
+          "z": 92
+        },
+        {
+          "x": 196,
+          "z": 78
+        },
+        {
+          "x": 248,
+          "z": 18
+        },
+        {
+          "x": 218,
+          "z": -66
+        },
+        {
+          "x": 132,
+          "z": -106
+        },
+        {
+          "x": 42,
+          "z": -88
+        },
+        {
+          "x": -14,
+          "z": -132
+        },
+        {
+          "x": -96,
+          "z": -118
+        },
+        {
+          "x": -164,
+          "z": -72
+        },
+        {
+          "x": -218,
+          "z": -24
+        }
+      ],
+      "practiceZones": [
+        {
+          "id": "start",
+          "label": "Start Pad",
+          "x": -176,
+          "z": 22,
+          "heading": 1.55
+        },
+        {
+          "id": "skidpad",
+          "label": "Skidpad",
+          "x": -122,
+          "z": 112,
+          "heading": 0.6
+        },
+        {
+          "id": "figure-eight",
+          "label": "Figure Eight",
+          "x": 34,
+          "z": -6,
+          "heading": 0.05
+        },
+        {
+          "id": "sweeper",
+          "label": "Long Sweeper",
+          "x": 164,
+          "z": 86,
+          "heading": 1.95
+        },
+        {
+          "id": "straight",
+          "label": "Shift Straight",
+          "x": -214,
+          "z": -78,
+          "heading": 1.48
+        },
+        {
+          "id": "gymkhana",
+          "label": "Gymkhana Lot",
+          "x": 132,
+          "z": -154,
+          "heading": -0.35
+        }
+      ],
+      "practiceAreas": [
+        {
+          "type": "circle",
+          "x": -122,
+          "z": 112,
+          "radius": 46
+        },
+        {
+          "type": "rect",
+          "x": 34,
+          "z": -6,
+          "width": 92,
+          "depth": 58,
+          "heading": 0
+        },
+        {
+          "type": "rect",
+          "x": -214,
+          "z": -78,
+          "width": 130,
+          "depth": 24,
+          "heading": 1.48
+        },
+        {
+          "type": "rect",
+          "x": 132,
+          "z": -154,
+          "width": 96,
+          "depth": 62,
+          "heading": -0.12
+        },
+        {
+          "type": "rect",
+          "x": 164,
+          "z": 86,
+          "width": 92,
+          "depth": 40,
+          "heading": 0.35
+        }
+      ],
+      "checkpoints": [
+        {
+          "x": -176,
+          "z": 22
+        },
+        {
+          "x": -122,
+          "z": 112
+        },
+        {
+          "x": 34,
+          "z": -6
+        },
+        {
+          "x": 164,
+          "z": 86
+        },
+        {
+          "x": -214,
+          "z": -78
+        },
+        {
+          "x": 132,
+          "z": -154
+        }
+      ]
     }
   }
 }
