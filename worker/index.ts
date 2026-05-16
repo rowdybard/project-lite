@@ -62,9 +62,9 @@ function scoreInput(session: PlayerSession, input: OnlineInputTelemetry, dt: num
   if (phase !== "racing" || session.player.finished) return;
 
   session.player.pose = input.pose;
-  // Trust client-provided scores instead of recalculating from telemetry
-  session.player.score = input.totalScore;
-  session.player.combo = input.comboScore;
+  // Client sends true total score in score field, just store it directly
+  session.player.score = input.score;
+  session.player.combo = input.combo;
   session.player.multiplier = input.multiplier;
 }
 
@@ -226,6 +226,10 @@ export class DriftRoom {
     if (this.phase === "finished") return;
     this.phase = "finished";
     for (const session of this.sessions.values()) {
+      if (session.player.combo > 0) {
+        session.player.score += session.player.combo;
+        session.player.combo = 0;
+      }
       session.player.finished = true;
     }
     this.broadcast({ type: "match_end", room: this.roomState() });

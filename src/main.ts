@@ -427,7 +427,7 @@ async function boot() {
     onlineMatchUi.hideQueue();
     clearActiveQueuePad();
     const local = room.players.find((player) => player.id === onlinePlayerId);
-    results.show(local ? local.score + local.combo : finishDriftRun(drift), drift.bestCombo, drift.bestRun);
+    results.show(local ? local.score : finishDriftRun(drift), drift.bestCombo, drift.bestRun);
   };
 
   let portalLaunchPending = false;
@@ -754,8 +754,8 @@ async function boot() {
           rearSlip: car.rearSlipAngle,
           driftAmount: car.driftAmount,
           onTrack: scoringSurface,
-          totalScore: drift.totalScore,
-          comboScore: drift.comboScore,
+          score: drift.totalScore + drift.comboScore,
+          combo: drift.comboScore,
           multiplier: drift.multiplier,
         });
       }

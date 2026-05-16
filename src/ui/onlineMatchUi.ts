@@ -31,7 +31,7 @@ function playerRows(room: OnlineRoomState | null, localId: string | null) {
 }
 
 function leaderboard(room: OnlineRoomState | null, localId: string | null) {
-  const players = [...(room?.players ?? [])].sort((a, b) => b.score + b.combo - (a.score + a.combo));
+  const players = [...(room?.players ?? [])].sort((a, b) => b.score - a.score);
   if (!players.length) return "";
   return players
     .map(
@@ -39,7 +39,7 @@ function leaderboard(room: OnlineRoomState | null, localId: string | null) {
         <div class="online-board__row ${player.id === localId ? "is-local" : ""}">
           <strong>${index + 1}</strong>
           <span>${player.name}</span>
-          <em>${formatScore(player.score + player.combo)}</em>
+          <em>${formatScore(player.score)}</em>
           <small>x${player.multiplier.toFixed(1)}</small>
         </div>
       `,

@@ -57,8 +57,8 @@ export type OnlineInputTelemetry = {
   rearSlip: number;
   driftAmount: number;
   onTrack: boolean;
-  totalScore: number;
-  comboScore: number;
+  score: number;
+  combo: number;
   multiplier: number;
 };
 

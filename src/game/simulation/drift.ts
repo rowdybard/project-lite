@@ -130,6 +130,12 @@ export function updateDriftScore(state: DriftState, car: CarState, dt: number, o
   }
 
   if (state.active && !onTrack) {
+    // Bank the combo before resetting
+    state.totalScore += state.comboScore;
+    if (state.totalScore > state.bestRun) {
+      state.bestRun = state.totalScore;
+      saveBestRun(state.bestRun);
+    }
     state.comboScore = 0;
     state.active = false;
     state.grace = 0;
