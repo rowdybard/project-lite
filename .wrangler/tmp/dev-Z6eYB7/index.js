@@ -9,6 +9,13 @@ function sanitizeRoomCode(value) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 }
 __name(sanitizeRoomCode, "sanitizeRoomCode");
+function makeRoomCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return code;
+}
+__name(makeRoomCode, "makeRoomCode");
 
 // worker/index.ts
 var defaultPose = { x: 0, z: 0, heading: 0, speed: 0 };
@@ -27,13 +34,6 @@ function json(data, init) {
   });
 }
 __name(json, "json");
-function makeRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return code;
-}
-__name(makeRoomCode, "makeRoomCode");
 function safeName(value) {
   if (typeof value !== "string") return "Guest";
   return value.trim().replace(/\s+/g, " ").slice(0, 18) || "Guest";

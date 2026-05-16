@@ -122,15 +122,17 @@ function createNoiseTexture(base: string, seed: number, repeat: SurfaceRepeat, c
 }
 
 export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) {
-  return createPbrMaterial({
-    id: "Road012A",
+  const material = createPbrMaterial({
+    id: "Asphalt025A",
     repeat,
-    color: 0x444542,
-    roughness: 1,
-    normalScale: 0.92,
-    aoIntensity: 0.72,
+    color: 0xffffff,
+    roughness: 0.96,
+    normalScale: 0.48,
+    aoIntensity: 0.18,
     displacementScale: 0,
   });
+  material.envMapIntensity = 0.04;
+  return material;
 }
 
 export function createGrassMaterial(repeat: SurfaceRepeat = { x: 48, y: 42 }) {

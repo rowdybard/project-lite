@@ -488,28 +488,6 @@ async function createModePortals(track: TrackConfig) {
     pad.position.y = 0.065;
     portalGroup.add(pad);
 
-    if (portal.mode === "drift-attack") {
-      const queuePaint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xf7f0df, 0.78));
-      const queueAsphalt = new Mesh(applyGroundUvs(new CircleGeometry(16, 96)), createAsphaltMaterial({ x: 1, y: 1 }));
-      queueAsphalt.position.set(0, 0.055, -28);
-      queueAsphalt.receiveShadow = true;
-      portalGroup.add(queueAsphalt);
-
-      const queueRing = new Mesh(new RingGeometry(10.8, 11.25, 96), queuePaint);
-      queueRing.rotation.x = -Math.PI / 2;
-      queueRing.position.set(0, 0.088, -28);
-      queueRing.renderOrder = 10;
-      portalGroup.add(queueRing);
-
-      for (let i = 0; i < 6; i++) {
-        const slot = createGroundDecal(0.55, 5.6, queuePaint, 10);
-        const angle = (i / 6) * Math.PI * 2;
-        slot.position.set(Math.cos(angle) * 9.5, 0.092, -28 + Math.sin(angle) * 9.5);
-        slot.rotation.y = -angle;
-        portalGroup.add(slot);
-      }
-    }
-
     const hauler = await createPortalHauler(color, portal.mode);
     portalGroup.add(hauler);
 

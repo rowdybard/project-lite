@@ -1,6 +1,7 @@
 import type { CarCustomization } from "../game/customization";
 import {
   makeGuestName,
+  makeRoomCode,
   sanitizeRoomCode,
   type ClientOnlineMessage,
   type OnlineInputTelemetry,
@@ -43,6 +44,7 @@ export function createOnlineClient(callbacks: OnlineClientCallbacks) {
   let socket: WebSocket | null = null;
   let playerId: string | null = null;
   let room: OnlineRoomState | null = null;
+  let connectionId = 0;
 
   function send(message: ClientOnlineMessage) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -81,9 +83,13 @@ export function createOnlineClient(callbacks: OnlineClientCallbacks) {
     },
     connect(profile: PlayerProfile, customization: CarCustomization, roomCode?: string) {
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) socket.close();
+      const currentConnection = ++connectionId;
+      const requestedRoomCode = sanitizeRoomCode(roomCode ?? "") || makeRoomCode();
       callbacks.onStatus("Connecting");
-      socket = new WebSocket(makeWsUrl(roomCode));
+      socket = new WebSocket(makeWsUrl(requestedRoomCode));
+      const activeSocket = socket;
       socket.addEventListener("open", () => {
+        if (currentConnection !== connectionId || activeSocket !== socket) return;
         callbacks.onStatus("Connected");
         send({
           type: "join",
@@ -93,16 +99,22 @@ export function createOnlineClient(callbacks: OnlineClientCallbacks) {
         });
       });
       socket.addEventListener("message", (event) => {
+        if (currentConnection !== connectionId || activeSocket !== socket) return;
         try {
           handleMessage(JSON.parse(event.data as string) as ServerOnlineMessage);
         } catch {
           callbacks.onError("Bad server message");
         }
       });
-      socket.addEventListener("close", () => callbacks.onStatus("Disconnected"));
+      socket.addEventListener("close", () => {
+        if (currentConnection === connectionId && activeSocket === socket) callbacks.onStatus("Disconnected");
+      });
       socket.addEventListener("error", () =>
-        callbacks.onError("Could not reach online server. In dev, run npm run dev so Vite and the Worker start together."),
+        currentConnection === connectionId && activeSocket === socket
+          ? callbacks.onError("Could not reach online server. In dev, run npm run dev so Vite and the Worker start together.")
+          : undefined,
       );
+      return requestedRoomCode;
     },
     setReady(ready: boolean) {
       return send({ type: "set_ready", ready });
@@ -111,6 +123,7 @@ export function createOnlineClient(callbacks: OnlineClientCallbacks) {
       return send({ type: "input", input });
     },
     disconnect() {
+      connectionId += 1;
       socket?.close();
       socket = null;
       playerId = null;

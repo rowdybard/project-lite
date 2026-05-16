@@ -106,8 +106,14 @@ export function sanitizeRoomCode(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 }
 
+export function makeRoomCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return code;
+}
+
 export function makeGuestName(value: string) {
   const clean = value.trim().replace(/\s+/g, " ").slice(0, 18);
   return clean || "Guest";
 }
-

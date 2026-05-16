@@ -1,6 +1,7 @@
 import {
   driftMatchSeconds,
   driftReadySeconds,
+  makeRoomCode,
   onlineMaxPlayers,
   sanitizeRoomCode,
   type ClientOnlineMessage,
@@ -37,13 +38,6 @@ function json(data: unknown, init?: ResponseInit) {
       ...init?.headers,
     },
   });
-}
-
-function makeRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return code;
 }
 
 function safeName(value: unknown) {
@@ -320,4 +314,3 @@ export default {
     return room.fetch(new Request(url, request));
   },
 };
-

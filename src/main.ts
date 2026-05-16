@@ -28,6 +28,7 @@ import { createTireSmoke } from "./render/objects/tireSmoke";
 import { createTireTracks } from "./render/objects/tireTracks";
 import { createTrackView } from "./render/objects/trackView";
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
+import { createQueueSlab } from "./render/objects/queueSlab";
 import { createGarageUi } from "./ui/garageUi";
 import { createHud, createResultsOverlay } from "./ui/hud";
 import { createOnlineHud, type OnlineHudPlayer } from "./ui/onlineHud";
@@ -91,8 +92,9 @@ async function boot() {
   const tireTracks = createTireTracks();
   const tireSmoke = createTireSmoke();
   const onlineGhosts = createOnlineGhosts();
+  const queueSlab = createQueueSlab();
   onlineGhosts.setTrack(activeTrack);
-  gameScene.add(tireTracks.root, tireSmoke.root, carView.root, onlineGhosts.root);
+  gameScene.add(tireTracks.root, tireSmoke.root, carView.root, onlineGhosts.root, queueSlab.root);
 
   const car = createCarState(activeTrack);
   const drift = createDriftState();
@@ -104,7 +106,7 @@ async function boot() {
   let onlineInputSeq = 0;
   let onlineInputDebt = 0;
   let onlineQueueOpen = false;
-  const queuePadOffset = -28;
+  let activeQueuePad: { roomCode: string; x: number; z: number; heading: number } | null = null;
   const setHudCarName = () => {
     hud.setCarName(getCarLabel(customization.selectedCar) ?? carEntry.name);
   };
@@ -140,30 +142,77 @@ async function boot() {
 
   const getQueuePortal = () => activeTrack.portals?.find((portal) => portal.mode === "drift-attack") ?? null;
 
-  function getQueueCenter() {
-    const portal = getQueuePortal();
-    if (!portal) return null;
-    const heading = portal.heading ?? 0;
+  function hashRoomCode(roomCode: string) {
+    let hash = 0;
+    for (const char of roomCode) hash = (hash * 33 + char.charCodeAt(0)) >>> 0;
+    return hash;
+  }
+
+  function getQueuePadForRoom(roomCode: string) {
+    const hash = hashRoomCode(roomCode);
+    const slot = hash % 12;
+    const col = slot % 4;
+    const row = Math.floor(slot / 4);
     return {
-      x: portal.x + Math.sin(heading) * queuePadOffset,
-      z: portal.z + Math.cos(heading) * queuePadOffset,
+      roomCode,
+      x: -480 + col * 320,
+      z: 430 - row * 170,
+      heading: ((hash >> 8) % 2) * Math.PI,
+    };
+  }
+
+  function setActiveQueuePad(roomCode: string) {
+    activeQueuePad = getQueuePadForRoom(roomCode);
+    queueSlab.setRoom(roomCode, activeQueuePad);
+    parkLocalCarOnQueuePad();
+  }
+
+  function clearActiveQueuePad() {
+    activeQueuePad = null;
+    queueSlab.hide();
+  }
+
+  function transformQueueLocal(localX: number, localZ: number) {
+    if (!activeQueuePad) return null;
+    const cos = Math.cos(activeQueuePad.heading);
+    const sin = Math.sin(activeQueuePad.heading);
+    return {
+      x: activeQueuePad.x + cos * localX + sin * localZ,
+      z: activeQueuePad.z - sin * localX + cos * localZ,
     };
   }
 
   function getQueuePose(index: number, count: number) {
-    const center = getQueueCenter();
-    if (!center) return null;
+    if (!activeQueuePad) return null;
     const safeCount = Math.max(1, count);
     const radius = safeCount <= 1 ? 0 : 10.2;
     const angle = -Math.PI / 2 + (index / safeCount) * Math.PI * 2;
-    const x = center.x + Math.cos(angle) * radius;
-    const z = center.z + Math.sin(angle) * radius;
+    const position = transformQueueLocal(Math.cos(angle) * radius, Math.sin(angle) * radius);
+    if (!position) return null;
     return {
-      x,
-      z,
-      heading: Math.atan2(center.x - x, center.z - z),
+      x: position.x,
+      z: position.z,
+      heading: Math.atan2(activeQueuePad.x - position.x, activeQueuePad.z - position.z),
       speed: 0,
     };
+  }
+
+  function applyQueuePose(pose: { x: number; z: number; heading: number; speed: number }) {
+    car.position.x = pose.x;
+    car.position.z = pose.z;
+    car.heading = pose.heading;
+    car.velocity.x = 0;
+    car.velocity.z = 0;
+    car.speed = pose.speed;
+    car.yawVelocity = 0;
+    car.throttleAxis = 0;
+    car.brakeAxis = 0;
+    car.frontWheelAngle = 0;
+  }
+
+  function parkLocalCarOnQueuePad() {
+    const pose = getQueuePose(0, 1);
+    if (pose) applyQueuePose(pose);
   }
 
   function stagedOnlinePlayers(room: OnlineRoomState): OnlinePlayerState[] {
@@ -178,16 +227,23 @@ async function boot() {
     if (index < 0) return;
     const pose = getQueuePose(index, room.players.length);
     if (!pose) return;
-    car.position.x = pose.x;
-    car.position.z = pose.z;
-    car.heading = pose.heading;
+    applyQueuePose(pose);
+  }
+
+  function returnCarToQueuePortal() {
+    const portal = getQueuePortal();
+    if (!portal) {
+      resetCar(car, activeTrack);
+      return;
+    }
+    const heading = portal.heading ?? 0;
+    car.position.x = portal.x - Math.sin(heading) * 18;
+    car.position.z = portal.z - Math.cos(heading) * 18;
+    car.heading = heading;
     car.velocity.x = 0;
     car.velocity.z = 0;
     car.speed = 0;
     car.yawVelocity = 0;
-    car.throttleAxis = 0;
-    car.brakeAxis = 0;
-    car.frontWheelAngle = 0;
   }
 
   let startEventPending = false;
@@ -253,6 +309,7 @@ async function boot() {
     onlineQueueOpen = false;
     onlineInputDebt = 0;
     onlineGhosts.clearRemotePlayers();
+    clearActiveQueuePad();
     carView.root.visible = true;
     tireTracks.root.visible = true;
     tireSmoke.root.visible = true;
@@ -284,6 +341,7 @@ async function boot() {
       garageUi.hide();
       attachmentTuner.hide();
       resetEvent();
+      if (activeMode !== "online-lobby") clearActiveQueuePad();
       setHudCarName();
       if (activeMode === "map-editor") {
         hud.root.hidden = true;
@@ -336,6 +394,7 @@ async function boot() {
       tireTracks.root.visible = true;
       tireSmoke.root.visible = true;
       onlineMatchUi.hideQueue();
+      clearActiveQueuePad();
       resetEvent();
       setHudCarName();
       hud.setMode("drift-attack");
@@ -366,6 +425,7 @@ async function boot() {
     onlineHud.hide();
     onlineMatchUi.updateRoom(room);
     onlineMatchUi.hideQueue();
+    clearActiveQueuePad();
     const local = room.players.find((player) => player.id === onlinePlayerId);
     results.show(local ? local.score + local.combo : finishDriftRun(drift), drift.bestCombo, drift.bestRun);
   };
@@ -380,18 +440,21 @@ async function boot() {
     onlineInputDebt = 0;
     onlineMatchUi.hideAll();
     onlineGhosts.clearRemotePlayers();
+    clearActiveQueuePad();
+    if (activeMode === "online-lobby") returnCarToQueuePortal();
   };
 
   const launchModeFromPortal = (mode: "drift-attack" | "free-drive") => {
     if (portalLaunchPending || startEventPending) return;
     if (mode === "drift-attack" && activeMode === "online-lobby") {
       if (onlineQueueOpen) {
-        onlineMatchUi.show(onlineRoom?.roomCode);
+        onlineMatchUi.show(onlineRoom?.roomCode ?? activeQueuePad?.roomCode);
         return;
       }
       onlineQueueOpen = true;
-      onlineMatchUi.show();
-      onlineClient.connect(playerProfile, customization);
+      const roomCode = onlineClient.connect(playerProfile, customization);
+      setActiveQueuePad(roomCode);
+      onlineMatchUi.show(roomCode);
       return;
     }
     portalLaunchPending = true;
@@ -406,7 +469,13 @@ async function boot() {
   let onlineClient: OnlineClient;
   const onlineMatchUi = createOnlineMatchUi({
     onConnect(roomCode) {
-      onlineClient.connect(playerProfile, customization, roomCode);
+      onlineQueueOpen = true;
+      onlineRoom = null;
+      onlinePlayerId = null;
+      onlineGhosts.clearRemotePlayers();
+      const joinedCode = onlineClient.connect(playerProfile, customization, roomCode);
+      setActiveQueuePad(joinedCode);
+      onlineMatchUi.show(joinedCode);
     },
     onReady(ready) {
       onlineClient.setReady(ready);
@@ -420,6 +489,7 @@ async function boot() {
     onJoined(playerId, room) {
       onlinePlayerId = playerId;
       onlineRoom = room;
+      if (!activeQueuePad || activeQueuePad.roomCode !== room.roomCode) setActiveQueuePad(room.roomCode);
       onlineMatchUi.setLocalPlayer(playerId);
       onlineMatchUi.updateRoom(room);
       if (activeMode === "online-lobby" && onlineQueueOpen) {
@@ -429,6 +499,9 @@ async function boot() {
     },
     onRoom(room) {
       onlineRoom = room;
+      if (activeMode === "online-lobby" && onlineQueueOpen && (!activeQueuePad || activeQueuePad.roomCode !== room.roomCode)) {
+        setActiveQueuePad(room.roomCode);
+      }
       onlineMatchUi.updateRoom(room);
       if (onlineMatchActive) onlineGhosts.setRemotePlayers(room.players, onlinePlayerId);
       else if (activeMode === "online-lobby" && onlineQueueOpen) {
@@ -580,6 +653,8 @@ async function boot() {
       if (onlineRoom) {
         lockLocalCarToQueue(onlineRoom);
         onlineGhosts.setRemotePlayers(stagedOnlinePlayers(onlineRoom), onlinePlayerId);
+      } else if (activeQueuePad) {
+        parkLocalCarOnQueuePad();
       }
 
       onlineGhosts.root.visible = true;
@@ -591,7 +666,7 @@ async function boot() {
       updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit());
       hud.update(car, drift);
       hud.updateTimer(Infinity);
-      hud.setOnlineStatus(onlineRoom ? `Room ${onlineRoom.roomCode}` : "Joining Drift Attack");
+      hud.setOnlineStatus(onlineRoom ? `Queue Pad ${onlineRoom.roomCode}` : "Opening Queue Pad");
       const ghostPlayers = onlineGhosts.getPlayers();
       const onlinePlayers: OnlineHudPlayer[] = [
         {
@@ -615,7 +690,11 @@ async function boot() {
       onlineHud.update({
         players: onlinePlayers,
         localPosition: car.position,
-        portalLabel: onlineRoom ? "Press E to ready up - Esc leaves queue" : "Joining Drift Attack queue",
+        portalLabel: onlineRoom
+          ? `Pad ${onlineRoom.roomCode}: Press E to ready - Esc leaves`
+          : activeQueuePad
+            ? `Opening private queue pad ${activeQueuePad.roomCode}`
+            : "Joining Drift Attack queue",
       });
       hud.root.hidden = false;
       renderer.render(gameScene, gameCamera);
@@ -724,7 +803,11 @@ async function boot() {
       onlineHud.update({
         players: onlinePlayers,
         localPosition: car.position,
-        portalLabel: nearbyPortal ? `Press E to confirm travel to ${nearbyPortal.label}` : null,
+        portalLabel: nearbyPortal
+          ? nearbyPortal.mode === "drift-attack"
+            ? "Press E to open a private Drift Attack queue pad"
+            : `Press E to confirm travel to ${nearbyPortal.label}`
+          : null,
       });
     } else {
       onlineHud.hide();

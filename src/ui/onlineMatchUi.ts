@@ -83,7 +83,7 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
     root.innerHTML = `
       <section class="online-match__panel">
         <div class="online-match__header">
-          <p>Online Drift Attack</p>
+          <p>Private Drift Queue Slab</p>
           <h2>${phaseText}</h2>
         </div>
         <label class="online-match__code">
@@ -99,6 +99,7 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
           <span>${latestRoom?.players.length ?? 0}/6 drivers</span>
           <span>E ready</span>
           <span>Esc leave</span>
+          <span>Instanced pad</span>
           <span>90s Drift Attack</span>
         </div>
         <div class="online-match__players">${playerRows(latestRoom, localPlayerId)}</div>
