@@ -149,7 +149,7 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
   root.add(grass);
 
   if (track.roadPath && track.roadPath.length >= 4) {
-    const { group, coneMeshes } = await createRoadFromPath(track, bounds);
+    const { group, coneMeshes } = await createRoadFromPath(track);
     optimizeTrackShadows(group);
     root.add(group);
     scene.add(root);
@@ -162,15 +162,13 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
 
 }
 
-type TrackBounds = ReturnType<typeof getTrackBounds>;
-
 function optimizeTrackShadows(root: Object3D) {
   root.traverse((child) => {
     if (child instanceof Mesh) child.castShadow = false;
   });
 }
 
-async function createRoadFromPath(track: TrackConfig, bounds: TrackBounds) {
+async function createRoadFromPath(track: TrackConfig) {
   const group = new Group();
   const points = track.roadPath!.map((point) => new Vector3(point.x, 0, point.z));
   const curve = new CatmullRomCurve3(points, true, "chordal", 0.48);
@@ -189,7 +187,6 @@ async function createRoadFromPath(track: TrackConfig, bounds: TrackBounds) {
     group.add(createShoulderBlend(track, samples, roadWidth));
     group.add(createGrassTufts(track, samples, roadWidth));
     group.add(createFoliage(track, samples, roadWidth));
-    group.add(createGrassColorPatches(bounds));
     group.add(createRoadWearDecals(samples, roadWidth));
     group.add(createPaintedLines(samples, roadWidth));
     group.add(createRunoffPatches(track, samples, roadWidth));
@@ -932,34 +929,6 @@ function createFoliage(track: TrackConfig, samples: Vector3[], roadWidth: number
   shrubs.castShadow = true;
   shrubs.receiveShadow = true;
   group.add(trunks, canopiesA, canopiesB, shrubs);
-  return group;
-}
-
-function createGrassColorPatches(bounds: TrackBounds) {
-  const group = new Group();
-  const patchMaterials = [
-    new MeshStandardMaterial({ color: 0x4d6738, roughness: 1, transparent: true, opacity: 0.2 }),
-    new MeshStandardMaterial({ color: 0x78834a, roughness: 1, transparent: true, opacity: 0.12 }),
-    new MeshStandardMaterial({ color: 0x5f7a3f, roughness: 1, transparent: true, opacity: 0.15 }),
-  ];
-  for (const material of patchMaterials) {
-    material.envMapIntensity = 0.02;
-    material.depthWrite = false;
-    material.polygonOffset = true;
-    material.polygonOffsetFactor = -1;
-    material.polygonOffsetUnits = -1;
-  }
-
-  for (let i = 0; i < 18; i++) {
-    const patch = new Mesh(groundDecalGeometry(34 + (i % 5) * 12, 14 + (i % 4) * 10), patchMaterials[i % patchMaterials.length]);
-    const x = bounds.centerX - bounds.width * 0.42 + ((i * 37) % Math.max(1, bounds.width * 0.84));
-    const z = bounds.centerZ - bounds.depth * 0.42 + ((i * 53) % Math.max(1, bounds.depth * 0.84));
-    patch.position.set(x, -0.016, z);
-    patch.rotation.y = (i * 0.41) % Math.PI;
-    patch.renderOrder = 1;
-    group.add(patch);
-  }
-
   return group;
 }
 
