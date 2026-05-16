@@ -75,17 +75,21 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
   board.hidden = true;
   document.body.append(board);
 
-  modal.querySelector("[data-create-room]")!.addEventListener("click", () => {
+  const createRoomBtn = document.querySelector("[data-create-room]") as HTMLButtonElement;
+  const joinCodeBtn = document.querySelector("[data-join-code]") as HTMLButtonElement;
+  const cancelBtn = document.querySelector("[data-cancel]") as HTMLButtonElement;
+
+  createRoomBtn.addEventListener("click", () => {
     modal.hidden = true;
     callbacks.onConnect(undefined); // Create new room
   });
 
-  modal.querySelector("[data-join-code]")!.addEventListener("click", () => {
+  joinCodeBtn.addEventListener("click", () => {
     modal.hidden = true;
     callbacks.onShowQueue(); // Show queue with room code input
   });
 
-  modal.querySelector("[data-cancel]")!.addEventListener("click", () => {
+  cancelBtn.addEventListener("click", () => {
     modal.hidden = true;
   });
 

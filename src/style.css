@@ -723,11 +723,12 @@ canvas {
 .online-modal {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1000;
   display: none;
   align-items: center;
   justify-content: center;
   background: rgb(0 0 0 / 70%);
+  pointer-events: auto;
 }
 
 .online-modal:not([hidden]) {
