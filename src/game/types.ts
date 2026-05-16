@@ -81,6 +81,7 @@ export type CarState = {
   throttleAxis: number;
   brakeAxis: number;
   reverseEngageTimer: number;
+  brakeToThrottleTimer: number;
 };
 
 export type InputState = {

@@ -88,6 +88,7 @@ export function createCarState(track: TrackConfig): CarState {
     throttleAxis: 0,
     brakeAxis: 0,
     reverseEngageTimer: 0,
+    brakeToThrottleTimer: 0,
   };
 }
 
@@ -127,6 +128,8 @@ export function resetCar(car: CarState, track: TrackConfig, spawn: TrackConfig["
   car.throttleAxis = 0;
   car.brakeAxis = 0;
   car.reverseEngageTimer = 0;
+  car.brakeToThrottleTimer = 0;
+  return car;
 }
 
 export function updateCar(car: CarState, input: InputState, tuning: CarTuning, dt: number, onTrack = true) {
@@ -275,8 +278,8 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
     (car.driftAmount > 0.16 || car.rearSlipVisual > 0.18 || car.slipAngle > 8)
       ? clamp(car.shiftCooldown / 0.15, 0, 1)
       : 0;
-  const shiftProgress = car.shiftCooldown > 0 ? clamp(1 - car.shiftCooldown / 0.22, 0, 1) : 1;
-  const shiftTorque = lerp(lerp(0.42, 0.72, driftShiftSustain), 1, shiftProgress);
+  const shiftProgress = car.shiftCooldown > 0 ? clamp(1 - car.shiftCooldown / 0.28, 0, 1) : 1;
+  const shiftTorque = lerp(lerp(0.08, 0.18, driftShiftSustain), 1, shiftProgress);
   const rearLockIntent = car.handbrakeAmount * clamp((speed - 3) / 14, 0, 1);
   const wantsReverse = car.brakeAxis > 0.92 && car.throttleAxis < 0.12;
   const reverseReady = forwardSpeed < 0.65;
@@ -286,9 +289,15 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const reverseActive = wantsReverse && reverseRamp > 0;
   const brakePressure = Math.pow(car.brakeAxis, 1.28) * lerp(0.68, 0.94, clamp(Math.abs(forwardSpeed) / 24, 0, 1));
   const liftOff = clamp((0.38 - car.throttleAxis) / 0.38, 0, 1);
+
+  // Brake-to-throttle delay: smooth power re-engagement after braking
+  car.brakeToThrottleTimer = car.brakeAxis > 0.1 ? car.brakeToThrottleTimer + dt : Math.max(0, car.brakeToThrottleTimer - dt);
+  const brakeToThrottleDelay = 0.12;
+  const throttleRamp = clamp((car.brakeToThrottleTimer - brakeToThrottleDelay) / 0.18, 0, 1);
   let drive =
     tuning.acceleration *
     car.throttleAxis *
+    throttleRamp *
     gearTorque *
     enginePull *
     tuning.engineTorque *
