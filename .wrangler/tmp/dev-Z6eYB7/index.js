@@ -133,6 +133,7 @@ var DriftRoom = class {
       const t = now();
       const dt = Math.min(0.2, Math.max(0, (t - session.lastInputAt) / 1e3 || 1 / 20));
       session.lastInputAt = t;
+      session.player.pose = message.input.pose;
       scoreInput(session, message.input, dt, this.phase);
       if (this.matchEndsAt && t >= this.matchEndsAt) this.finishMatch();
     }
@@ -182,6 +183,7 @@ var DriftRoom = class {
     this.sessions.delete(socket);
     if (this.leaderId === session.player.id) {
       this.leaderId = this.sessions.values().next().value?.player.id ?? null;
+      this.readyDeadline = null;
     }
     if (this.sessions.size === 0) this.clearTimers();
     this.broadcast({ type: "room_state", room: this.roomState() });
@@ -240,7 +242,7 @@ var DriftRoom = class {
       } else {
         this.broadcast({ type: "room_state", room: this.roomState() });
       }
-    }, 100);
+    }, 50);
   }
   clearTimers() {
     if (this.snapshotTimer) clearInterval(this.snapshotTimer);

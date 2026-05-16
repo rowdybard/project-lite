@@ -23,6 +23,9 @@ type GhostDriver = {
 type RemoteDriver = {
   view: ReturnType<typeof createCarView>;
   key: string;
+  targetX: number;
+  targetZ: number;
+  targetHeading: number;
 };
 
 export type OnlineGhostSnapshot = {
@@ -241,11 +244,18 @@ export function createOnlineGhosts() {
   function update(dt: number) {
     if (remoteSnapshots) {
       root.visible = remoteSnapshots.length > 0;
+      const alpha = 1 - Math.pow(0.0001, dt * 6);
       for (const snapshot of remoteSnapshots) {
         const ghost = remoteGhosts.get(snapshot.id);
         if (!ghost) continue;
-        ghost.view.root.position.set(snapshot.position.x, 0, snapshot.position.z);
-        ghost.view.root.rotation.y = snapshot.heading ?? ghost.view.root.rotation.y;
+        const r = ghost.view.root;
+        r.position.x += (ghost.targetX - r.position.x) * alpha;
+        r.position.z += (ghost.targetZ - r.position.z) * alpha;
+        // Shortest-path heading lerp
+        let dh = ghost.targetHeading - r.rotation.y;
+        while (dh > Math.PI) dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        r.rotation.y += dh * alpha;
       }
       return;
     }
@@ -300,8 +310,18 @@ export function createOnlineGhosts() {
       if (player.id === localPlayerId) continue;
       const key = remoteKey(player);
       const existing = remoteGhosts.get(player.id);
-      if (existing?.key === key) continue;
-      if (existing) root.remove(existing.view.root);
+
+      // Update interpolation targets from latest snapshot
+      const snap = remoteSnapshots?.find((s) => s.id === player.id);
+      if (existing) {
+        if (snap) {
+          existing.targetX = snap.position.x;
+          existing.targetZ = snap.position.z;
+          existing.targetHeading = snap.heading ?? existing.targetHeading;
+        }
+        if (existing.key === key) continue;
+        root.remove(existing.view.root);
+      }
 
       const view = createCarView(1.55);
       view.applyCustomization(customizationForPlayer(player));
@@ -311,7 +331,16 @@ export function createOnlineGhosts() {
           child.receiveShadow = false;
         }
       });
-      remoteGhosts.set(player.id, { view, key });
+      const startX = snap?.position.x ?? 0;
+      const startZ = snap?.position.z ?? 0;
+      view.root.position.set(startX, 0, startZ);
+      remoteGhosts.set(player.id, {
+        view,
+        key,
+        targetX: startX,
+        targetZ: startZ,
+        targetHeading: snap?.heading ?? 0,
+      });
       root.add(view.root);
     }
   }

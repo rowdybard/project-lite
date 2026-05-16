@@ -148,6 +148,8 @@ export class DriftRoom {
       const t = now();
       const dt = Math.min(0.2, Math.max(0, (t - session.lastInputAt) / 1000 || 1 / 20));
       session.lastInputAt = t;
+      // Always update pose so ghosts move in all phases (queue, countdown, racing)
+      session.player.pose = message.input.pose;
       scoreInput(session, message.input, dt, this.phase);
       if (this.matchEndsAt && t >= this.matchEndsAt) this.finishMatch();
     }
@@ -201,6 +203,7 @@ export class DriftRoom {
     this.sessions.delete(socket);
     if (this.leaderId === session.player.id) {
       this.leaderId = this.sessions.values().next().value?.player.id ?? null;
+      this.readyDeadline = null;
     }
     if (this.sessions.size === 0) this.clearTimers();
     this.broadcast({ type: "room_state", room: this.roomState() });
@@ -265,7 +268,7 @@ export class DriftRoom {
       } else {
         this.broadcast({ type: "room_state", room: this.roomState() });
       }
-    }, 100);
+    }, 50);
   }
 
   private clearTimers() {
