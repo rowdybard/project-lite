@@ -4,6 +4,7 @@ type OnlineMatchUiCallbacks = {
   onConnect: (roomCode?: string) => void;
   onReady: (ready: boolean) => void;
   onLeave: () => void;
+  onShowQueue: () => void;
 };
 
 const formatScore = (value: number) => Math.round(value).toLocaleString();
@@ -53,10 +54,40 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
   root.hidden = true;
   document.body.append(root);
 
+  const modal = document.createElement("div");
+  modal.className = "online-modal";
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="online-modal__panel">
+      <h2>Drift Attack Online</h2>
+      <p>Join an online drift attack session</p>
+      <div class="online-modal__actions">
+        <button type="button" data-create-room>Create New Room</button>
+        <button type="button" data-join-code>Join with Code</button>
+        <button type="button" data-cancel>Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.append(modal);
+
   const board = document.createElement("aside");
   board.className = "online-board";
   board.hidden = true;
   document.body.append(board);
+
+  modal.querySelector("[data-create-room]")!.addEventListener("click", () => {
+    modal.hidden = true;
+    callbacks.onConnect(undefined); // Create new room
+  });
+
+  modal.querySelector("[data-join-code]")!.addEventListener("click", () => {
+    modal.hidden = true;
+    callbacks.onShowQueue(); // Show queue with room code input
+  });
+
+  modal.querySelector("[data-cancel]")!.addEventListener("click", () => {
+    modal.hidden = true;
+  });
 
   let latestRoom: OnlineRoomState | null = null;
   let localPlayerId: string | null = null;
@@ -148,10 +179,17 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
   return {
     root,
     board,
+    modal,
     show(roomCode?: string) {
       preferredRoomCode = sanitizeRoomCode(roomCode ?? preferredRoomCode);
       root.hidden = false;
       renderQueue();
+    },
+    showModal() {
+      modal.hidden = false;
+    },
+    hideModal() {
+      modal.hidden = true;
     },
     hideQueue() {
       root.hidden = true;
@@ -159,6 +197,7 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
     hideAll() {
       root.hidden = true;
       board.hidden = true;
+      modal.hidden = true;
     },
     setStatus(next: string) {
       status = next;

@@ -451,10 +451,7 @@ async function boot() {
         onlineMatchUi.show(onlineRoom?.roomCode ?? activeQueuePad?.roomCode);
         return;
       }
-      onlineQueueOpen = true;
-      const roomCode = onlineClient.connect(playerProfile, customization);
-      setActiveQueuePad(roomCode);
-      onlineMatchUi.show(roomCode);
+      onlineMatchUi.showModal();
       return;
     }
     portalLaunchPending = true;
@@ -482,6 +479,13 @@ async function boot() {
     },
     onLeave() {
       leaveOnlineQueue();
+    },
+    onShowQueue() {
+      onlineQueueOpen = true;
+      onlineRoom = null;
+      onlinePlayerId = null;
+      onlineGhosts.clearRemotePlayers();
+      onlineMatchUi.show();
     },
   });
 
