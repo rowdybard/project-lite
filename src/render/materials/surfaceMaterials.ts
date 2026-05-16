@@ -125,13 +125,13 @@ export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) 
   const material = createPbrMaterial({
     id: "Asphalt025A",
     repeat,
-    color: 0xffffff,
-    roughness: 0.96,
-    normalScale: 0.48,
-    aoIntensity: 0.18,
+    color: 0x4a4a4a,
+    roughness: 0.97,
+    normalScale: 1.4,
+    aoIntensity: 0.82,
     displacementScale: 0,
   });
-  material.envMapIntensity = 0.04;
+  material.envMapIntensity = 0.12;
   return material;
 }
 
