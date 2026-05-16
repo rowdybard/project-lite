@@ -1,6 +1,6 @@
 import type { CarTuning } from "./types";
 
-export type ModeId = "online-lobby" | "drift-attack" | "free-drive" | "drag-race" | "lap-race";
+export type ModeId = "online-lobby" | "map-editor" | "drift-attack" | "free-drive" | "drag-race" | "lap-race";
 export type CustomizationSlot =
   | "selectedCar"
   | "paint"
@@ -83,6 +83,7 @@ export const carTuningPaths: Record<string, string> = {
 
 export const modeOptions: CustomizationOption[] = [
   { id: "online-lobby", label: "Online" },
+  { id: "map-editor", label: "Map Editor" },
   { id: "drift-attack", label: "Drift Attack" },
   { id: "free-drive", label: "Practice Grounds" },
   { id: "drag-race", label: "Drag Race", disabled: true },
@@ -90,7 +91,7 @@ export const modeOptions: CustomizationOption[] = [
 ];
 
 export function isPlayableMode(mode: string): mode is ModeId {
-  return mode === "online-lobby" || mode === "drift-attack" || mode === "free-drive";
+  return mode === "online-lobby" || mode === "map-editor" || mode === "drift-attack" || mode === "free-drive";
 }
 
 export const customizationCategories: CustomizationCategory[] = [

@@ -1,5 +1,6 @@
 import { Box3, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 export type ImportedCarAttachments = {
   bodyWidth: number;
@@ -95,6 +96,22 @@ function loadScene(path: string) {
 
 function normalizeName(name: string) {
   return name.toLowerCase().replace(/[_\s]+/g, " ").trim();
+}
+
+function stripMaterialTextureNoise(material: MeshStandardMaterial) {
+  material.map = null;
+  material.normalMap = null;
+  material.roughnessMap = null;
+  material.metalnessMap = null;
+  material.aoMap = null;
+  material.displacementMap = null;
+  material.bumpMap = null;
+  material.emissiveMap = null;
+  material.lightMap = null;
+  material.vertexColors = false;
+  material.flatShading = false;
+  material.roughness = Math.max(material.roughness ?? 0.5, 0.42);
+  material.needsUpdate = true;
 }
 
 function findByName(root: Object3D, name: string): Object3D | null {
@@ -301,6 +318,10 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   content.traverse((node) => {
     if (!(node instanceof Mesh)) return;
+    node.geometry = mergeVertices(node.geometry, 0.002);
+    node.geometry.deleteAttribute("color");
+    node.geometry.computeVertexNormals();
+    node.receiveShadow = false;
 
     const isWheelChild = wheelRecords.some((w) => {
       let parent: Object3D | null = node;
@@ -309,9 +330,11 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
     });
 
     const materials = Array.isArray(node.material) ? node.material : [node.material];
+    for (const material of materials) {
+      const mat = material as MeshStandardMaterial;
+      if (mat && mat.color) stripMaterialTextureNoise(mat);
+    }
     const nodeName = node.name.toLowerCase();
-
-    console.log(`[importedCars] mesh: "${node.name}" materials: ${materials.length} isWheel: ${isWheelChild}`);
 
     if (isWheelChild) {
       const isTire = tireKeywords.some((kw) => nodeName.includes(kw));
@@ -341,7 +364,6 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
       if (isBodyByName && !isTrimBlack && !isAccentWhite) {
         validIndices.push(i);
-        console.log(`[importedCars]   mat[${i}] "${mat.name}" → BODY (paintable)`);
       }
     }
 
@@ -350,8 +372,6 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
       bodyMaterialIndices.set(node, validIndices);
     }
   });
-
-  console.log(`[importedCars] ${id}: ${bodyMeshes.length} body meshes, ${rimMeshes.length} rim meshes`);
 
   return { root, wheels: wheelRecords, bodyMeshes, rimMeshes, bodyMaterialIndices };
 }

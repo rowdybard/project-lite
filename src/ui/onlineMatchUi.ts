@@ -97,8 +97,9 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
         </div>
         <div class="online-match__meta">
           <span>${latestRoom?.players.length ?? 0}/6 drivers</span>
+          <span>E ready</span>
+          <span>Esc leave</span>
           <span>90s Drift Attack</span>
-          <span>No contact</span>
         </div>
         <div class="online-match__players">${playerRows(latestRoom, localPlayerId)}</div>
       </section>
@@ -164,4 +165,3 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
     },
   };
 }
-

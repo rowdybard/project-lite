@@ -100,7 +100,9 @@ export function createOnlineClient(callbacks: OnlineClientCallbacks) {
         }
       });
       socket.addEventListener("close", () => callbacks.onStatus("Disconnected"));
-      socket.addEventListener("error", () => callbacks.onError("Could not reach online server"));
+      socket.addEventListener("error", () =>
+        callbacks.onError("Could not reach online server. In dev, run npm run dev so Vite and the Worker start together."),
+      );
     },
     setReady(ready: boolean) {
       return send({ type: "set_ready", ready });
@@ -116,4 +118,3 @@ export function createOnlineClient(callbacks: OnlineClientCallbacks) {
     },
   };
 }
-

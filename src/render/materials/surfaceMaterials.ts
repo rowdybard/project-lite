@@ -21,6 +21,7 @@ type PbrMaterialOptions = {
   metalness?: number;
   normalScale?: number;
   aoIntensity?: number;
+  displacementScale?: number;
   opacity?: number;
 };
 
@@ -55,6 +56,7 @@ function createPbrMaterial({
   metalness = 0,
   normalScale = 0.55,
   aoIntensity = 0.55,
+  displacementScale = 0,
   opacity = 1,
 }: PbrMaterialOptions) {
   const material = new MeshStandardMaterial({
@@ -69,6 +71,11 @@ function createPbrMaterial({
   if (normalScale > 0) {
     material.normalMap = loadTexture(texturePath(id, "NormalGL"), repeat);
     material.normalScale = new Vector2(normalScale, normalScale);
+  }
+  if (displacementScale > 0) {
+    material.displacementMap = loadTexture(texturePath(id, "Displacement"), repeat);
+    material.displacementScale = displacementScale;
+    material.displacementBias = -displacementScale * 0.52;
   }
   const useAo = aoIntensity > 0 && id !== "RoadLines001" && id !== "Rubber003";
   if (useAo) {
@@ -118,10 +125,11 @@ export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) 
   return createPbrMaterial({
     id: "Road012A",
     repeat,
-    color: 0x383938,
+    color: 0x444542,
     roughness: 1,
-    normalScale: 0.82,
-    aoIntensity: 0.66,
+    normalScale: 0.92,
+    aoIntensity: 0.72,
+    displacementScale: 0,
   });
 }
 

@@ -5,8 +5,10 @@ import {
   Mesh,
   MeshStandardMaterial,
 } from "three";
+import { paintColors, type CarCustomization } from "../../game/customization";
 import type { TrackConfig, Vec2 } from "../../game/types";
 import type { OnlinePlayerState } from "../../net/protocol";
+import { createCarView } from "./carView";
 
 type GhostDriver = {
   id: string;
@@ -16,6 +18,11 @@ type GhostDriver = {
   progress: number;
   speed: number;
   laneOffset: number;
+};
+
+type RemoteDriver = {
+  view: ReturnType<typeof createCarView>;
+  key: string;
 };
 
 export type OnlineGhostSnapshot = {
@@ -163,6 +170,25 @@ function sampleRoute(points: Vec2[], lengths: number[], total: number, distance:
   };
 }
 
+function customizationForPlayer(player: OnlinePlayerState): CarCustomization {
+  return {
+    selectedMode: "online-lobby",
+    selectedCar: player.carId || player.customization.selectedCar,
+    paint: player.customization.paint,
+    wheelColor: player.customization.wheelColor,
+    stance: player.customization.stance,
+    spoiler: player.customization.spoiler,
+    frontLip: player.customization.frontLip,
+    sideSkirts: player.customization.sideSkirts,
+    underglow: player.customization.underglow,
+    tuningPreset: player.customization.tuningPreset,
+  };
+}
+
+function remoteKey(player: OnlinePlayerState) {
+  return `${player.carId}|${JSON.stringify(player.customization)}`;
+}
+
 export function createOnlineGhosts() {
   const root = new Group();
   root.visible = false;
@@ -171,7 +197,7 @@ export function createOnlineGhosts() {
   let segmentLengths: number[] = [];
   let totalDistance = 1;
   let ghosts: GhostDriver[] = [];
-  let remoteGhosts = new Map<string, Group>();
+  let remoteGhosts = new Map<string, RemoteDriver>();
   let remoteSnapshots: OnlineGhostSnapshot[] | null = null;
 
   function setTrack(track: TrackConfig) {
@@ -218,8 +244,8 @@ export function createOnlineGhosts() {
       for (const snapshot of remoteSnapshots) {
         const ghost = remoteGhosts.get(snapshot.id);
         if (!ghost) continue;
-        ghost.position.set(snapshot.position.x, 0.04, snapshot.position.z);
-        ghost.rotation.y = snapshot.heading ?? ghost.rotation.y;
+        ghost.view.root.position.set(snapshot.position.x, 0, snapshot.position.z);
+        ghost.view.root.rotation.y = snapshot.heading ?? ghost.view.root.rotation.y;
       }
       return;
     }
@@ -256,7 +282,7 @@ export function createOnlineGhosts() {
       .map((player) => ({
         id: player.id,
         name: player.name,
-        color: player.leader ? 0xf1c75b : 0x68d8ff,
+        color: paintColors[player.customization.paint] ?? (player.leader ? 0xf1c75b : 0x68d8ff),
         position: { x: player.pose.x, z: player.pose.z },
         heading: player.pose.heading,
         speedMph: player.pose.speed * 2.237,
@@ -265,22 +291,34 @@ export function createOnlineGhosts() {
     const live = new Set(remoteSnapshots.map((snapshot) => snapshot.id));
     for (const [id, ghost] of remoteGhosts) {
       if (!live.has(id)) {
-        root.remove(ghost);
+        root.remove(ghost.view.root);
         remoteGhosts.delete(id);
       }
     }
 
-    for (const snapshot of remoteSnapshots) {
-      if (remoteGhosts.has(snapshot.id)) continue;
-      const ghost = makeGhostCar(snapshot.color, "coupe");
-      remoteGhosts.set(snapshot.id, ghost);
-      root.add(ghost);
+    for (const player of players) {
+      if (player.id === localPlayerId) continue;
+      const key = remoteKey(player);
+      const existing = remoteGhosts.get(player.id);
+      if (existing?.key === key) continue;
+      if (existing) root.remove(existing.view.root);
+
+      const view = createCarView(1.55);
+      view.applyCustomization(customizationForPlayer(player));
+      view.root.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.castShadow = false;
+          child.receiveShadow = false;
+        }
+      });
+      remoteGhosts.set(player.id, { view, key });
+      root.add(view.root);
     }
   }
 
   function clearRemotePlayers() {
     remoteSnapshots = null;
-    for (const ghost of remoteGhosts.values()) root.remove(ghost);
+    for (const ghost of remoteGhosts.values()) root.remove(ghost.view.root);
     remoteGhosts.clear();
   }
 

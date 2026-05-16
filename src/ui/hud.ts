@@ -81,7 +81,7 @@ export function createHud() {
       root.classList.toggle("is-online-lobby", mode === "online-lobby");
       root.querySelector("[data-hint]")!.textContent =
         mode === "online-lobby"
-          ? "Drive onto a trailer - Enter load - R reset - Esc garage"
+          ? "Drive onto a trailer - E confirm - R reset - Esc garage"
           : mode === "free-drive"
             ? "R reset zone - C next zone - Esc garage"
             : "R restart";

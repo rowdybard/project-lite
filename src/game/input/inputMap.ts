@@ -8,7 +8,7 @@ let menuPressed = false;
 let zoneNextPressed = false;
 let handbrakePulseUntil = 0;
 
-const handbrakeKeys = new Set(["Space", "ShiftLeft", "ShiftRight", "KeyE"]);
+const handbrakeKeys = new Set(["Space", "ShiftLeft", "ShiftRight"]);
 
 // Gamepad state
 let cameraOrbit = 0;
@@ -38,7 +38,7 @@ export function bindInput(): () => void {
 
     if (event.code === "KeyT") debugPressed = true;
     if (event.code === "KeyR") resetPressed = true;
-    if (event.code === "Enter") confirmPressed = true;
+    if (event.code === "Enter" || event.code === "KeyE") confirmPressed = true;
     if (event.code === "KeyC") zoneNextPressed = true;
     if (event.code === "Escape") menuPressed = true;
 

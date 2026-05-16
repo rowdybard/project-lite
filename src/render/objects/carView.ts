@@ -77,6 +77,16 @@ const setVisible = (visible: boolean, ...objects: (Mesh | Group)[]) => {
 function prepPaintMaterial(material: MeshStandardMaterial, paintHex: number) {
   material.color.setHex(paintHex);
   material.map = null;
+  material.normalMap = null;
+  material.roughnessMap = null;
+  material.metalnessMap = null;
+  material.aoMap = null;
+  material.displacementMap = null;
+  material.bumpMap = null;
+  material.emissiveMap = null;
+  material.lightMap = null;
+  material.vertexColors = false;
+  material.flatShading = false;
   material.roughness = 0.48;
   material.metalness = 0.18;
   material.envMapIntensity = 0.48;
@@ -381,6 +391,14 @@ export function createCarView(scale = 1) {
         if (!mat || !mat.color) return m;
         const cloned = mat.clone() as MeshStandardMaterial;
         cloned.map = null;
+        cloned.normalMap = null;
+        cloned.roughnessMap = null;
+        cloned.metalnessMap = null;
+        cloned.aoMap = null;
+        cloned.displacementMap = null;
+        cloned.bumpMap = null;
+        cloned.vertexColors = false;
+        cloned.flatShading = false;
         cloned.color.setHex(wheelHex);
         cloned.roughness = 0.5;
         cloned.metalness = 0.08;
@@ -439,7 +457,7 @@ export function createCarView(scale = 1) {
         model.root.traverse((child) => {
           if (child instanceof Mesh) {
             child.castShadow = true;
-            child.receiveShadow = true;
+            child.receiveShadow = false;
           }
         });
         importedWheels = model.wheels;

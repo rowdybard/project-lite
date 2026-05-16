@@ -3,6 +3,7 @@ import {
   BufferGeometry,
   CanvasTexture,
   CatmullRomCurve3,
+  CircleGeometry,
   CylinderGeometry,
   DoubleSide,
   Float32BufferAttribute,
@@ -22,6 +23,7 @@ import {
   Vector3,
 } from "three";
 import type { TrackConfig } from "../../game/types";
+import { loadMapEdits } from "../../game/editor/mapEdits";
 import { getRoadWidth, isTracksideClearZone } from "../../game/simulation/trackLayout";
 import { loadGltf } from "../loaders/loadGltf";
 import {
@@ -35,6 +37,7 @@ import {
   createShoulderMaterial,
 } from "../materials/surfaceMaterials";
 import { createImportedCarModel } from "./importedCars";
+import { createMapEditStampObject } from "./mapEditObjects";
 
 export type TrackViewResult = {
   root: Object3D;
@@ -43,6 +46,7 @@ export type TrackViewResult = {
 
 const yawForTangentX = (tangent: Vector3) => Math.atan2(-tangent.z, tangent.x);
 const roadBaseY = 0.036;
+const asphaltTextureMeters = 7.5;
 
 function buildRoadDistances(samples: Vector3[]) {
   const cumulativeDistances: number[] = [0];
@@ -57,7 +61,9 @@ function roadSurfaceY(distance01: number, acrossPosition: number) {
   const bank = Math.sin(distance01 * Math.PI * 8 + 0.45) * 0.028;
   const crown = (1 - Math.min(1, Math.abs(acrossPosition) * 2)) * 0.09;
   const edgeDrop = Math.pow(Math.abs(acrossPosition) * 2, 1.7) * 0.035;
-  return roadBaseY + crown - edgeDrop + bank * acrossPosition;
+  const longWave = Math.sin(distance01 * Math.PI * 34 + acrossPosition * 3.2) * 0.008;
+  const fineBreakup = Math.sin(distance01 * Math.PI * 137 + acrossPosition * 19) * 0.0035;
+  return roadBaseY + crown - edgeDrop + bank * acrossPosition + longWave + fineBreakup;
 }
 
 function roadSurfaceYAt(
@@ -90,8 +96,31 @@ function groundDecalGeometry(width: number, depth: number) {
   return geometry;
 }
 
+function applyGroundUvs(geometry: BufferGeometry, scale = asphaltTextureMeters) {
+  const position = geometry.attributes.position;
+  const uvs: number[] = [];
+  for (let i = 0; i < position.count; i++) {
+    uvs.push(position.getX(i) / scale, position.getZ(i) / scale);
+  }
+  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute("uv2", new Float32BufferAttribute(uvs, 2));
+  return geometry;
+}
+
 function createGroundDecal(width: number, depth: number, material: MeshStandardMaterial, renderOrder = 8) {
   return prepGroundOverlay(new Mesh(groundDecalGeometry(width, depth), material), renderOrder);
+}
+
+async function createMapEditOverlays(track: TrackConfig) {
+  const group = new Group();
+  const edits = await loadMapEdits(track.id).catch(() => []);
+  if (!edits.length) return group;
+
+  for (const stamp of edits) {
+    group.add(createMapEditStampObject(stamp));
+  }
+
+  return group;
 }
 
 export async function createTrackView(scene: Scene, track: TrackConfig): Promise<TrackViewResult> {
@@ -109,8 +138,8 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
   const grass = new Mesh(
     grassGeometry,
     createGrassMaterial({
-      x: Math.max(36, bounds.width / 7),
-      y: Math.max(34, bounds.depth / 7),
+      x: Math.max(18, bounds.width / 18),
+      y: Math.max(18, bounds.depth / 18),
     }),
   );
   grass.rotation.x = -Math.PI / 2;
@@ -145,12 +174,12 @@ async function createRoadFromPath(track: TrackConfig, bounds: TrackBounds) {
   const group = new Group();
   const points = track.roadPath!.map((point) => new Vector3(point.x, 0, point.z));
   const curve = new CatmullRomCurve3(points, true, "chordal", 0.48);
-  const samples = curve.getPoints(192);
+  const samples = curve.getPoints(320);
   if (samples.length > 1 && samples[0].distanceToSquared(samples[samples.length - 1]) < 0.0001) {
     samples.pop();
   }
   const roadWidth = getRoadWidth(track);
-  const roadMaterial = createAsphaltMaterial({ x: 1.15, y: 18 });
+  const roadMaterial = createAsphaltMaterial({ x: 1, y: 1 });
   roadMaterial.side = DoubleSide;
   const road = new Mesh(createRoadGeometry(samples, roadWidth), roadMaterial);
   road.receiveShadow = true;
@@ -172,102 +201,37 @@ async function createRoadFromPath(track: TrackConfig, bounds: TrackBounds) {
   group.add(trackside.group);
   group.add(createTrainingCircuitDressing(track, samples, roadWidth));
   group.add(createCircuitFacilities(track, samples, roadWidth));
+  group.add(await createMapEditOverlays(track));
   return { group, coneMeshes: trackside.coneMeshes };
-}
-
-function distanceToRoadSamples(x: number, z: number, samples: Vector3[]) {
-  let nearest = Infinity;
-  for (let i = 0; i < samples.length; i++) {
-    const a = samples[i];
-    const b = samples[(i + 1) % samples.length];
-    const abx = b.x - a.x;
-    const abz = b.z - a.z;
-    const apx = x - a.x;
-    const apz = z - a.z;
-    const lengthSq = abx * abx + abz * abz;
-    const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, (apx * abx + apz * abz) / lengthSq));
-    const closestX = a.x + abx * t;
-    const closestZ = a.z + abz * t;
-    nearest = Math.min(nearest, Math.hypot(x - closestX, z - closestZ));
-  }
-  return nearest;
 }
 
 function createPracticeAreaSurface(
   area: NonNullable<TrackConfig["practiceAreas"]>[number],
-  samples: Vector3[],
-  roadWidth: number,
+  _samples: Vector3[],
+  _roadWidth: number,
   material: MeshStandardMaterial,
 ) {
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  const vertexByGrid = new Map<string, number>();
   const heading = area.type === "rect" ? area.heading ?? 0 : 0;
-  const cos = Math.cos(heading);
-  const sin = Math.sin(heading);
   const width = area.type === "circle" ? area.radius * 2 : area.width;
   const depth = area.type === "circle" ? area.radius * 2 : area.depth;
-  const xSteps = Math.max(4, Math.ceil(width / 6));
-  const zSteps = Math.max(4, Math.ceil(depth / 6));
-  const dx = width / xSteps;
-  const dz = depth / zSteps;
-  const roadClip = roadWidth / 2 + 2.75;
 
-  const toWorld = (localX: number, localZ: number) => ({
-    x: area.x + localX * cos - localZ * sin,
-    z: area.z + localX * sin + localZ * cos,
-  });
-
-  const addVertex = (gx: number, gz: number, localX: number, localZ: number) => {
-    const key = `${gx}:${gz}`;
-    const existing = vertexByGrid.get(key);
-    if (existing !== undefined) return existing;
-
-    const world = toWorld(localX, localZ);
-    const index = positions.length / 3;
-    positions.push(world.x, -0.008, world.z);
-    uvs.push(localX / 8, localZ / 8);
-    vertexByGrid.set(key, index);
-    return index;
-  };
-
-  for (let ix = 0; ix < xSteps; ix++) {
-    for (let iz = 0; iz < zSteps; iz++) {
-      const x0 = -width / 2 + ix * dx;
-      const x1 = x0 + dx;
-      const z0 = -depth / 2 + iz * dz;
-      const z1 = z0 + dz;
-      const cx = (x0 + x1) * 0.5;
-      const cz = (z0 + z1) * 0.5;
-
-      if (area.type === "circle" && Math.hypot(cx, cz) > area.radius - Math.min(dx, dz) * 0.25) continue;
-
-      const checks = [toWorld(x0, z0), toWorld(x1, z0), toWorld(x1, z1), toWorld(x0, z1), toWorld(cx, cz)];
-      if (checks.some((point) => distanceToRoadSamples(point.x, point.z, samples) < roadClip)) continue;
-
-      const a = addVertex(ix, iz, x0, z0);
-      const b = addVertex(ix + 1, iz, x1, z0);
-      const c = addVertex(ix + 1, iz + 1, x1, z1);
-      const d = addVertex(ix, iz + 1, x0, z1);
-      indices.push(a, c, b, a, d, c);
-    }
-  }
-
-  const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
-  geometry.setAttribute("uv2", new Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
+  const geometry = area.type === "circle"
+    ? new CircleGeometry(area.radius, 96)
+    : new PlaneGeometry(width, depth, 1, 1);
+  geometry.rotateX(-Math.PI / 2);
+  applyGroundUvs(geometry);
   geometry.computeVertexNormals();
-  return new Mesh(geometry, material);
+  const mesh = new Mesh(geometry, material);
+  mesh.position.set(area.x, -0.012, area.z);
+  mesh.rotation.y = heading;
+  return mesh;
 }
 
 function createPracticeAreas(track: TrackConfig, samples: Vector3[], roadWidth: number) {
   const group = new Group();
   if (!track.practiceAreas) return group;
 
-  const asphaltMaterial = createAsphaltMaterial({ x: 10, y: 5 });
+  const asphaltMaterial = createAsphaltMaterial({ x: 1, y: 1 });
   const paintMaterial = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xd8d2bf, 0.68));
   const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 3, y: 2 }, 0.34));
   const coneMaterial = new MeshStandardMaterial({ color: 0xe68a2e, roughness: 0.72 });
@@ -524,6 +488,28 @@ async function createModePortals(track: TrackConfig) {
     pad.position.y = 0.065;
     portalGroup.add(pad);
 
+    if (portal.mode === "drift-attack") {
+      const queuePaint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xf7f0df, 0.78));
+      const queueAsphalt = new Mesh(applyGroundUvs(new CircleGeometry(16, 96)), createAsphaltMaterial({ x: 1, y: 1 }));
+      queueAsphalt.position.set(0, 0.055, -28);
+      queueAsphalt.receiveShadow = true;
+      portalGroup.add(queueAsphalt);
+
+      const queueRing = new Mesh(new RingGeometry(10.8, 11.25, 96), queuePaint);
+      queueRing.rotation.x = -Math.PI / 2;
+      queueRing.position.set(0, 0.088, -28);
+      queueRing.renderOrder = 10;
+      portalGroup.add(queueRing);
+
+      for (let i = 0; i < 6; i++) {
+        const slot = createGroundDecal(0.55, 5.6, queuePaint, 10);
+        const angle = (i / 6) * Math.PI * 2;
+        slot.position.set(Math.cos(angle) * 9.5, 0.092, -28 + Math.sin(angle) * 9.5);
+        slot.rotation.y = -angle;
+        portalGroup.add(slot);
+      }
+    }
+
     const hauler = await createPortalHauler(color, portal.mode);
     portalGroup.add(hauler);
 
@@ -705,7 +691,7 @@ function createRoadGeometry(samples: Vector3[], roadWidth: number) {
   const uvs: number[] = [];
   const indices: number[] = [];
   const { cumulativeDistances, totalDistance } = buildRoadDistances(samples);
-  const across = [-0.5, -0.24, 0, 0.24, 0.5];
+  const across = [-0.5, -0.42, -0.34, -0.25, -0.16, -0.08, 0, 0.08, 0.16, 0.25, 0.34, 0.42, 0.5];
 
   for (let i = 0; i < samples.length; i++) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
@@ -717,7 +703,7 @@ function createRoadGeometry(samples: Vector3[], roadWidth: number) {
     for (const acrossPosition of across) {
       const point = samples[i].clone().addScaledVector(normal, acrossPosition * roadWidth);
       positions.push(point.x, roadSurfaceY(distance01, acrossPosition), point.z);
-      uvs.push(acrossPosition + 0.5, cumulativeDistances[i] / 7.5);
+      uvs.push((acrossPosition * roadWidth) / asphaltTextureMeters, cumulativeDistances[i] / asphaltTextureMeters);
     }
   }
 
@@ -759,7 +745,7 @@ function getTrackBounds(track: TrackConfig) {
 
 function createRingRoad(track: TrackConfig) {
   const group = new Group();
-  const roadMaterial = createAsphaltMaterial({ x: 9, y: 9 });
+  const roadMaterial = createAsphaltMaterial({ x: 3, y: 3 });
   roadMaterial.side = DoubleSide;
   const road = new Mesh(
     new RingGeometry(track.roadWidth + 8, track.roadWidth - 8, 220),
@@ -1035,12 +1021,12 @@ function createPaintedLines(samples: Vector3[], roadWidth: number) {
 
 function createRoadWearDecals(samples: Vector3[], roadWidth: number) {
   const group = new Group();
-  const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 2, y: 1 }, 0.22));
-  const stainMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(0x121517, 0.16));
-  const rubberGeometry = groundDecalGeometry(4.8, 2.8);
-  const stainGeometry = groundDecalGeometry(2.6, 0.42);
-  const rubberCount = Math.floor(samples.length / 18);
-  const stainCount = Math.floor(samples.length / 14);
+  const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 2.8, y: 1.2 }, 0.34));
+  const stainMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(0x121517, 0.22));
+  const rubberGeometry = groundDecalGeometry(6.4, 3.2);
+  const stainGeometry = groundDecalGeometry(3.8, 0.52);
+  const rubberCount = Math.floor(samples.length / 12);
+  const stainCount = Math.floor(samples.length / 10);
   const rubber = new InstancedMesh(rubberGeometry, rubberMaterial, rubberCount);
   const stains = new InstancedMesh(stainGeometry, stainMaterial, stainCount);
   const matrix = new Matrix4();
@@ -1050,32 +1036,32 @@ function createRoadWearDecals(samples: Vector3[], roadWidth: number) {
   let rubberIndex = 0;
   let stainIndex = 0;
 
-  for (let i = 0; i < samples.length; i += 7) {
+  for (let i = 0; i < samples.length; i += 5) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
     const tangent = next.clone().sub(previous).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
     const angle = yawForTangentX(tangent);
 
-    if (i % 18 === 0 && rubberIndex < rubberCount) {
-      const lateral = ((((i * 37) % 100) / 100) - 0.5) * roadWidth * 0.24;
+    if (i % 12 === 0 && rubberIndex < rubberCount) {
+      const lateral = Math.sin(i * 0.29) * roadWidth * 0.14;
       const position = samples[i].clone().addScaledVector(normal, lateral);
       rotation.setFromAxisAngle(up, angle + ((((i * 11) % 100) / 100) - 0.5) * 0.18);
       matrix.compose(
-        new Vector3(position.x, roadSurfaceYAt(distances, i, lateral, roadWidth, 0.072), position.z),
+        new Vector3(position.x, roadSurfaceYAt(distances, i, lateral, roadWidth, 0.078), position.z),
         rotation,
-        new Vector3(0.85 + ((i * 5) % 7) * 0.04, 1, 0.72 + ((i * 3) % 5) * 0.05),
+        new Vector3(0.95 + ((i * 5) % 7) * 0.045, 1, 0.78 + ((i * 3) % 5) * 0.06),
       );
       rubber.setMatrixAt(rubberIndex, matrix);
       rubberIndex += 1;
     }
 
-    if (i % 14 === 0 && stainIndex < stainCount) {
+    if (i % 10 === 0 && stainIndex < stainCount) {
       const lateral = ((((i * 19) % 100) / 100) - 0.5) * roadWidth * 0.72;
       const position = samples[i].clone().addScaledVector(normal, lateral);
       rotation.setFromAxisAngle(up, angle + Math.PI * 0.5 + ((((i * 23) % 100) / 100) - 0.5) * 0.34);
       matrix.compose(
-        new Vector3(position.x, roadSurfaceYAt(distances, i, lateral, roadWidth, 0.074), position.z),
+        new Vector3(position.x, roadSurfaceYAt(distances, i, lateral, roadWidth, 0.08), position.z),
         rotation,
         new Vector3(0.78 + ((i * 7) % 5) * 0.08, 1, 1),
       );
@@ -1452,7 +1438,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
   const group = new Group();
   if (!track.roadPath || track.id !== "harbor-grand-circuit") return group;
 
-  const asphaltMaterial = createAsphaltMaterial({ x: 12, y: 2 });
+  const asphaltMaterial = createAsphaltMaterial({ x: 1, y: 1 });
   const wallMaterial = createConcreteMaterial({ x: 12, y: 1 });
   const glassMaterial = new MeshStandardMaterial({ color: 0x5e7e92, roughness: 0.24, metalness: 0.2 });
   const roofMaterial = new MeshStandardMaterial({ color: 0x1d252d, roughness: 0.72, metalness: 0.14 });

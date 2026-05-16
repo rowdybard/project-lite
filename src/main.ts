@@ -39,7 +39,8 @@ import { createTrackColliders, updateTrackCollision } from "./game/simulation/tr
 import type { Cone } from "./game/simulation/trackCollision";
 import { createOnlineClient, type OnlineClient } from "./net/onlineClient";
 import { loadPlayerProfile, savePlayerProfile, type PlayerProfile } from "./net/profile";
-import type { OnlineRoomState } from "./net/protocol";
+import type { OnlinePlayerState, OnlineRoomState } from "./net/protocol";
+import { createMapEditor } from "./game/editor/mapEditor";
 
 type AppState = "garage" | "event" | "results";
 const eventCarScale = 1.55;
@@ -103,6 +104,7 @@ async function boot() {
   let onlineInputSeq = 0;
   let onlineInputDebt = 0;
   let onlineQueueOpen = false;
+  const queuePadOffset = -28;
   const setHudCarName = () => {
     hud.setCarName(getCarLabel(customization.selectedCar) ?? carEntry.name);
   };
@@ -126,6 +128,7 @@ async function boot() {
 
   const getTrackForMode = (mode: ModeId) => {
     if (mode === "online-lobby") return onlineLobbyTrack;
+    if (mode === "map-editor") return onlineLobbyTrack;
     if (mode === "free-drive") return practiceTrack;
     return driftTrack;
   };
@@ -134,6 +137,58 @@ async function boot() {
     if (activeMode !== "free-drive") return activeTrack.start;
     return activeTrack.practiceZones?.[practiceZoneIndex] ?? activeTrack.start;
   };
+
+  const getQueuePortal = () => activeTrack.portals?.find((portal) => portal.mode === "drift-attack") ?? null;
+
+  function getQueueCenter() {
+    const portal = getQueuePortal();
+    if (!portal) return null;
+    const heading = portal.heading ?? 0;
+    return {
+      x: portal.x + Math.sin(heading) * queuePadOffset,
+      z: portal.z + Math.cos(heading) * queuePadOffset,
+    };
+  }
+
+  function getQueuePose(index: number, count: number) {
+    const center = getQueueCenter();
+    if (!center) return null;
+    const safeCount = Math.max(1, count);
+    const radius = safeCount <= 1 ? 0 : 10.2;
+    const angle = -Math.PI / 2 + (index / safeCount) * Math.PI * 2;
+    const x = center.x + Math.cos(angle) * radius;
+    const z = center.z + Math.sin(angle) * radius;
+    return {
+      x,
+      z,
+      heading: Math.atan2(center.x - x, center.z - z),
+      speed: 0,
+    };
+  }
+
+  function stagedOnlinePlayers(room: OnlineRoomState): OnlinePlayerState[] {
+    return room.players.map((player, index) => {
+      const pose = getQueuePose(index, room.players.length);
+      return pose ? { ...player, pose } : player;
+    });
+  }
+
+  function lockLocalCarToQueue(room: OnlineRoomState) {
+    const index = room.players.findIndex((player) => player.id === onlinePlayerId);
+    if (index < 0) return;
+    const pose = getQueuePose(index, room.players.length);
+    if (!pose) return;
+    car.position.x = pose.x;
+    car.position.z = pose.z;
+    car.heading = pose.heading;
+    car.velocity.x = 0;
+    car.velocity.z = 0;
+    car.speed = 0;
+    car.yawVelocity = 0;
+    car.throttleAxis = 0;
+    car.brakeAxis = 0;
+    car.frontWheelAngle = 0;
+  }
 
   let startEventPending = false;
   let startEventRequestedAt = 0;
@@ -159,6 +214,17 @@ async function boot() {
     practiceZoneIndex = 0;
   };
 
+  const reloadActiveTrack = async () => {
+    gameScene.remove(trackView.root);
+    disposeSceneRoot(trackView.root);
+    trackView = await createTrackView(gameScene, activeTrack);
+    colliders = createTrackColliders(activeTrack);
+    coneMeshes = trackView.coneMeshes;
+    onlineGhosts.setTrack(activeTrack);
+  };
+
+  const mapEditor = createMapEditor(canvas, gameCamera, gameScene, { onReloadTrack: reloadActiveTrack });
+
   const resetEvent = () => {
     resetCar(car, activeTrack, getPracticeSpawn());
     resetDrift(drift);
@@ -178,6 +244,7 @@ async function boot() {
     results.hide();
     hud.root.hidden = true;
     onlineHud.hide();
+    mapEditor.hide();
     onlineMatchUi.hideAll();
     onlineClient.disconnect();
     onlineRoom = null;
@@ -186,6 +253,9 @@ async function boot() {
     onlineQueueOpen = false;
     onlineInputDebt = 0;
     onlineGhosts.clearRemotePlayers();
+    carView.root.visible = true;
+    tireTracks.root.visible = true;
+    tireSmoke.root.visible = true;
     garageUi.update(customization);
     garageUi.show();
     garageView.applyCustomization(customization);
@@ -211,12 +281,27 @@ async function boot() {
       activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
       appState = "event";
       results.hide();
-      hud.root.hidden = false;
       garageUi.hide();
       attachmentTuner.hide();
       resetEvent();
       setHudCarName();
-      hud.setMode(activeMode === "online-lobby" ? "online-lobby" : activeMode === "free-drive" ? "free-drive" : "drift-attack");
+      if (activeMode === "map-editor") {
+        hud.root.hidden = true;
+        onlineHud.hide();
+        onlineMatchUi.hideAll();
+        carView.root.visible = false;
+        tireTracks.root.visible = false;
+        tireSmoke.root.visible = false;
+        onlineGhosts.root.visible = false;
+        mapEditor.show(activeTrack);
+      } else {
+        mapEditor.hide();
+        carView.root.visible = true;
+        tireTracks.root.visible = true;
+        tireSmoke.root.visible = true;
+        hud.root.hidden = false;
+        hud.setMode(activeMode === "online-lobby" ? "online-lobby" : activeMode === "free-drive" ? "free-drive" : "drift-attack");
+      }
       canvas.focus();
     } catch (error) {
       console.error("Could not start event", error);
@@ -246,6 +331,10 @@ async function boot() {
       hud.root.hidden = false;
       garageUi.hide();
       attachmentTuner.hide();
+      mapEditor.hide();
+      carView.root.visible = true;
+      tireTracks.root.visible = true;
+      tireSmoke.root.visible = true;
       onlineMatchUi.hideQueue();
       resetEvent();
       setHudCarName();
@@ -282,6 +371,17 @@ async function boot() {
   };
 
   let portalLaunchPending = false;
+  const leaveOnlineQueue = () => {
+    onlineClient.disconnect();
+    onlineRoom = null;
+    onlinePlayerId = null;
+    onlineMatchActive = false;
+    onlineQueueOpen = false;
+    onlineInputDebt = 0;
+    onlineMatchUi.hideAll();
+    onlineGhosts.clearRemotePlayers();
+  };
+
   const launchModeFromPortal = (mode: "drift-attack" | "free-drive") => {
     if (portalLaunchPending || startEventPending) return;
     if (mode === "drift-attack" && activeMode === "online-lobby") {
@@ -312,14 +412,7 @@ async function boot() {
       onlineClient.setReady(ready);
     },
     onLeave() {
-      onlineClient.disconnect();
-      onlineRoom = null;
-      onlinePlayerId = null;
-      onlineMatchActive = false;
-      onlineQueueOpen = false;
-      onlineInputDebt = 0;
-      onlineMatchUi.hideAll();
-      onlineGhosts.clearRemotePlayers();
+      leaveOnlineQueue();
     },
   });
 
@@ -329,11 +422,19 @@ async function boot() {
       onlineRoom = room;
       onlineMatchUi.setLocalPlayer(playerId);
       onlineMatchUi.updateRoom(room);
+      if (activeMode === "online-lobby" && onlineQueueOpen) {
+        lockLocalCarToQueue(room);
+        onlineGhosts.setRemotePlayers(stagedOnlinePlayers(room), onlinePlayerId);
+      }
     },
     onRoom(room) {
       onlineRoom = room;
       onlineMatchUi.updateRoom(room);
       if (onlineMatchActive) onlineGhosts.setRemotePlayers(room.players, onlinePlayerId);
+      else if (activeMode === "online-lobby" && onlineQueueOpen) {
+        lockLocalCarToQueue(room);
+        onlineGhosts.setRemotePlayers(stagedOnlinePlayers(room), onlinePlayerId);
+      }
     },
     onMatchStart(room) {
       onlineRoom = room;
@@ -448,12 +549,78 @@ async function boot() {
   function updateEvent(dt: number) {
     const input = readInput();
 
+    if (activeMode === "map-editor") {
+      if (input.menu) {
+        showGarage();
+        return;
+      }
+      mapEditor.update(dt);
+      renderer.render(gameScene, gameCamera);
+      return;
+    }
+
     if (input.zoneNext && activeMode === "free-drive" && activeTrack.practiceZones?.length) {
       practiceZoneIndex = (practiceZoneIndex + 1) % activeTrack.practiceZones.length;
       resetEvent();
     }
-    if (input.reset) resetEvent();
-    if (input.menu) { showGarage(); return; }
+    const queueStaging = activeMode === "online-lobby" && onlineQueueOpen && !onlineMatchActive;
+    if (input.reset && !queueStaging) resetEvent();
+    if (input.menu) {
+      if (queueStaging) leaveOnlineQueue();
+      else showGarage();
+      return;
+    }
+
+    if (queueStaging) {
+      if (input.confirm && onlineRoom) {
+        const local = onlineRoom.players.find((player) => player.id === onlinePlayerId);
+        onlineClient.setReady(!local?.ready);
+      }
+
+      if (onlineRoom) {
+        lockLocalCarToQueue(onlineRoom);
+        onlineGhosts.setRemotePlayers(stagedOnlinePlayers(onlineRoom), onlinePlayerId);
+      }
+
+      onlineGhosts.root.visible = true;
+      onlineGhosts.update(dt);
+      tireSmoke.reset();
+      carView.sync(car);
+      engineSound.update(car, activeTuning);
+      cameraShake = Math.max(0, cameraShake - dt * 1.7);
+      updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit());
+      hud.update(car, drift);
+      hud.updateTimer(Infinity);
+      hud.setOnlineStatus(onlineRoom ? `Room ${onlineRoom.roomCode}` : "Joining Drift Attack");
+      const ghostPlayers = onlineGhosts.getPlayers();
+      const onlinePlayers: OnlineHudPlayer[] = [
+        {
+          id: "local-player",
+          name: "You",
+          color: 0xf1c75b,
+          position: { ...car.position },
+          speedMph: 0,
+          local: true,
+          distance: 0,
+        },
+        ...ghostPlayers.map((player) => {
+          const distance = Math.hypot(player.position.x - car.position.x, player.position.z - car.position.z);
+          return {
+            ...player,
+            distance,
+            screen: projectOnlineLabel(player.position, distance),
+          };
+        }),
+      ];
+      onlineHud.update({
+        players: onlinePlayers,
+        localPosition: car.position,
+        portalLabel: onlineRoom ? "Press E to ready up - Esc leaves queue" : "Joining Drift Attack queue",
+      });
+      hud.root.hidden = false;
+      renderer.render(gameScene, gameCamera);
+      return;
+    }
 
     if (activeMode === "drift-attack") {
       sessionTime = onlineMatchActive && onlineRoom?.matchEndsAt
@@ -557,7 +724,7 @@ async function boot() {
       onlineHud.update({
         players: onlinePlayers,
         localPosition: car.position,
-        portalLabel: nearbyPortal?.label ?? null,
+        portalLabel: nearbyPortal ? `Press E to confirm travel to ${nearbyPortal.label}` : null,
       });
     } else {
       onlineHud.hide();

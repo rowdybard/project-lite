@@ -136,7 +136,7 @@ export function createOnlineHud() {
       root.hidden = false;
       setText(root, "[data-online-count]", `${state.players.length}/32`);
       prompt.hidden = !state.portalLabel;
-      prompt.textContent = state.portalLabel ? `Press Enter to load ${state.portalLabel}` : "";
+      prompt.textContent = state.portalLabel ?? "";
       updateMap(state.players, state.localPosition);
       updateRoster(state.players);
       updateNameplates(state.players);

@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-online.mjs",
+    "dev:client": "vite --host 127.0.0.1 --port 5180",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "online:dev": "wrangler dev",
+    "online:dev": "wrangler dev --ip 127.0.0.1 --port 8787",
     "online:deploy": "wrangler deploy"
   },
   "devDependencies": {
