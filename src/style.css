@@ -588,7 +588,6 @@ canvas {
   bottom: 18px;
   z-index: 11;
   width: min(380px, calc(100vw - 36px));
-  pointer-events: none;
 }
 
 .online-match__panel {
@@ -646,6 +645,7 @@ canvas {
   font: inherit;
   font-weight: 900;
   text-transform: uppercase;
+  cursor: text;
 }
 
 .online-match__actions {

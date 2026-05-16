@@ -89,7 +89,7 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
           </div>
           <label class="online-match__code">
             <span>Room code</span>
-            <input data-room-code maxlength="6" placeholder="NEW ROOM" />
+            <input type="text" data-room-code maxlength="6" placeholder="NEW ROOM" autocomplete="off" spellcheck="false" />
           </label>
           <div class="online-match__actions">
             <button type="button" data-connect></button>
