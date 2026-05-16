@@ -754,6 +754,9 @@ async function boot() {
           rearSlip: car.rearSlipAngle,
           driftAmount: car.driftAmount,
           onTrack: scoringSurface,
+          totalScore: drift.totalScore,
+          comboScore: drift.comboScore,
+          multiplier: drift.multiplier,
         });
       }
     }

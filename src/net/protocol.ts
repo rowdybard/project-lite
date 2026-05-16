@@ -57,6 +57,9 @@ export type OnlineInputTelemetry = {
   rearSlip: number;
   driftAmount: number;
   onTrack: boolean;
+  totalScore: number;
+  comboScore: number;
+  multiplier: number;
 };
 
 export type ClientOnlineMessage =

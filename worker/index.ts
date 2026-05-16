@@ -18,8 +18,6 @@ export type Env = {
 type PlayerSession = {
   socket: WebSocket;
   player: OnlinePlayerState;
-  comboGrace: number;
-  driftTime: number;
   lastInputAt: number;
 };
 
@@ -64,28 +62,10 @@ function scoreInput(session: PlayerSession, input: OnlineInputTelemetry, dt: num
   if (phase !== "racing" || session.player.finished) return;
 
   session.player.pose = input.pose;
-  const angle = Math.abs(input.angle);
-  const rearSlip = Math.abs(input.rearSlip);
-  const isScoring = input.onTrack && input.speedMph > 18 && angle > 7.5 && rearSlip > 8 && input.driftAmount > 0.24;
-
-  if (!isScoring) {
-    session.comboGrace -= dt;
-    if (session.comboGrace <= 0 && session.player.combo > 0) {
-      session.player.score += session.player.combo;
-      session.player.combo = 0;
-      session.player.multiplier = 1;
-      session.driftTime = 0;
-    }
-    return;
-  }
-
-  session.comboGrace = 1.15;
-  session.driftTime += dt;
-  session.player.multiplier = Math.min(5, 1 + session.driftTime * 0.12);
-  const angleScore = Math.min(Math.max(angle - 4, 0), 58);
-  const speedScore = Math.min(input.speedMph, 95);
-  const throttleBonus = 0.96 + Math.max(0, input.throttle) * 0.18;
-  session.player.combo += speedScore * angleScore * 0.38 * throttleBonus * session.player.multiplier * dt;
+  // Trust client-provided scores instead of recalculating from telemetry
+  session.player.score = input.totalScore;
+  session.player.combo = input.comboScore;
+  session.player.multiplier = input.multiplier;
 }
 
 export class DriftRoom {
@@ -188,8 +168,6 @@ export class DriftRoom {
     this.sessions.set(socket, {
       socket,
       player,
-      comboGrace: 0,
-      driftTime: 0,
       lastInputAt: now(),
     });
     this.ensureSnapshotTimer();
@@ -248,12 +226,7 @@ export class DriftRoom {
     if (this.phase === "finished") return;
     this.phase = "finished";
     for (const session of this.sessions.values()) {
-      if (session.player.combo > 0) {
-        session.player.score += session.player.combo;
-        session.player.combo = 0;
-      }
       session.player.finished = true;
-      session.player.multiplier = 1;
     }
     this.broadcast({ type: "match_end", room: this.roomState() });
     this.clearTimers();
