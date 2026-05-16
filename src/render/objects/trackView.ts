@@ -59,7 +59,7 @@ function buildRoadDistances(samples: Vector3[]) {
 
 function roadSurfaceY(distance01: number, acrossPosition: number) {
   const bank = Math.sin(distance01 * Math.PI * 8 + 0.45) * 0.028;
-  const crown = (1 - Math.min(1, Math.abs(acrossPosition) * 2)) * 0.09;
+  const crown = (1 - Math.min(1, Math.abs(acrossPosition) * 2)) * 0.04;
   const edgeDrop = Math.pow(Math.abs(acrossPosition) * 2, 1.7) * 0.035;
   const longWave = Math.sin(distance01 * Math.PI * 34 + acrossPosition * 3.2) * 0.008;
   const fineBreakup = Math.sin(distance01 * Math.PI * 137 + acrossPosition * 19) * 0.0035;

@@ -587,7 +587,7 @@ export function createCarView(scale = 1) {
       root.rotation.y = car.heading;
       updateBrakeLights(car.brakeAxis);
       if (activeImportedCarId) {
-        importedRoot.position.y = -stanceDrop;
+        importedRoot.position.y = 0.036 - stanceDrop;
         importedRoot.rotation.x = car.bodyPitch * 0.055;
         importedRoot.rotation.z = -car.bodyRoll * 0.055;
         lightRig.position.y = importedRoot.position.y;
@@ -613,7 +613,7 @@ export function createCarView(scale = 1) {
         return;
       }
 
-      bodyGroup.position.y = 0.02 - stanceDrop + Math.abs(car.bodyPitch) * 0.006 + Math.abs(car.bodyRoll) * 0.004;
+      bodyGroup.position.y = 0.056 - stanceDrop + Math.abs(car.bodyPitch) * 0.006 + Math.abs(car.bodyRoll) * 0.004;
       bodyGroup.rotation.x = car.bodyPitch * 0.06;
       bodyGroup.rotation.z = -car.bodyRoll * 0.07;
       lightRig.position.y = bodyGroup.position.y;
