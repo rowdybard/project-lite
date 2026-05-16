@@ -13,6 +13,8 @@ type MapEditorUiCallbacks = {
   onSave: () => void;
   onExport: () => void;
   onClear: () => void;
+  onUndo: () => void;
+  onRotateReset: () => void;
 };
 
 export type MapEditorUi = ReturnType<typeof createMapEditorUi>;
@@ -23,28 +25,44 @@ export function createMapEditorUi(callbacks: MapEditorUiCallbacks) {
   root.hidden = true;
   root.innerHTML = `
     <div class="map-editor__header">
-      <span>Developer Tool</span>
-      <h2>Map Editor</h2>
+      <span class="map-editor__dev-label">Dev Tool</span>
+      <div class="map-editor__title-row">
+        <h2>Map Editor</h2>
+        <mark class="map-editor__unsaved" data-unsaved hidden>Unsaved</mark>
+      </div>
+      <div class="map-editor__track" data-track></div>
     </div>
-    <div class="map-editor__track" data-track>Track</div>
-    <div class="map-editor__tools">
-      <button type="button" data-tool="road">Paint Road</button>
-      <button type="button" data-tool="grass">Remove Road</button>
-      <button type="button" data-tool="asset">Place Asset</button>
+    <div class="map-editor__section">
+      <div class="map-editor__tools">
+        <button type="button" data-tool="road">Paint Road</button>
+        <button type="button" data-tool="grass">Erase Road</button>
+        <button type="button" data-tool="asset">Place Asset</button>
+        <button type="button" data-undo>Undo &nbsp;Ctrl+Z</button>
+      </div>
     </div>
-    <div class="map-editor__asset-cats" data-asset-cats></div>
-    <div class="map-editor__asset-grid" data-assets></div>
-    <label class="map-editor__brush">
-      <span>Brush / Scale</span>
-      <input data-brush type="range" min="3" max="26" step="1" value="10" />
-      <strong data-brush-value>10m</strong>
-    </label>
+    <div class="map-editor__section">
+      <div class="map-editor__asset-cats" data-asset-cats></div>
+      <div class="map-editor__asset-grid" data-assets></div>
+    </div>
+    <div class="map-editor__section">
+      <div class="map-editor__asset-edit" data-asset-edit hidden>
+        <button type="button" data-rotate-reset>Reset Rotation</button>
+      </div>
+      <label class="map-editor__brush">
+        <span>Brush / Scale</span>
+        <input data-brush type="range" min="3" max="26" step="1" value="10" />
+        <strong data-brush-value>10m</strong>
+      </label>
+    </div>
     <div class="map-editor__actions">
-      <button type="button" data-save>Save</button>
+      <button type="button" data-save>Save &nbsp;Ctrl+S</button>
       <button type="button" data-export>Export</button>
-      <button type="button" data-clear>Clear</button>
+      <button type="button" data-clear>Clear All</button>
     </div>
-    <p data-status>Right mouse look. WASD fly. Q/E down/up. Left mouse paints.</p>
+    <footer class="map-editor__footer">
+      <p data-status></p>
+      <div class="map-editor__stamp-count" data-stamp-count hidden></div>
+    </footer>
   `;
   document.body.append(root);
 
@@ -55,10 +73,13 @@ export function createMapEditorUi(callbacks: MapEditorUiCallbacks) {
   const toolButtons = [...root.querySelectorAll<HTMLButtonElement>("[data-tool]")];
   const assetCats = root.querySelector<HTMLElement>("[data-asset-cats]")!;
   const assetGrid = root.querySelector<HTMLElement>("[data-assets]")!;
+  const assetEdit = root.querySelector<HTMLElement>("[data-asset-edit]")!;
   const brush = root.querySelector<HTMLInputElement>("[data-brush]")!;
   const brushValue = root.querySelector<HTMLElement>("[data-brush-value]")!;
   const trackLabel = root.querySelector<HTMLElement>("[data-track]")!;
   const status = root.querySelector<HTMLElement>("[data-status]")!;
+  const unsavedBadge = root.querySelector<HTMLElement>("[data-unsaved]")!;
+  const stampCount = root.querySelector<HTMLElement>("[data-stamp-count]")!;
 
   const render = () => {
     for (const button of toolButtons) {
@@ -83,6 +104,7 @@ export function createMapEditorUi(callbacks: MapEditorUiCallbacks) {
       });
       assetGrid.append(button);
     }
+    assetEdit.hidden = activeTool !== "asset";
     brush.value = String(brushRadius);
     brushValue.textContent = activeTool === "asset" ? `${(brushRadius / 10).toFixed(1)}x` : `${brushRadius}m`;
   };
@@ -118,7 +140,11 @@ export function createMapEditorUi(callbacks: MapEditorUiCallbacks) {
 
   root.querySelector("[data-save]")!.addEventListener("click", callbacks.onSave);
   root.querySelector("[data-export]")!.addEventListener("click", callbacks.onExport);
-  root.querySelector("[data-clear]")!.addEventListener("click", callbacks.onClear);
+  root.querySelector("[data-clear]")!.addEventListener("click", () => {
+    if (confirm("Clear all map edits for this track? This cannot be undone.")) callbacks.onClear();
+  });
+  root.querySelector("[data-undo]")!.addEventListener("click", callbacks.onUndo);
+  root.querySelector("[data-rotate-reset]")!.addEventListener("click", callbacks.onRotateReset);
 
   render();
 
@@ -133,6 +159,11 @@ export function createMapEditorUi(callbacks: MapEditorUiCallbacks) {
     },
     setStatus(text: string) {
       status.textContent = text;
+    },
+    setDirty(dirty: boolean, count: number) {
+      unsavedBadge.hidden = !dirty;
+      stampCount.hidden = count === 0;
+      stampCount.textContent = `${count} stamp${count === 1 ? "" : "s"}`;
     },
     setTool(tool: MapEditTool) {
       activeTool = tool;

@@ -1,5 +1,4 @@
 import {
-  Color,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -44,7 +43,14 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
       activeTool = "asset";
       ui.setTool("asset");
       updateCursorMaterial();
-      ui.setStatus(`Placing ${mapEditorAssetOptions.find((option) => option.id === asset)?.label ?? asset}`);
+      ui.setStatus(`Placing ${mapEditorAssetOptions.find((option) => option.id === asset)?.label ?? asset} — R rotate, 0 reset`);
+    },
+    onUndo() {
+      doUndo();
+    },
+    onRotateReset() {
+      assetRotation = 0;
+      ui.setStatus("Rotation reset to 0°");
     },
     async onSave() {
       if (!track) return;
@@ -52,8 +58,9 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
         await saveMapEdits(track.id, stamps);
         liveLayer.clear();
         dirty = false;
+        ui.setDirty(false, stamps.length);
         await options.onReloadTrack();
-        ui.setStatus(`Saved ${stamps.length} edits to public/assets/map-edits/${track.id}.json`);
+        ui.setStatus(`Saved — ${stamps.length} stamp${stamps.length === 1 ? "" : "s"} written to ${track.id}.json`);
       } catch (error) {
         ui.setStatus(error instanceof Error ? error.message : String(error));
       }
@@ -67,7 +74,7 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
       anchor.download = `${track.id}-map-edits.json`;
       anchor.click();
       URL.revokeObjectURL(url);
-      ui.setStatus("Exported JSON patch");
+      ui.setStatus(`Exported ${stamps.length} stamp${stamps.length === 1 ? "" : "s"} as JSON`);
     },
     async onClear() {
       if (!track) return;
@@ -76,8 +83,9 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
         await clearMapEdits(track.id);
         liveLayer.clear();
         dirty = false;
+        ui.setDirty(false, 0);
         await options.onReloadTrack();
-        ui.setStatus("Cleared project map edits for this track");
+        ui.setStatus("All map edits cleared");
       } catch (error) {
         ui.setStatus(error instanceof Error ? error.message : String(error));
       }
@@ -119,6 +127,19 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
   let dirty = false;
   let lastPaintX = Infinity;
   let lastPaintZ = Infinity;
+
+  function doUndo() {
+    if (stamps.length === 0) {
+      ui.setStatus("Nothing to undo");
+      return;
+    }
+    stamps.pop();
+    const last = liveLayer.children[liveLayer.children.length - 1];
+    if (last) liveLayer.remove(last);
+    dirty = stamps.length > 0;
+    ui.setDirty(dirty, stamps.length);
+    ui.setStatus(`Undone — ${stamps.length} stamp${stamps.length === 1 ? "" : "s"} remaining`);
+  }
 
   function updateCursorMaterial() {
     cursor.material = activeTool === "road" || activeTool === "asset" ? cursorRoad : cursorGrass;
@@ -167,15 +188,33 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
     dirty = true;
     lastPaintX = groundPoint.x;
     lastPaintZ = groundPoint.z;
-    ui.setStatus(`${activeTool === "asset" ? activeAsset : activeTool === "road" ? "Road" : "Grass"} added. Save writes the map file.`);
+    ui.setDirty(true, stamps.length);
+    const label = activeTool === "asset" ? (mapEditorAssetOptions.find((o) => o.id === activeAsset)?.label ?? activeAsset) : activeTool === "road" ? "Road" : "Erase";
+    ui.setStatus(`${label} placed — ${stamps.length} stamp${stamps.length === 1 ? "" : "s"} · Ctrl+S to save`);
   }
 
   function onKeyDown(event: KeyboardEvent) {
     if (!active) return;
     keys.add(event.code);
-    if (event.code === "KeyR") {
-      assetRotation += Math.PI / 12;
-      ui.setStatus(`Asset rotation ${Math.round((assetRotation * 180) / Math.PI) % 360}deg`);
+    if (event.ctrlKey && event.code === "KeyZ") {
+      doUndo();
+      event.preventDefault();
+      return;
+    }
+    if (event.ctrlKey && event.code === "KeyS") {
+      document.querySelector<HTMLButtonElement>(".map-editor [data-save]")?.click();
+      event.preventDefault();
+      return;
+    }
+    if (event.code === "KeyR" && !event.ctrlKey) {
+      const step = event.shiftKey ? Math.PI / 36 : Math.PI / 12;
+      assetRotation += step;
+      ui.setStatus(`Rotation: ${Math.round(((assetRotation * 180) / Math.PI) % 360)}°  (Shift+R for fine, 0 to reset)`);
+      event.preventDefault();
+    }
+    if (event.code === "Digit0") {
+      assetRotation = 0;
+      ui.setStatus("Rotation reset to 0°");
       event.preventDefault();
     }
     if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"].includes(event.code)) event.preventDefault();
@@ -248,12 +287,15 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
       stamps = [];
       liveLayer.clear();
       dirty = false;
-      ui.show(`${nextTrack.name} (loading edits)`);
+      ui.show(`${nextTrack.name}`);
+      ui.setStatus("Loading edits…");
       void loadMapEdits(nextTrack.id).then((loaded) => {
         if (track?.id !== nextTrack.id) return;
         stamps = loaded;
-        ui.show(`${nextTrack.name} (${stamps.length} project edits)`);
-        ui.setStatus("Right mouse look. WASD fly. Q/E down/up. Left mouse paints. R rotates assets.");
+        dirty = false;
+        ui.show(`${nextTrack.name}`);
+        ui.setDirty(false, stamps.length);
+        ui.setStatus("RMB look · WASD fly · Q/E up/down · LMB paint · R rotate · Shift+R fine · 0 reset");
       }).catch((error) => {
         ui.setStatus(error instanceof Error ? error.message : String(error));
       });
@@ -292,10 +334,6 @@ export function createMapEditor(canvas: HTMLCanvasElement, camera: PerspectiveCa
       if (keys.has("KeyQ")) camera.position.y -= moveSpeed;
       camera.position.y = Math.max(4, Math.min(150, camera.position.y));
       setCameraFromAngles();
-      if (dirty) {
-        const color = activeTool === "road" ? new Color(0x68d8ff) : new Color(0xf1c75b);
-        cursorRoad.color.copy(color);
-      }
     },
   };
 }
