@@ -27,7 +27,7 @@ function makeWsUrl(roomCode?: string) {
     configured ||
     (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
       ? `ws://${window.location.hostname}:8787/api/ws`
-      : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/ws`);
+      : `wss://project-lite-online.workers.dev/api/ws`);
   const url = new URL(base);
   const cleanCode = sanitizeRoomCode(roomCode ?? "");
   if (cleanCode) url.searchParams.set("room", cleanCode);
