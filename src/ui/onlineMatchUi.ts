@@ -80,40 +80,53 @@ export function createOnlineMatchUi(callbacks: OnlineMatchUiCallbacks) {
             ? "Run finished"
             : status;
 
-    root.innerHTML = `
-      <section class="online-match__panel">
-        <div class="online-match__header">
-          <p>Private Drift Queue Slab</p>
-          <h2>${phaseText}</h2>
-        </div>
-        <label class="online-match__code">
-          <span>Room code</span>
-          <input data-room-code maxlength="6" value="${roomCode}" placeholder="NEW ROOM" />
-        </label>
-        <div class="online-match__actions">
-          <button type="button" data-connect>${connected ? "Reconnect" : "Create / Join"}</button>
-          <button type="button" data-ready ${canReady ? "" : "disabled"}>${readyLabel}</button>
-          <button type="button" data-leave>Leave</button>
-        </div>
-        <div class="online-match__meta">
-          <span>${latestRoom?.players.length ?? 0}/6 drivers</span>
-          <span>E ready</span>
-          <span>Esc leave</span>
-          <span>Instanced pad</span>
-          <span>90s Drift Attack</span>
-        </div>
-        <div class="online-match__players">${playerRows(latestRoom, localPlayerId)}</div>
-      </section>
-    `;
+    if (!root.querySelector(".online-match__panel")) {
+      root.innerHTML = `
+        <section class="online-match__panel">
+          <div class="online-match__header">
+            <p>Private Drift Queue Slab</p>
+            <h2 data-phase></h2>
+          </div>
+          <label class="online-match__code">
+            <span>Room code</span>
+            <input data-room-code maxlength="6" placeholder="NEW ROOM" />
+          </label>
+          <div class="online-match__actions">
+            <button type="button" data-connect></button>
+            <button type="button" data-ready></button>
+            <button type="button" data-leave>Leave</button>
+          </div>
+          <div class="online-match__meta">
+            <span data-drivers></span>
+            <span>E ready</span>
+            <span>Esc leave</span>
+            <span>Instanced pad</span>
+            <span>90s Drift Attack</span>
+          </div>
+          <div class="online-match__players"></div>
+        </section>
+      `;
+      const input = root.querySelector<HTMLInputElement>("[data-room-code]")!;
+      input.addEventListener("input", () => {
+        input.value = sanitizeRoomCode(input.value);
+        preferredRoomCode = input.value;
+      });
+      root.querySelector("[data-connect]")!.addEventListener("click", () => callbacks.onConnect(input.value || undefined));
+      root.querySelector("[data-ready]")!.addEventListener("click", () => callbacks.onReady(!local?.ready));
+      root.querySelector("[data-leave]")!.addEventListener("click", callbacks.onLeave);
+    }
 
     const input = root.querySelector<HTMLInputElement>("[data-room-code]")!;
-    input.addEventListener("input", () => {
-      input.value = sanitizeRoomCode(input.value);
-      preferredRoomCode = input.value;
-    });
-    root.querySelector("[data-connect]")!.addEventListener("click", () => callbacks.onConnect(input.value || undefined));
-    root.querySelector("[data-ready]")!.addEventListener("click", () => callbacks.onReady(!local?.ready));
-    root.querySelector("[data-leave]")!.addEventListener("click", callbacks.onLeave);
+    if (document.activeElement !== input) {
+      input.value = roomCode;
+    }
+    root.querySelector("[data-phase]")!.textContent = phaseText;
+    root.querySelector("[data-connect]")!.textContent = connected ? "Reconnect" : "Create / Join";
+    const readyBtn = root.querySelector<HTMLButtonElement>("[data-ready]")!;
+    readyBtn.textContent = readyLabel;
+    readyBtn.disabled = !canReady;
+    root.querySelector("[data-drivers]")!.textContent = `${latestRoom?.players.length ?? 0}/6 drivers`;
+    root.querySelector(".online-match__players")!.innerHTML = playerRows(latestRoom, localPlayerId);
   }
 
   function renderBoard() {
