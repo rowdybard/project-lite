@@ -1,7 +1,7 @@
 {
   "maxForwardSpeed": 62.6,
   "maxReverseSpeed": 16.5,
-  "acceleration": 36,
+  "acceleration": 27,
   "brakeForce": 52,
   "reverseAcceleration": 18,
   "drag": 0.0026,
