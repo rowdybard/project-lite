@@ -156,7 +156,7 @@ const vertexShader = `
     }
     vColor = texture2D(uColorLut, vec2(t01, 0.5)).rgb;
     vOpacity = texture2D(uOpacityLut, vec2(t01, 0.5)).r;
-    vGroundAlpha = uGroundFade > 0.0 ? clamp((worldPos.y - size * 0.5) / uGroundFade, 0.0, 1.0) : 1.0;
+    vGroundAlpha = uGroundFade > 0.0 ? smoothstep(-uGroundFade * 0.35, uGroundFade, worldPos.y) : 1.0;
   }
 `;
 

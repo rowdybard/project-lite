@@ -126,20 +126,30 @@ export type AsphaltDetailUniforms = {
   uPuddleMask: { value: Texture };
 };
 
+export type AsphaltDetailOptions = {
+  detailTiling?: number;
+  detailStrength?: number;
+  roughNoiseTiling?: number;
+  roughNoiseAmount?: number;
+};
+
 // Requires the material to have `map` (uses vMapUv) and a tangent-space normalMap.
 // Returns the live uniforms so a future rain phase can drive uWetness/uPuddleMask.
-export function applyAsphaltDetail(material: MeshStandardMaterial): AsphaltDetailUniforms {
+export function applyAsphaltDetail(
+  material: MeshStandardMaterial,
+  options: AsphaltDetailOptions = {},
+): AsphaltDetailUniforms {
   const uniforms: AsphaltDetailUniforms = {
     uWetness: { value: 0 },
     uPuddleMask: { value: getPuddlePlaceholder() },
   };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uDetailNormalMap = { value: getDetailNormalMap() };
-    shader.uniforms.uDetailTiling = { value: 3.5 };
-    shader.uniforms.uDetailStrength = { value: 0.5 };
+    shader.uniforms.uDetailTiling = { value: options.detailTiling ?? 3.5 };
+    shader.uniforms.uDetailStrength = { value: options.detailStrength ?? 0.5 };
     shader.uniforms.uRoughNoiseMap = { value: getRoughNoiseMap() };
-    shader.uniforms.uRoughNoiseTiling = { value: 0.22 };
-    shader.uniforms.uRoughNoiseAmount = { value: 0.16 };
+    shader.uniforms.uRoughNoiseTiling = { value: options.roughNoiseTiling ?? 0.22 };
+    shader.uniforms.uRoughNoiseAmount = { value: options.roughNoiseAmount ?? 0.16 };
     shader.uniforms.uWetness = uniforms.uWetness;
     shader.uniforms.uPuddleMask = uniforms.uPuddleMask;
     shader.uniforms.uPuddleTiling = { value: 0.1 };

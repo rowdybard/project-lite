@@ -18,27 +18,28 @@ function createSmokeEmitter(): GpuParticleSystem {
     space: "world",
     emitter: { type: "point" },
     rate: 0,
-    life: [0.9, 1.6],
-    speed: [0.15, 0.5],
-    gravity: 0.46,
-    drag: 0.2,
-    curlNoise: 0.25,
-    startSize: [0.5, 0.85],
+    life: [1.05, 1.8],
+    speed: [0.28, 0.78],
+    gravity: 0.62,
+    drag: 0.28,
+    curlNoise: 0.32,
+    startSize: [0.62, 1.02],
     rotationSpeed: [-0.9, 0.9],
-    groundFade: 0.45,
+    groundFade: 0.38,
     sizeOverLife: buildScalarLut([
-      { t: 0, value: 1.25 },
-      { t: 1, value: 3.05 },
+      { t: 0, value: 1.12 },
+      { t: 0.58, value: 2.25 },
+      { t: 1, value: 3.3 },
     ]),
     opacityOverLife: buildScalarLut([
-      { t: 0, value: 0.42 },
-      { t: 0.45, value: 0.18 },
+      { t: 0, value: 0.56 },
+      { t: 0.42, value: 0.27 },
       { t: 1, value: 0 },
     ]),
     colorOverLife: buildColorLut([
-      { t: 0, r: 0.96, g: 0.96, b: 0.94 },
-      { t: 0.6, r: 0.82, g: 0.82, b: 0.8 },
-      { t: 1, r: 0.7, g: 0.7, b: 0.68 },
+      { t: 0, r: 0.94, g: 0.94, b: 0.91 },
+      { t: 0.58, r: 0.76, g: 0.76, b: 0.73 },
+      { t: 1, r: 0.58, g: 0.58, b: 0.55 },
     ]),
     renderOrder: 12,
   });
@@ -58,10 +59,11 @@ export function createTireSmoke() {
       }
     },
     update(car: CarState, onTrack: boolean, dt: number) {
-      const activeSlide = Math.max(0, car.rearSlipVisual - 0.18);
-      const heatBoost = 0.72 + car.tireHeat * 0.48;
-      const strength = activeSlide * heatBoost * 1.18 * (onTrack ? 1 : 0.35);
-      const rate = strength > 0.12 ? strength * car.speed * 3 : 0;
+      const wheelSlip = Math.max(car.rearSlipVisual, car.handbrakeAmount * 0.72, car.slipAmount * 0.55);
+      const activeSlide = Math.max(0, wheelSlip - 0.09);
+      const heatBoost = 0.78 + car.tireHeat * 0.52;
+      const strength = activeSlide * heatBoost * 1.28 * (onTrack ? 1 : 0.18);
+      const rate = strength > 0.05 ? strength * Math.max(car.speed, 4) * 4.8 : 0;
 
       const sin = Math.sin(car.heading);
       const cos = Math.cos(car.heading);

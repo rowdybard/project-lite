@@ -10,6 +10,7 @@ const desiredPosition = new Vector3();
 const desiredLook = new Vector3();
 const renderPosition = new Vector3();
 const shakeOffset = new Vector3();
+const collisionTarget = new Vector3();
 let initialized = false;
 let smoothOrbit = 0;
 let orbitVelocity = 0;
@@ -74,6 +75,7 @@ function obstructCamera(target: Vector3, cameraPosition: Vector3, barriers: Barr
   const dz = cameraPosition.z - target.z;
 
   for (const barrier of barriers) {
+    if (barrier.halfLength > 20 && barrier.halfWidth > 2) continue;
     const cos = Math.cos(barrier.angle);
     const sin = Math.sin(barrier.angle);
     const startX = (target.x - barrier.x) * cos + (target.z - barrier.z) * sin;
@@ -168,7 +170,8 @@ export function updateChaseCamera(
   const shakeY = (Math.sin(shakePhase * 2.07 + 1.4) + Math.sin(shakePhase * 1.21) * 0.3) * shakeEnvelope * 0.08;
   shakeOffset.set(shakeX, shakeY, -shakeX * 0.35);
   renderPosition.copy(position).add(shakeOffset);
-  obstructCamera(lookPosition, renderPosition, barriers);
+  collisionTarget.set(car.position.x, 1.15, car.position.z);
+  obstructCamera(collisionTarget, renderPosition, barriers);
   camera.position.copy(renderPosition);
 
   const speedFov = Math.min(9, car.speed * 0.19);

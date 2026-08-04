@@ -37,6 +37,8 @@ import {
   createConcreteMaterial,
   createGrassMaterial,
   createGravelMaterial,
+  createIndoorAsphaltMaterial,
+  createIndoorTrackEdgeMaterial,
   createProceduralStainMaterial,
   createRoadPaintMaterial,
   createRubberMaterial,
@@ -211,16 +213,12 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
   const roadWidth = getRoadWidth(track);
   const mapEdits = await loadMapEdits(track.id).catch(() => []);
   const dressing = createDressingPlacement(track, samples, roadWidth, mapEdits);
-  const roadMaterial = createAsphaltMaterial({ x: 1, y: 1 });
-  if (indoor) {
-    roadMaterial.color.set(0x918d84);
-    roadMaterial.roughness = 0.94;
-    roadMaterial.envMapIntensity = 0.42;
-  }
+  const roadMaterial = indoor ? createIndoorAsphaltMaterial({ x: 1, y: 1 }) : createAsphaltMaterial({ x: 1, y: 1 });
   roadMaterial.side = DoubleSide;
   const road = new Mesh(createRoadGeometry(samples, roadWidth), roadMaterial);
   road.receiveShadow = true;
   group.add(road);
+  if (indoor) group.add(createIndoorTrackEdges(samples, roadWidth));
 
   const cornerMarkers = createCornerPoles(track, roadWidth, dressing);
   group.add(cornerMarkers.group);
@@ -230,12 +228,12 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
     group.add(createFoliage(samples, roadWidth, dressing));
     group.add(createRunoffPatches(track, samples, roadWidth, dressing));
   }
-  group.add(createRoadWearDecals(samples, roadWidth));
-  group.add(createPaintedLines(samples, roadWidth));
-  group.add(createPracticeAreas(track, samples, roadWidth));
+  group.add(createRoadWearDecals(samples, roadWidth, indoor));
+  group.add(createPaintedLines(samples, roadWidth, indoor));
+  group.add(createPracticeAreas(track, samples, roadWidth, indoor));
   group.add(await createModePortals(track));
   group.add(createOnlineLobbyDressing(track));
-  group.add(createCurbs(track, samples, roadWidth, dressing));
+  group.add(createCurbs(track, samples, roadWidth, dressing, indoor));
   const trackside = createTracksideDepth(track, samples, roadWidth, dressing);
   group.add(trackside.group);
   group.add(createTrackLandmarks(samples, roadWidth, dressing));
@@ -268,11 +266,11 @@ function createPracticeAreaSurface(
   return mesh;
 }
 
-function createPracticeAreas(track: TrackConfig, samples: Vector3[], roadWidth: number) {
+function createPracticeAreas(track: TrackConfig, samples: Vector3[], roadWidth: number, indoor = false) {
   const group = new Group();
   if (!track.practiceAreas) return group;
 
-  const asphaltMaterial = createAsphaltMaterial({ x: 1, y: 1 });
+  const asphaltMaterial = indoor ? createIndoorAsphaltMaterial({ x: 1, y: 1 }) : createAsphaltMaterial({ x: 1, y: 1 });
   const paintMaterial = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xd8d2bf, 0.68));
   const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 3, y: 2 }, 0.34));
   const coneMaterial = new MeshStandardMaterial({ color: 0xe68a2e, roughness: 0.72 });
@@ -703,6 +701,59 @@ async function createPortalHauler(color: number, mode: "drift-attack" | "free-dr
   group.add(loadingSign);
 
   return group;
+}
+
+function createIndoorTrackEdges(samples: Vector3[], roadWidth: number) {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const { cumulativeDistances, totalDistance } = buildRoadDistances(samples);
+  const profile = [roadWidth / 2 + 0.02, roadWidth / 2 + 0.62, roadWidth / 2 + 2.45];
+
+  for (let sideIndex = 0; sideIndex < 2; sideIndex++) {
+    const side = sideIndex === 0 ? -1 : 1;
+    for (let i = 0; i < samples.length; i++) {
+      const previous = samples[(i - 1 + samples.length) % samples.length];
+      const next = samples[(i + 1) % samples.length];
+      const tangent = next.clone().sub(previous).normalize();
+      const normal = new Vector3(-tangent.z, 0, tangent.x);
+      const distance01 = cumulativeDistances[i] / Math.max(totalDistance, 1);
+      for (let profileIndex = 0; profileIndex < profile.length; profileIndex++) {
+        const point = samples[i].clone().addScaledVector(normal, side * profile[profileIndex]);
+        const y = profileIndex === 0
+          ? roadSurfaceY(distance01, side * 0.5) + 0.003
+          : roadBaseY - (profileIndex === 1 ? 0.034 : 0.052);
+        positions.push(point.x, y, point.z);
+        uvs.push(profile[profileIndex] / asphaltTextureMeters, cumulativeDistances[i] / asphaltTextureMeters);
+      }
+    }
+  }
+
+  for (let sideIndex = 0; sideIndex < 2; sideIndex++) {
+    const sideBase = sideIndex * samples.length * profile.length;
+    for (let i = 0; i < samples.length; i++) {
+      const next = (i + 1) % samples.length;
+      for (let profileIndex = 0; profileIndex < profile.length - 1; profileIndex++) {
+        const a = sideBase + i * profile.length + profileIndex;
+        const b = a + 1;
+        const c = sideBase + next * profile.length + profileIndex;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute("uv2", new Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const material = createIndoorTrackEdgeMaterial({ x: 1, y: 1 });
+  material.side = DoubleSide;
+  const edges = new Mesh(geometry, material);
+  edges.receiveShadow = true;
+  return edges;
 }
 
 function createRoadGeometry(samples: Vector3[], roadWidth: number) {
@@ -1401,10 +1452,12 @@ function createTrackLandmarks(samples: Vector3[], roadWidth: number, dressing: D
   return group;
 }
 
-function createPaintedLines(samples: Vector3[], roadWidth: number) {
+function createPaintedLines(samples: Vector3[], roadWidth: number, indoor = false) {
   const group = new Group();
-  const edgeMaterial = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1.8, y: 1 }, 0xcfc8b7, 0.68));
-  const seamMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(0x15191d, 0.26));
+  const edgeMaterial = prepGroundOverlayMaterial(
+    createRoadPaintMaterial({ x: 1.8, y: 1 }, indoor ? 0x8b908d : 0xcfc8b7, indoor ? 0.46 : 0.68),
+  );
+  const seamMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(indoor ? 0x0c1012 : 0x15191d, indoor ? 0.42 : 0.26));
   const distances = buildRoadDistances(samples);
 
   for (let i = 0; i < samples.length; i += 8) {
@@ -1416,7 +1469,7 @@ function createPaintedLines(samples: Vector3[], roadWidth: number) {
 
     for (const side of [-1, 1]) {
       const lateral = side * (roadWidth / 2 - 0.68);
-      const line = createGroundDecal(3.6, 0.075, edgeMaterial, 10);
+      const line = createGroundDecal(3.6, indoor ? 0.14 : 0.075, edgeMaterial, 10);
       line.position.copy(samples[i].clone().addScaledVector(normal, lateral));
       line.position.y = roadSurfaceYAt(distances, i, lateral, roadWidth, 0.068);
       line.rotation.y = angle;
@@ -1435,14 +1488,17 @@ function createPaintedLines(samples: Vector3[], roadWidth: number) {
   return group;
 }
 
-function createRoadWearDecals(samples: Vector3[], roadWidth: number) {
+function createRoadWearDecals(samples: Vector3[], roadWidth: number, indoor = false) {
   const group = new Group();
-  const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 2.8, y: 1.2 }, 0.34));
-  const stainMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(0x121517, 0.22));
+  const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 2.8, y: 1.2 }, indoor ? 0.5 : 0.34));
+  const stainMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(0x121517, indoor ? 0.34 : 0.22));
   const rubberGeometry = groundDecalGeometry(6.4, 3.2);
   const stainGeometry = groundDecalGeometry(3.8, 0.52);
-  const rubberCount = Math.floor(samples.length / 12);
-  const stainCount = Math.floor(samples.length / 10);
+  const sampleCount = Math.ceil(samples.length / 5);
+  const rubberStride = indoor ? 3 : 12;
+  const stainStride = indoor ? 1 : 2;
+  const rubberCount = Math.ceil(sampleCount / rubberStride);
+  const stainCount = Math.ceil(sampleCount / stainStride);
   const rubber = new InstancedMesh(rubberGeometry, rubberMaterial, rubberCount);
   const stains = new InstancedMesh(stainGeometry, stainMaterial, stainCount);
   const matrix = new Matrix4();
@@ -1458,22 +1514,27 @@ function createRoadWearDecals(samples: Vector3[], roadWidth: number) {
     const tangent = next.clone().sub(previous).normalize();
     const normal = new Vector3(-tangent.z, 0, tangent.x);
     const angle = yawForTangentX(tangent);
+    const sampleIndex = i / 5;
 
-    if (i % 12 === 0 && rubberIndex < rubberCount) {
-      const lateral = Math.sin(i * 0.29) * roadWidth * 0.14;
+    if (sampleIndex % rubberStride === 0 && rubberIndex < rubberCount) {
+      const lateral = Math.sin(i * 0.29) * roadWidth * (indoor ? 0.22 : 0.14);
       const position = samples[i].clone().addScaledVector(normal, lateral);
       rotation.setFromAxisAngle(up, angle + ((((i * 11) % 100) / 100) - 0.5) * 0.18);
       matrix.compose(
         new Vector3(position.x, roadSurfaceYAt(distances, i, lateral, roadWidth, 0.078), position.z),
         rotation,
-        new Vector3(0.95 + ((i * 5) % 7) * 0.045, 1, 0.78 + ((i * 3) % 5) * 0.06),
+        new Vector3(
+          (0.95 + ((i * 5) % 7) * 0.045) * (indoor ? 1.2 : 1),
+          1,
+          (0.78 + ((i * 3) % 5) * 0.06) * (indoor ? 1.12 : 1),
+        ),
       );
       rubber.setMatrixAt(rubberIndex, matrix);
       rubberIndex += 1;
     }
 
-    if (i % 10 === 0 && stainIndex < stainCount) {
-      const lateral = ((((i * 19) % 100) / 100) - 0.5) * roadWidth * 0.72;
+    if (sampleIndex % stainStride === 0 && stainIndex < stainCount) {
+      const lateral = ((((i * 19) % 100) / 100) - 0.5) * roadWidth * (indoor ? 0.82 : 0.72);
       const position = samples[i].clone().addScaledVector(normal, lateral);
       rotation.setFromAxisAngle(up, angle + Math.PI * 0.5 + ((((i * 23) % 100) / 100) - 0.5) * 0.34);
       matrix.compose(
@@ -1520,10 +1581,20 @@ function createRunoffPatches(track: TrackConfig, samples: Vector3[], roadWidth: 
   return group;
 }
 
-function createCurbs(track: TrackConfig, samples: Vector3[], roadWidth: number, dressing: DressingPlacement) {
+function createCurbs(
+  track: TrackConfig,
+  samples: Vector3[],
+  roadWidth: number,
+  dressing: DressingPlacement,
+  indoor = false,
+) {
   const group = new Group();
-  const red = createRoadPaintMaterial({ x: 1, y: 1 }, 0xa33a32, 0.94);
-  const white = createRoadPaintMaterial({ x: 1, y: 1 }, 0xd7d1bf, 0.94);
+  const red = createRoadPaintMaterial({ x: 1, y: 1 }, indoor ? 0x6c3029 : 0xa33a32, 0.94);
+  const white = createRoadPaintMaterial({ x: 1, y: 1 }, indoor ? 0x898984 : 0xd7d1bf, 0.94);
+  if (indoor) {
+    red.envMapIntensity = 0.12;
+    white.envMapIntensity = 0.12;
+  }
 
   for (let i = 0; i < samples.length; i += 10) {
     const previous = samples[(i - 1 + samples.length) % samples.length];

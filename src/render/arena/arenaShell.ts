@@ -76,6 +76,7 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
   const pilasterMaterial = new MeshStandardMaterial({ color: arenaPalette.pilasterColor, roughness: 0.82, metalness: 0.12 });
   const roofMaterial = new MeshStandardMaterial({ color: arenaPalette.roofColor, roughness: 0.8, metalness: 0.2, side: DoubleSide });
   const steelMaterial = new MeshStandardMaterial({ color: arenaPalette.steelColor, roughness: 0.58, metalness: 0.5 });
+  const bleacherMaterial = new MeshStandardMaterial({ color: 0xc4ced2, roughness: 0.32, metalness: 0.78 });
   const stripeMaterial = new MeshStandardMaterial({ color: arenaPalette.accentColor, emissive: 0x351e04, roughness: 0.54 });
   const coolFixtureMaterial = new MeshStandardMaterial({
     color: 0xf4f8ff,
@@ -124,6 +125,7 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
   wallMaterial.envMapIntensity = 0.35;
   bandMaterial.envMapIntensity = 0.2;
   pilasterMaterial.envMapIntensity = 0.3;
+  bleacherMaterial.envMapIntensity = 0.72;
 
   // Wall pilasters: vertical ribs so the walls don't read as flat slabs at speed.
   const pilasterSpacing = 12;
@@ -197,6 +199,96 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
   stands.instanceMatrix.needsUpdate = true;
   if (stands.instanceColor) stands.instanceColor.needsUpdate = true;
   group.add(stands);
+
+  const bleacherRows = 5;
+  const bleacherRise = 0.68;
+  const bleacherRun = 0.88;
+  const bleacherFrontOffset = 28;
+  const bleacherBaseY = 6.75;
+  const bleacherSupportY = 5.85;
+  const bleacherSeatMatrices: Matrix4[] = [];
+  const bleacherStepMatrices: Matrix4[] = [];
+  const bleacherFrameMatrices: Matrix4[] = [];
+  const bleacherRailMatrices: Matrix4[] = [];
+  const bleacherPosition = new Vector3();
+  const bleacherScale = new Vector3();
+  const addBleacherBank = (wall: (typeof wallSpecs)[number], along: number, span: number) => {
+    const inwardX = wall.spanX ? 0 : wall.x < bounds.centerX ? 1 : -1;
+    const inwardZ = wall.spanX ? wall.z < bounds.centerZ ? 1 : -1 : 0;
+    const rotation = wall.spanX ? identity : yaw90;
+    const place = (bankAlong: number, offset: number, y: number) => {
+      bleacherPosition.set(
+        wall.spanX ? wall.x + bankAlong : wall.x + inwardX * offset,
+        y,
+        wall.spanX ? wall.z + inwardZ * offset : wall.z + bankAlong,
+      );
+    };
+
+    for (let row = 0; row < bleacherRows; row++) {
+      const rowOffset = bleacherFrontOffset - row * bleacherRun;
+      const seatY = bleacherBaseY + row * bleacherRise;
+      place(along, rowOffset, seatY);
+      bleacherScale.set(span, 0.14, 0.5);
+      matrix.compose(bleacherPosition, rotation, bleacherScale);
+      bleacherSeatMatrices.push(matrix.clone());
+
+      place(along, rowOffset + 0.46, seatY - 0.34);
+      bleacherScale.set(span, 0.1, 0.64);
+      matrix.compose(bleacherPosition, rotation, bleacherScale);
+      bleacherStepMatrices.push(matrix.clone());
+
+      place(along, rowOffset - 0.16, seatY - 0.26);
+      bleacherScale.set(span, 0.08, 0.08);
+      matrix.compose(bleacherPosition, rotation, bleacherScale);
+      bleacherFrameMatrices.push(matrix.clone());
+
+      for (const support of [-0.38, 0, 0.38]) {
+        const supportHeight = seatY - 0.16 - bleacherSupportY;
+        place(along + support * span, rowOffset - 0.16, bleacherSupportY + supportHeight * 0.5);
+        bleacherScale.set(0.1, supportHeight, 0.1);
+        matrix.compose(bleacherPosition, rotation, bleacherScale);
+        bleacherFrameMatrices.push(matrix.clone());
+      }
+    }
+
+    const topRowOffset = bleacherFrontOffset - (bleacherRows - 1) * bleacherRun;
+    const topSeatY = bleacherBaseY + (bleacherRows - 1) * bleacherRise;
+    place(along, topRowOffset - 0.32, topSeatY + 0.78);
+    bleacherScale.set(span, 0.07, 0.07);
+    matrix.compose(bleacherPosition, rotation, bleacherScale);
+    bleacherRailMatrices.push(matrix.clone());
+    for (const rail of [-0.48, 0, 0.48]) {
+      place(along + rail * span, topRowOffset - 0.32, topSeatY + 0.39);
+      bleacherScale.set(0.07, 0.78, 0.07);
+      matrix.compose(bleacherPosition, rotation, bleacherScale);
+      bleacherRailMatrices.push(matrix.clone());
+    }
+  };
+
+  for (const wall of wallSpecs) {
+    const span = wall.spanX ? wall.width : wall.depth;
+    const bankSpan = wall.spanX ? Math.min(18, span * 0.18) : Math.min(20, span * 0.22);
+    const bankOffsets = wall.spanX ? [-span * 0.23, span * 0.23] : [0];
+    for (const bankOffset of bankOffsets) addBleacherBank(wall, bankOffset, bankSpan);
+  }
+
+  const bleacherSeats = new InstancedMesh(new BoxGeometry(1, 0.14, 0.5), bleacherMaterial, bleacherSeatMatrices.length);
+  const bleacherSteps = new InstancedMesh(new BoxGeometry(1, 0.1, 0.64), bleacherMaterial, bleacherStepMatrices.length);
+  const bleacherFrames = new InstancedMesh(new BoxGeometry(1, 1, 1), steelMaterial, bleacherFrameMatrices.length);
+  const bleacherRails = new InstancedMesh(new BoxGeometry(1, 1, 1), steelMaterial, bleacherRailMatrices.length);
+  bleacherSeatMatrices.forEach((m, i) => bleacherSeats.setMatrixAt(i, m));
+  bleacherStepMatrices.forEach((m, i) => bleacherSteps.setMatrixAt(i, m));
+  bleacherFrameMatrices.forEach((m, i) => bleacherFrames.setMatrixAt(i, m));
+  bleacherRailMatrices.forEach((m, i) => bleacherRails.setMatrixAt(i, m));
+  bleacherSeats.instanceMatrix.needsUpdate = true;
+  bleacherSteps.instanceMatrix.needsUpdate = true;
+  bleacherFrames.instanceMatrix.needsUpdate = true;
+  bleacherRails.instanceMatrix.needsUpdate = true;
+  bleacherSeats.computeBoundingSphere();
+  bleacherSteps.computeBoundingSphere();
+  bleacherFrames.computeBoundingSphere();
+  bleacherRails.computeBoundingSphere();
+  group.add(bleacherSeats, bleacherSteps, bleacherFrames, bleacherRails);
 
   // Truss grid: main beams across the width plus cross purlins so the ceiling reads as structure.
   const trussCount = 9;

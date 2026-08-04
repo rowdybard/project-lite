@@ -7,7 +7,7 @@ import {
   TextureLoader,
   Vector2,
 } from "three";
-import { applyAsphaltDetail } from "./asphaltDetail";
+import { applyAsphaltDetail, type AsphaltDetailOptions } from "./asphaltDetail";
 
 type SurfaceRepeat = {
   x: number;
@@ -138,6 +138,46 @@ export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) 
   applyAsphaltDetail(material);
   material.needsUpdate = true;
   return material;
+}
+
+function createIndoorGritAsphaltMaterial(
+  repeat: SurfaceRepeat,
+  color: number,
+  normalScale: number,
+  envMapIntensity: number,
+  detailOptions: AsphaltDetailOptions,
+) {
+  const material = createPbrMaterial({
+    id: "Asphalt025A",
+    repeat,
+    color,
+    roughness: 1,
+    normalScale,
+    aoIntensity: 0.8,
+    displacementScale: 0,
+  });
+  material.envMapIntensity = envMapIntensity;
+  applyAsphaltDetail(material, detailOptions);
+  material.needsUpdate = true;
+  return material;
+}
+
+export function createIndoorAsphaltMaterial(repeat: SurfaceRepeat = { x: 1, y: 1 }) {
+  return createIndoorGritAsphaltMaterial(repeat, 0x34383a, 1.14, 0.07, {
+    detailTiling: 4.6,
+    detailStrength: 0.7,
+    roughNoiseTiling: 0.3,
+    roughNoiseAmount: 0.22,
+  });
+}
+
+export function createIndoorTrackEdgeMaterial(repeat: SurfaceRepeat = { x: 1, y: 1 }) {
+  return createIndoorGritAsphaltMaterial(repeat, 0x202426, 1.28, 0.03, {
+    detailTiling: 5.6,
+    detailStrength: 0.82,
+    roughNoiseTiling: 0.34,
+    roughNoiseAmount: 0.26,
+  });
 }
 
 export function createGrassMaterial(repeat: SurfaceRepeat = { x: 48, y: 42 }) {
