@@ -12,6 +12,7 @@ import {
 } from "three";
 import { paintColors, underglowColors, wheelColors, type CarCustomization } from "../../game/customization";
 import type { CarState } from "../../game/types";
+import { applyProceduralPaint } from "../materials/carPaint";
 import { createImportedCarModel, getAttachments, isImportedCar, type ImportedCarAttachments, type ImportedCarModel, type ImportedWheel } from "./importedCars";
 
 type WheelCorner = "fl" | "fr" | "rl" | "rr";
@@ -79,7 +80,6 @@ const setVisible = (visible: boolean, ...objects: (Mesh | Group)[]) => {
 function prepPaintMaterial(material: MeshStandardMaterial, paintHex: number) {
   material.color.setHex(paintHex);
   material.map = null;
-  material.normalMap = null;
   material.roughnessMap = null;
   material.metalnessMap = null;
   material.aoMap = null;
@@ -89,12 +89,17 @@ function prepPaintMaterial(material: MeshStandardMaterial, paintHex: number) {
   material.lightMap = null;
   material.vertexColors = false;
   material.flatShading = false;
-  material.roughness = 0.34;
+  material.roughness = 0.42;
   material.metalness = 0.08;
-  material.envMapIntensity = 0.82;
+  material.envMapIntensity = 0.85;
   if (material instanceof MeshPhysicalMaterial) {
-    material.clearcoat = 0.72;
-    material.clearcoatRoughness = 0.2;
+    material.clearcoat = 0.6;
+    material.clearcoatRoughness = 0.26;
+    applyProceduralPaint(material, paintHex);
+  } else {
+    // Strip the procedural normal map on non-physical materials so it doesn't leak.
+    material.normalMap = null;
+    material.normalScale.set(0, 0);
   }
   material.needsUpdate = true;
 }
@@ -104,17 +109,20 @@ function createContactShadowMaterial() {
   canvas.width = 128;
   canvas.height = 128;
   const ctx = canvas.getContext("2d")!;
-  const gradient = ctx.createRadialGradient(64, 64, 8, 64, 64, 62);
-  gradient.addColorStop(0, "rgba(0, 0, 0, 0.78)");
-  gradient.addColorStop(0.5, "rgba(0, 0, 0, 0.42)");
+  // Dense core under the chassis with a soft falloff — the car must read grounded indoors
+  // even where the single key spot doesn't reach.
+  const gradient = ctx.createRadialGradient(64, 64, 6, 64, 64, 62);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 0.95)");
+  gradient.addColorStop(0.42, "rgba(0, 0, 0, 0.72)");
+  gradient.addColorStop(0.72, "rgba(0, 0, 0, 0.3)");
   gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 128, 128);
   return new MeshBasicMaterial({
-    color: 0x0a0c0d,
+    color: 0x050607,
     map: new CanvasTexture(canvas),
     transparent: true,
-    opacity: 0.62,
+    opacity: 0.9,
     depthWrite: false,
   });
 }
@@ -151,11 +159,11 @@ export function createCarView(scale = 1) {
   importedRoot.scale.setScalar(1.15);
   const paintMaterial = new MeshPhysicalMaterial({
     color: 0xbfc3be,
-    roughness: 0.34,
+    roughness: 0.42,
     metalness: 0.08,
-    clearcoat: 0.72,
-    clearcoatRoughness: 0.2,
-    envMapIntensity: 0.82,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.26,
+    envMapIntensity: 0.85,
   });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });

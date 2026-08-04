@@ -1,5 +1,5 @@
 import "./style.css";
-import { Mesh, Timer, Vector3 } from "three";
+import { Mesh, Timer, Vector3, type Texture } from "three";
 import {
   applyTuningPreset,
   carTuningPaths,
@@ -30,9 +30,12 @@ import { createCamera, resetChaseCamera, updateChaseCamera } from "./render/app/
 import { createRenderer } from "./render/app/createRenderer";
 import { createPerformanceMonitor } from "./render/app/performanceMonitor";
 import { createScene, updateSceneLighting } from "./render/app/createScene";
+import { createArenaLightRig, type ArenaLightRig } from "./render/arena/lightRig";
+import { bakeArenaEnvironment } from "./render/arena/environmentBake";
+import { createPostPipeline, type PostPipeline } from "./render/post/postPipeline";
 import { createGarageView } from "./render/garage/garageView";
 import { createCarView } from "./render/objects/carView";
-import { createTireSmoke } from "./render/objects/tireSmoke";
+import { createTireSmoke } from "./render/objects/tireSmokeGpu";
 import { createTireTracks } from "./render/objects/tireTracks";
 import { createTrackView, updateCornerMarkerFlex } from "./render/objects/trackView";
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
@@ -42,6 +45,7 @@ import { createHud, createResultsOverlay } from "./ui/hud";
 import { createOnlineHud, type OnlineHudPlayer } from "./ui/onlineHud";
 import { createOnlineMatchUi } from "./ui/onlineMatchUi";
 import { createAttachmentTuner } from "./ui/attachmentTuner";
+import { createVfxEditor } from "./ui/vfxEditor";
 import { isImportedCar } from "./render/objects/importedCars";
 import { createEngineSound } from "./audio/engineSound";
 import { createTrackColliders, updateTrackCollision } from "./game/simulation/trackCollision";
@@ -71,6 +75,13 @@ async function boot() {
   const performanceMonitor = createPerformanceMonitor(renderer);
   const gameScene = createScene();
   const gameCamera = createCamera();
+  const postPipeline: PostPipeline | null = new URLSearchParams(window.location.search).has("nopost")
+    ? null
+    : createPostPipeline(renderer, gameScene, gameCamera);
+  const renderGameScene = (dt: number) => {
+    if (postPipeline) postPipeline.render(dt);
+    else renderer.render(gameScene, gameCamera);
+  };
   const timer = new Timer();
   timer.connect(document);
 
@@ -109,6 +120,20 @@ async function boot() {
 
   let activeTrack: TrackConfig = driftTrack;
   let trackView = await createTrackView(gameScene, activeTrack);
+  let arenaRig: ArenaLightRig | null = null;
+  let arenaEnv: Texture | null = null;
+  const setupArenaLighting = () => {
+    arenaRig?.dispose();
+    arenaRig = null;
+    arenaEnv?.dispose();
+    arenaEnv = null;
+    if (trackView.arena) {
+      arenaRig = createArenaLightRig(gameScene);
+      arenaEnv = bakeArenaEnvironment(renderer);
+      gameScene.environment = arenaEnv;
+    }
+  };
+  setupArenaLighting();
   let colliders = createTrackColliders(activeTrack);
   let coneMeshes = trackView.coneMeshes;
   let cornerMarkers = trackView.cornerMarkers;
@@ -302,6 +327,7 @@ async function boot() {
     disposeSceneRoot(trackView.root);
     activeTrack = nextTrack;
     trackView = await createTrackView(gameScene, activeTrack);
+    setupArenaLighting();
     colliders = createTrackColliders(activeTrack);
     coneMeshes = trackView.coneMeshes;
     cornerMarkers = trackView.cornerMarkers;
@@ -313,6 +339,7 @@ async function boot() {
     gameScene.remove(trackView.root);
     disposeSceneRoot(trackView.root);
     trackView = await createTrackView(gameScene, activeTrack);
+    setupArenaLighting();
     colliders = createTrackColliders(activeTrack);
     coneMeshes = trackView.coneMeshes;
     cornerMarkers = trackView.cornerMarkers;
@@ -577,6 +604,7 @@ async function boot() {
     },
   });
 
+  const vfxEditor = createVfxEditor();
   const garageUi = createGarageUi(customization, playerProfile, {
     onCustomizationChange(slot, value) {
       startEventPending = false;
@@ -608,6 +636,7 @@ async function boot() {
       garageUi.update(customization, playerProfile);
     },
     onStart: startEvent,
+    onOpenVfxLab: () => vfxEditor.show(),
   });
 
   const results = createResultsOverlay(startEvent, showGarage);
@@ -616,6 +645,7 @@ async function boot() {
   const onResize = () => {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.15));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    postPipeline?.setSize(window.innerWidth, window.innerHeight);
     const aspect = window.innerWidth / window.innerHeight;
     gameCamera.aspect = aspect;
     gameCamera.updateProjectionMatrix();
@@ -671,6 +701,11 @@ async function boot() {
     };
   }
 
+  const applyFocusLighting = () => {
+    if (arenaRig) arenaRig.update(car.position);
+    else updateSceneLighting(gameScene, car.position);
+  };
+
   function updateEvent(dt: number) {
     const liveInput = readInput();
     const probeTime = playerRouteProbe.elapsed;
@@ -697,7 +732,7 @@ async function boot() {
         return;
       }
       mapEditor.update(dt);
-      renderer.render(gameScene, gameCamera);
+      renderGameScene(dt);
       return;
     }
 
@@ -737,7 +772,7 @@ async function boot() {
       engineSound.update(car, activeTuning);
       cameraShake = Math.max(0, cameraShake - dt * 1.7);
       updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), colliders.barriers);
-      updateSceneLighting(gameScene, car.position);
+      applyFocusLighting();
       hud.update(car, drift);
       hud.updateTimer(Infinity);
       hud.setOnlineStatus(onlineRoom ? `Queue Pad ${onlineRoom.roomCode}` : "Opening Queue Pad");
@@ -771,7 +806,7 @@ async function boot() {
             : "Joining Drift Attack queue",
       });
       hud.root.hidden = false;
-      renderer.render(gameScene, gameCamera);
+      renderGameScene(dt);
       return;
     }
 
@@ -872,7 +907,7 @@ async function boot() {
     engineSound.update(car, activeTuning);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
     updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), colliders.barriers);
-    updateSceneLighting(gameScene, car.position);
+    applyFocusLighting();
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
     if (activeMode === "free-drive") {
@@ -913,7 +948,7 @@ async function boot() {
       onlineHud.hide();
     }
     hud.root.hidden = false;
-    renderer.render(gameScene, gameCamera);
+    renderGameScene(dt);
   }
 
   let prevAppState: AppState = appState;
@@ -935,7 +970,7 @@ async function boot() {
     } else if (appState === "event") {
       updateEvent(dt);
     } else {
-      renderer.render(gameScene, gameCamera);
+      renderGameScene(dt);
     }
 
     performanceMonitor.update(dt, lastFixedSteps, lastDroppedSeconds);

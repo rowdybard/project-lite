@@ -7,6 +7,7 @@ import {
   TextureLoader,
   Vector2,
 } from "three";
+import { applyAsphaltDetail } from "./asphaltDetail";
 
 type SurfaceRepeat = {
   x: number;
@@ -131,10 +132,10 @@ export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) 
     aoIntensity: 0.62,
     displacementScale: 0,
   });
-  // Keep the real color/normal/AO read, but avoid the roughness map turning the
-  // racing line into a wet-looking mirror under the low sun.
-  material.roughnessMap = null;
-  material.envMapIntensity = 0.08;
+  // Indoors: keep the real roughness map (no low sun to wet-mirror the racing line)
+  // and let the floor pick up a bit more of the baked arena environment.
+  material.envMapIntensity = 0.22;
+  applyAsphaltDetail(material);
   material.needsUpdate = true;
   return material;
 }

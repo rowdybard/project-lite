@@ -1,5 +1,4 @@
 import {
-  AmbientLight,
   BoxGeometry,
   BufferGeometry,
   CanvasTexture,
@@ -9,18 +8,17 @@ import {
   ConeGeometry,
   CylinderGeometry,
   DoubleSide,
-  DirectionalLight,
-  Fog,
+  FogExp2,
   Float32BufferAttribute,
   Group,
   IcosahedronGeometry,
   InstancedMesh,
+  Light,
   Matrix4,
   Mesh,
   MeshStandardMaterial,
   Object3D,
   PlaneGeometry,
-  PointLight,
   Quaternion,
   RingGeometry,
   Scene,
@@ -31,6 +29,8 @@ import {
 import type { CarState, TrackConfig } from "../../game/types";
 import { loadMapEdits, type MapEditStamp } from "../../game/editor/mapEdits";
 import { getRoadWidth, isTracksideClearZone } from "../../game/simulation/trackLayout";
+import { buildArenaShell, createIndoorVenueSign, type ArenaShellResult } from "../arena/arenaShell";
+import { arenaPalette } from "../arena/palette";
 import { loadGltf } from "../loaders/loadGltf";
 import {
   createAsphaltMaterial,
@@ -49,6 +49,7 @@ export type TrackViewResult = {
   root: Object3D;
   coneMeshes: Mesh[];
   cornerMarkers: CornerMarker[];
+  arena?: ArenaShellResult;
 };
 
 type CornerMarker = {
@@ -169,20 +170,26 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(bounds.centerX, -0.02, bounds.centerZ);
   ground.receiveShadow = true;
-  root.add(ground);
-  if (indoor) root.add(createIndoorDriftHall(bounds));
-  else root.add(createTrackBackdrop(track));
+  const arena = indoor ? buildArenaShell(bounds) : undefined;
+  // Indoor: the floor belongs to the shell so the environment bake captures floor bounce.
+  if (arena) {
+    arena.group.add(ground);
+    root.add(arena.group);
+  } else {
+    root.add(ground);
+    root.add(createTrackBackdrop(track));
+  }
 
   if (track.roadPath && track.roadPath.length >= 4) {
     const { group, coneMeshes, cornerMarkers } = await createRoadFromPath(track, indoor);
     optimizeTrackShadows(group);
     root.add(group);
     scene.add(root);
-    return { root, coneMeshes, cornerMarkers };
+    return { root, coneMeshes, cornerMarkers, arena };
   } else {
     root.add(createRingRoad(track));
     scene.add(root);
-    return { root, coneMeshes: [], cornerMarkers: [] };
+    return { root, coneMeshes: [], cornerMarkers: [], arena };
   }
 
 }
@@ -208,7 +215,7 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
   if (indoor) {
     roadMaterial.color.set(0x918d84);
     roadMaterial.roughness = 0.94;
-    roadMaterial.envMapIntensity = 0.28;
+    roadMaterial.envMapIntensity = 0.42;
   }
   roadMaterial.side = DoubleSide;
   const road = new Mesh(createRoadGeometry(samples, roadWidth), roadMaterial);
@@ -758,143 +765,41 @@ function getTrackBounds(track: TrackConfig) {
 }
 
 function configureTrackMood(scene: Scene, indoor: boolean) {
-  const stored = scene.userData.outdoorMood as
-    | { background: Scene["background"]; fog: Scene["fog"]; environmentIntensity: number; sunIntensity: number }
-    | undefined;
-  const drivingSun = scene.userData.drivingSun as DirectionalLight | undefined;
+  type OutdoorMood = {
+    background: Scene["background"];
+    fog: Scene["fog"];
+    environment: Scene["environment"];
+    environmentIntensity: number;
+  };
+  const stored = scene.userData.outdoorMood as OutdoorMood | undefined;
 
   if (!stored) {
     scene.userData.outdoorMood = {
       background: scene.background,
       fog: scene.fog,
+      environment: scene.environment,
       environmentIntensity: scene.environmentIntensity,
-      sunIntensity: drivingSun?.intensity ?? 2.75,
-    };
+    } satisfies OutdoorMood;
   }
 
-  const outdoor = scene.userData.outdoorMood as {
-    background: Scene["background"];
-    fog: Scene["fog"];
-    environmentIntensity: number;
-    sunIntensity: number;
-  };
+  const outdoor = scene.userData.outdoorMood as OutdoorMood;
+  const outdoorLights = scene.userData.outdoorLights as Record<string, Light> | undefined;
   scene.userData.indoorVenue = indoor;
   if (indoor) {
-    scene.background = new Color(0x242a2d);
-    scene.fog = new Fog(0x3f4648, 82, 310);
-    scene.environmentIntensity = 0.14;
-    if (drivingSun) drivingSun.intensity = 0.2;
+    // Enclosed arena: no sun, no sky. Every photon comes from the ArenaLightRig.
+    scene.background = new Color(arenaPalette.background);
+    scene.fog = new FogExp2(arenaPalette.fogColor, arenaPalette.fogDensity);
+    scene.environment = null;
+    scene.environmentIntensity = arenaPalette.environmentIntensity;
+    if (outdoorLights) for (const light of Object.values(outdoorLights)) light.visible = false;
     return;
   }
 
   scene.background = outdoor.background;
   scene.fog = outdoor.fog;
+  scene.environment = outdoor.environment;
   scene.environmentIntensity = outdoor.environmentIntensity;
-  if (drivingSun) drivingSun.intensity = outdoor.sunIntensity;
-}
-
-function createIndoorVenueSign(label: string, accent: number) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = 256;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#151b1e";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = `#${accent.toString(16).padStart(6, "0")}`;
-  ctx.fillRect(0, 0, canvas.width, 20);
-  ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
-  ctx.fillStyle = "#f1eee2";
-  ctx.font = "900 72px Arial, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, canvas.width / 2, canvas.height / 2 + 3);
-
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  return new Mesh(
-    new PlaneGeometry(20, 5),
-    new MeshStandardMaterial({
-      map: texture,
-      emissive: 0x2f281d,
-      emissiveMap: texture,
-      emissiveIntensity: 0.16,
-      roughness: 0.68,
-      side: DoubleSide,
-    }),
-  );
-}
-
-function createIndoorDriftHall(bounds: ReturnType<typeof getTrackBounds>) {
-  const group = new Group();
-  const wallHeight = 25;
-  const roofY = 25.2;
-  const inset = 4.5;
-  const innerWidth = bounds.width - inset * 2;
-  const innerDepth = bounds.depth - inset * 2;
-  const wallMaterial = new MeshStandardMaterial({ color: 0x555a59, roughness: 0.91, metalness: 0.03, side: DoubleSide });
-  const roofMaterial = new MeshStandardMaterial({ color: 0x1d2427, roughness: 0.8, metalness: 0.2, side: DoubleSide });
-  const steelMaterial = new MeshStandardMaterial({ color: 0x20292d, roughness: 0.58, metalness: 0.5 });
-  const stripeMaterial = new MeshStandardMaterial({ color: 0xd6a63d, emissive: 0x351e04, roughness: 0.54 });
-  const lightMaterial = new MeshStandardMaterial({ color: 0xf5e7bf, emissive: 0xffc873, emissiveIntensity: 1.15, roughness: 0.3 });
-  group.add(new AmbientLight(0xe3e9e3, 0.5));
-
-  for (const wall of [
-    { width: innerWidth, depth: 0.8, x: bounds.centerX, z: bounds.centerZ - innerDepth / 2 },
-    { width: innerWidth, depth: 0.8, x: bounds.centerX, z: bounds.centerZ + innerDepth / 2 },
-    { width: 0.8, depth: innerDepth, x: bounds.centerX - innerWidth / 2, z: bounds.centerZ },
-    { width: 0.8, depth: innerDepth, x: bounds.centerX + innerWidth / 2, z: bounds.centerZ },
-  ]) {
-    const shell = new Mesh(new BoxGeometry(wall.width, wallHeight, wall.depth), wallMaterial);
-    shell.position.set(wall.x, wallHeight / 2, wall.z);
-    shell.receiveShadow = true;
-    const stripe = new Mesh(new BoxGeometry(wall.width + 0.04, 0.5, wall.depth + 0.05), stripeMaterial);
-    stripe.position.set(wall.x, 3.1, wall.z);
-    group.add(shell, stripe);
-  }
-
-  const roof = new Mesh(new BoxGeometry(innerWidth + 0.8, 0.5, innerDepth + 0.8), roofMaterial);
-  roof.position.set(bounds.centerX, roofY, bounds.centerZ);
-  roof.receiveShadow = true;
-  group.add(roof);
-
-  const trussCount = 9;
-  const trusses = new InstancedMesh(new BoxGeometry(innerWidth - 1.2, 0.24, 0.28), steelMaterial, trussCount);
-  const fixtures = new InstancedMesh(new BoxGeometry(4.8, 0.18, 0.88), lightMaterial, trussCount * 2);
-  const matrix = new Matrix4();
-  let fixtureIndex = 0;
-  for (let i = 0; i < trussCount; i++) {
-    const z = bounds.centerZ - innerDepth * 0.4 + (i / (trussCount - 1)) * innerDepth * 0.8;
-    matrix.makeTranslation(bounds.centerX, roofY - 2.05, z);
-    trusses.setMatrixAt(i, matrix);
-    for (const offset of [-innerWidth * 0.23, innerWidth * 0.23]) {
-      matrix.makeTranslation(bounds.centerX + offset, roofY - 2.5, z);
-      fixtures.setMatrixAt(fixtureIndex++, matrix);
-    }
-  }
-  trusses.instanceMatrix.needsUpdate = true;
-  fixtures.count = fixtureIndex;
-  fixtures.instanceMatrix.needsUpdate = true;
-  group.add(trusses, fixtures);
-
-  for (const xRatio of [-0.26, 0.26]) {
-    for (const zRatio of [-0.28, 0, 0.28]) {
-      const light = new PointLight(0xffd7a5, 52, 128, 1.5);
-      light.position.set(bounds.centerX + innerWidth * xRatio, roofY - 3.1, bounds.centerZ + innerDepth * zRatio);
-      group.add(light);
-    }
-  }
-
-  const overhead = new DirectionalLight(0xffe2bd, 0.9);
-  overhead.position.set(bounds.centerX - innerWidth * 0.18, roofY - 1, bounds.centerZ - innerDepth * 0.12);
-  overhead.target.position.set(bounds.centerX, 0, bounds.centerZ);
-  group.add(overhead, overhead.target);
-
-  const sign = createIndoorVenueSign("PROJECT LITE  //  DRIFT LAB", 0xd6a63d);
-  sign.position.set(bounds.centerX, 10.5, bounds.centerZ - innerDepth / 2 + 0.46);
-  sign.rotation.y = Math.PI;
-  group.add(sign);
-
-  return group;
+  if (outdoorLights) for (const light of Object.values(outdoorLights)) light.visible = true;
 }
 
 function createIndoorPaddock(track: TrackConfig) {

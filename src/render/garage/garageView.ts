@@ -1,19 +1,19 @@
 import {
   BoxGeometry,
   Group,
-  HemisphereLight,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
   PlaneGeometry,
   Scene,
-  SpotLight,
   Vector3,
   WebGLRenderer,
 } from "three";
 import type { CarCustomization } from "../../game/customization";
 import { createCarView } from "../objects/carView";
-import { createSkyEnvironment } from "../app/createScene";
+import { createArenaLightRig } from "../arena/lightRig";
+import { bakeArenaEnvironment } from "../arena/environmentBake";
+import { arenaPalette } from "../arena/palette";
 import { createPreviewCarState } from "./previewCarState";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -22,7 +22,7 @@ const lerp = (from: number, to: number, t: number) => from + (to - from) * t;
 export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRenderer, customization: CarCustomization) {
   const scene = new Scene();
   scene.background = null;
-  scene.environment = createSkyEnvironment();
+  scene.environmentIntensity = arenaPalette.environmentIntensity;
 
   const camera = new PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 120);
   const carView = createCarView(1);
@@ -31,15 +31,40 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   scene.add(carView.root);
 
   const garage = new Group();
-  const concrete = new MeshStandardMaterial({ color: 0x2d3135, roughness: 0.88 });
-  const wallMaterial = new MeshStandardMaterial({ color: 0x161d25, roughness: 0.78 });
+  const concrete = new MeshStandardMaterial({ color: 0x2d3135, roughness: 0.88, envMapIntensity: 0.3 });
+  const wallMaterial = new MeshStandardMaterial({ color: 0x161d25, roughness: 0.78, envMapIntensity: 0.25 });
   const doorMaterial = new MeshStandardMaterial({ color: 0x242c35, roughness: 0.72, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0xd0a63e, emissive: 0x241600, roughness: 0.52 });
+  const platformMaterial = new MeshStandardMaterial({
+    color: 0x1a1f25,
+    roughness: 0.42,
+    metalness: 0.35,
+    envMapIntensity: 0.55,
+  });
+  const platformRingMaterial = new MeshStandardMaterial({
+    color: arenaPalette.accentColor,
+    emissive: arenaPalette.accentColor,
+    emissiveIntensity: 0.4,
+    roughness: 0.4,
+    metalness: 0.2,
+  });
 
   const floor = new Mesh(new PlaneGeometry(18, 14), concrete);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   garage.add(floor);
+
+  // Turntable platform under the car: a low disc with an emissive accent ring so the
+  // car reads as the focal point and the floor reflection breaks up around it.
+  const platform = new Mesh(new PlaneGeometry(4.6, 4.6), platformMaterial);
+  platform.rotation.x = -Math.PI / 2;
+  platform.position.set(0, 0.02, 0);
+  platform.receiveShadow = true;
+  garage.add(platform);
+  const ring = new Mesh(new PlaneGeometry(4.8, 4.8), platformRingMaterial);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(0, 0.015, 0);
+  garage.add(ring);
 
   const backWall = new Mesh(new BoxGeometry(18, 5, 0.28), wallMaterial);
   backWall.position.set(0, 2.5, -5.8);
@@ -64,24 +89,40 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
     garage.add(seam);
   }
 
+  const coolStripMaterial = new MeshStandardMaterial({
+    color: 0xf4f8ff,
+    emissive: arenaPalette.fixtureCoolEmissive,
+    emissiveIntensity: arenaPalette.fixtureCoolIntensity,
+    roughness: 0.3,
+  });
   for (const x of [-3.8, 3.8]) {
-    const light = new Mesh(new BoxGeometry(2.4, 0.1, 0.34), trimMaterial);
+    const light = new Mesh(new BoxGeometry(2.4, 0.1, 0.34), coolStripMaterial);
     light.position.set(x, 4.75, -1.2);
     garage.add(light);
   }
 
-  const mainLight = new SpotLight(0xffffff, 520, 18, Math.PI / 4, 0.55, 1.6);
-  mainLight.position.set(0, 6.8, 2.8);
-  mainLight.target.position.set(0, 0.4, 0);
-  mainLight.castShadow = true;
-  scene.add(mainLight, mainLight.target);
-  scene.add(new HemisphereLight(0xc8dcf0, 0x292d28, 0.52));
+  const warmSconceMaterial = new MeshStandardMaterial({
+    color: 0xffe0b8,
+    emissive: arenaPalette.fixtureWarmEmissive,
+    emissiveIntensity: arenaPalette.fixtureWarmIntensity,
+    roughness: 0.34,
+  });
+  for (const x of [-5.4, 5.4]) {
+    const sconce = new Mesh(new BoxGeometry(1.1, 0.3, 0.22), warmSconceMaterial);
+    sconce.position.set(x, 3.4, -5.52);
+    garage.add(sconce);
+  }
 
-  const fillLight = new SpotLight(0x9fc8ff, 150, 18, Math.PI / 5, 0.75, 2);
-  fillLight.position.set(-5, 4, 4);
-  fillLight.target.position.set(0, 0.6, 0);
-  scene.add(fillLight, fillLight.target);
   scene.add(garage);
+  // Tight 9m shadow frustum at 512: the garage is 18m wide and the car sits at the
+  // center, so texels concentrate on the car instead of empty floor (was 50m @ 1024).
+  const rig = createArenaLightRig(scene, {
+    intensityScale: 0.04,
+    shadowMapSize: 512,
+    shadowHalfExtent: 9,
+  });
+  rig.update({ x: 0, z: 0 });
+  scene.environment = bakeArenaEnvironment(renderer);
 
   let dragging = false;
   let lastX = 0;

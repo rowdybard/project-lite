@@ -15,6 +15,12 @@ type LitScene = Scene & {
   userData: {
     drivingSun?: DirectionalLight;
     drivingSunTarget?: Object3D;
+    outdoorLights?: {
+      ambient: AmbientLight;
+      hemi: HemisphereLight;
+      sun: DirectionalLight;
+      skyFill: DirectionalLight;
+    };
   };
 };
 
@@ -26,8 +32,9 @@ export function createScene() {
   scene.environmentIntensity = 0.34;
   scene.fog = new Fog(0x91aab0, 165, 535);
 
-  scene.add(new AmbientLight(0xe7eee8, 0.38));
-  scene.add(new HemisphereLight(0xc5def0, 0x3d4d35, 1.28));
+  const ambient = new AmbientLight(0xe7eee8, 0.38);
+  const hemi = new HemisphereLight(0xc5def0, 0x3d4d35, 1.28);
+  scene.add(ambient, hemi);
 
   const sunTarget = new Object3D();
   const sun = new DirectionalLight(0xffd6a1, 2.75);
@@ -49,6 +56,7 @@ export function createScene() {
   scene.add(skyFill);
   scene.userData.drivingSun = sun;
   scene.userData.drivingSunTarget = sunTarget;
+  scene.userData.outdoorLights = { ambient, hemi, sun, skyFill };
   updateSceneLighting(scene, { x: 0, z: 0 });
 
   return scene;
