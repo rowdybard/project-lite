@@ -20,15 +20,16 @@ export function createHud() {
       <span>Rear Slip <strong data-rear-slip>0 deg</strong></span>
     </div>
     <div class="drift-score">
-      <div class="drift-score__label">Drift score</div>
+      <div class="drift-score__label">Banked</div>
       <div class="drift-score__total" data-total-score>0</div>
       <div class="drift-score__combo">
-        <span data-combo-score>+0</span>
-        <strong data-multiplier>x1.0</strong>
+        <span>Live</span>
+        <b data-combo-score>+0</b>
       </div>
-      <div class="drift-score__meta">
-        <span>Chain <strong data-chain>0.0s</strong></span>
-        <span>Best <strong data-best-run>0</strong></span>
+      <div class="drift-score__status">
+        <strong data-multiplier>x1.0</strong>
+        <span data-tier>Tier 1 Initiate</span>
+        <span data-chain>Ready</span>
       </div>
       <div class="drift-score__callout" data-callout hidden>Drift</div>
     </div>
@@ -57,15 +58,15 @@ export function createHud() {
         `${Math.round(car.weightForward * 100)}F/${Math.round((1 - car.weightForward) * 100)}R`;
       root.querySelector("[data-angle]")!.textContent = `${Math.round(car.slipAngle)} deg`;
       root.querySelector("[data-rear-slip]")!.textContent = `${Math.round(Math.abs(car.rearSlipAngle))} deg`;
-      root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore + drift.comboScore);
+      root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore);
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
       root.querySelector("[data-multiplier]")!.textContent = `x${drift.multiplier.toFixed(1)}`;
-      root.querySelector("[data-chain]")!.textContent = formatTime(drift.driftTime);
-      root.querySelector("[data-best-run]")!.textContent = formatScore(drift.bestRun);
+      root.querySelector("[data-tier]")!.textContent = `Tier ${drift.tier + 1} ${drift.tierName}`;
+      root.querySelector("[data-chain]")!.textContent = drift.active ? `${formatTime(drift.driftTime)} chain` : "Ready";
 
       const callout = root.querySelector("[data-callout]") as HTMLElement;
-      callout.textContent = drift.calloutTimer > 0 ? drift.callout : drift.grade;
-      callout.hidden = drift.calloutTimer <= 0 && !drift.active;
+      callout.textContent = drift.callout;
+      callout.hidden = drift.calloutTimer <= 0;
     },
     updateTimer(secondsRemaining: number) {
       root.querySelector("[data-time-label]")!.textContent = "Time";

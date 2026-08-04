@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.wrangler/
+.wrangler-local/
 
 # Windsurf browser preview temp profiles
 .chrome-test-*/

@@ -1,6 +1,7 @@
 import {
   BoxGeometry,
   Group,
+  HemisphereLight,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
@@ -12,6 +13,7 @@ import {
 } from "three";
 import type { CarCustomization } from "../../game/customization";
 import { createCarView } from "../objects/carView";
+import { createSkyEnvironment } from "../app/createScene";
 import { createPreviewCarState } from "./previewCarState";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -20,6 +22,7 @@ const lerp = (from: number, to: number, t: number) => from + (to - from) * t;
 export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRenderer, customization: CarCustomization) {
   const scene = new Scene();
   scene.background = null;
+  scene.environment = createSkyEnvironment();
 
   const camera = new PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 120);
   const carView = createCarView(1);
@@ -72,6 +75,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   mainLight.target.position.set(0, 0.4, 0);
   mainLight.castShadow = true;
   scene.add(mainLight, mainLight.target);
+  scene.add(new HemisphereLight(0xc8dcf0, 0x292d28, 0.52));
 
   const fillLight = new SpotLight(0x9fc8ff, 150, 18, Math.PI / 5, 0.75, 2);
   fillLight.position.set(-5, 4, 4);

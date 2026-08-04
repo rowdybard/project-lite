@@ -226,10 +226,9 @@ export class DriftRoom {
     if (this.phase === "finished") return;
     this.phase = "finished";
     for (const session of this.sessions.values()) {
-      if (session.player.combo > 0) {
-        session.player.score += session.player.combo;
-        session.player.combo = 0;
-      }
+      // The client score is already banked score plus its active combo.
+      // Preserve that single total and only close the combo presentation.
+      session.player.combo = 0;
       session.player.finished = true;
     }
     this.broadcast({ type: "match_end", room: this.roomState() });

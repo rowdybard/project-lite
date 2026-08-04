@@ -6,13 +6,11 @@ let resetPressed = false;
 let confirmPressed = false;
 let menuPressed = false;
 let zoneNextPressed = false;
-let handbrakePulseUntil = 0;
 
 const handbrakeKeys = new Set(["Space", "ShiftLeft", "ShiftRight"]);
 
 // Gamepad state
 let cameraOrbit = 0;
-let padHandbrakePulseUntil = 0;
 let padConfirmWasPressed = false;
 
 function deadzone(value: number, threshold = 0.12): number {
@@ -30,10 +28,6 @@ function getGamepad(): Gamepad | null {
 
 export function bindInput(): () => void {
   const onKeyDown = (event: KeyboardEvent) => {
-    if (handbrakeKeys.has(event.code) && !keys.has(event.code)) {
-      handbrakePulseUntil = performance.now() + 260;
-    }
-
     keys.add(event.code);
 
     if (event.code === "KeyT") debugPressed = true;
@@ -71,21 +65,17 @@ export function resetInputState() {
   confirmPressed = false;
   menuPressed = false;
   zoneNextPressed = false;
-  handbrakePulseUntil = 0;
-  padHandbrakePulseUntil = 0;
   padConfirmWasPressed = false;
   cameraOrbit = 0;
 }
 
 export function readInput(): InputState {
-  const now = performance.now();
-
   // --- Keyboard ---
   let throttle = keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0;
   let brake = keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0;
   let steerLeft = keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0;
   let steerRight = keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0;
-  let handbrake = [...handbrakeKeys].some((code) => keys.has(code)) || handbrakePulseUntil > now;
+  let handbrake = [...handbrakeKeys].some((code) => keys.has(code));
   let confirm = confirmPressed;
 
   // --- Gamepad ---
@@ -115,10 +105,7 @@ export function readInput(): InputState {
     // B button (index 1) → handbrake
     const bButton = pad.buttons[1];
     if (bButton) {
-      if (bButton.pressed && padHandbrakePulseUntil <= now) {
-        padHandbrakePulseUntil = now + 260;
-      }
-      handbrake = handbrake || bButton.pressed || padHandbrakePulseUntil > now;
+      handbrake = handbrake || bButton.pressed;
     }
 
     const aPressed = pad.buttons[0]?.pressed ?? false;

@@ -1,5 +1,5 @@
 import "./style.css";
-import { Clock, Mesh, Vector3 } from "three";
+import { Mesh, Timer, Vector3 } from "three";
 import {
   applyTuningPreset,
   carTuningPaths,
@@ -14,19 +14,27 @@ import {
 import { loadJson, loadManifest } from "./game/content/manifest";
 import { bindInput, readInput, getCameraOrbit, resetInputState } from "./game/input/inputMap";
 import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
+import { createFixedStepRunner } from "./game/simulation/fixedStep";
+import {
+  mountHandlingHarnessReport,
+  runFleetTransmissionHarness,
+  runHandlingHarness,
+} from "./game/simulation/handlingHarness";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
+import { applyStandardDriftTransmission } from "./game/simulation/driftTransmission";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
 import { applyVehicleGeometryTuning } from "./game/simulation/vehicleGeometry";
 import type { CarTuning } from "./game/types";
 import type { TrackConfig } from "./game/types";
-import { createCamera, updateChaseCamera } from "./render/app/camera";
+import { createCamera, resetChaseCamera, updateChaseCamera } from "./render/app/camera";
 import { createRenderer } from "./render/app/createRenderer";
-import { createScene } from "./render/app/createScene";
+import { createPerformanceMonitor } from "./render/app/performanceMonitor";
+import { createScene, updateSceneLighting } from "./render/app/createScene";
 import { createGarageView } from "./render/garage/garageView";
 import { createCarView } from "./render/objects/carView";
 import { createTireSmoke } from "./render/objects/tireSmoke";
 import { createTireTracks } from "./render/objects/tireTracks";
-import { createTrackView } from "./render/objects/trackView";
+import { createTrackView, updateCornerMarkerFlex } from "./render/objects/trackView";
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
 import { createQueueSlab } from "./render/objects/queueSlab";
 import { createGarageUi } from "./ui/garageUi";
@@ -60,9 +68,11 @@ async function boot() {
   canvas.focus();
 
   const renderer = createRenderer(canvas);
+  const performanceMonitor = createPerformanceMonitor(renderer);
   const gameScene = createScene();
   const gameCamera = createCamera();
-  const clock = new Clock();
+  const timer = new Timer();
+  timer.connect(document);
 
   const manifest = await loadManifest();
   const carEntry = manifest.cars[manifest.activeCar];
@@ -74,7 +84,7 @@ async function boot() {
     const cached = tuningCache.get(carId);
     if (cached) return cached;
     const path = carTuningPaths[carId] ?? carEntry.tuning;
-    const tuning = applyVehicleGeometryTuning(await loadJson<CarTuning>(path));
+    const tuning = applyStandardDriftTransmission(applyVehicleGeometryTuning(await loadJson<CarTuning>(path)));
     tuningCache.set(carId, tuning);
     return tuning;
   }
@@ -82,11 +92,26 @@ async function boot() {
   let playerProfile: PlayerProfile = loadPlayerProfile();
   let baseTuning = await loadCarTuning(customization.selectedCar);
   let activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
+  const query = new URLSearchParams(window.location.search);
+  const playerRouteProbeEnabled = query.has("playerRouteProbe");
+  if (query.has("handlingHarness")) {
+    const fleetIds = [...new Set([manifest.activeCar, ...Object.keys(carTuningPaths)])];
+    const fleet = await Promise.all(
+      fleetIds.map(async (id) => ({ id, tuning: applyTuningPreset(await loadCarTuning(id), "balanced") })),
+    );
+    const report = {
+      ...runHandlingHarness(activeTuning, driftTrack),
+      fleetTransmission: runFleetTransmissionHarness(fleet, driftTrack),
+    };
+    (window as Window & { __projectLiteHandlingReport?: typeof report }).__projectLiteHandlingReport = report;
+    mountHandlingHarnessReport(report);
+  }
 
   let activeTrack: TrackConfig = driftTrack;
   let trackView = await createTrackView(gameScene, activeTrack);
   let colliders = createTrackColliders(activeTrack);
   let coneMeshes = trackView.coneMeshes;
+  let cornerMarkers = trackView.cornerMarkers;
   const carView = createCarView((carEntry.scale ?? 1) * eventCarScale);
   carView.applyCustomization(customization);
   const tireTracks = createTireTracks();
@@ -97,6 +122,14 @@ async function boot() {
   gameScene.add(tireTracks.root, tireSmoke.root, carView.root, onlineGhosts.root, queueSlab.root);
 
   const car = createCarState(activeTrack);
+  const playerRouteProbe = {
+    enabled: playerRouteProbeEnabled,
+    elapsed: 0,
+    previousGear: car.gear,
+    shiftEvents: [] as Array<{ from: number; to: number; mph: number; rpm: number; rpmFraction: number }>,
+    score: 0,
+  };
+  (window as Window & { __projectLiteRouteProbe?: typeof playerRouteProbe }).__projectLiteRouteProbe = playerRouteProbe;
   const drift = createDriftState();
   const hud = createHud();
   const onlineHud = createOnlineHud();
@@ -119,6 +152,11 @@ async function boot() {
     garageView.carView.applyAttachments(att);
   });
   const runLength = 90;
+  const fixedStepRunner = createFixedStepRunner(1 / 120, 0.1);
+  const handlingProfile = query.get("handling") === "classic" ? "classic" : "polished";
+  let lastFixedSteps = 0;
+  let lastDroppedSeconds = 0;
+  let sessionEndsAt = performance.now() + runLength * 1000;
   const attachmentTunerEnabled = new URLSearchParams(window.location.search).has("kitTuner");
   if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
   let appState: AppState = "garage";
@@ -266,6 +304,7 @@ async function boot() {
     trackView = await createTrackView(gameScene, activeTrack);
     colliders = createTrackColliders(activeTrack);
     coneMeshes = trackView.coneMeshes;
+    cornerMarkers = trackView.cornerMarkers;
     onlineGhosts.setTrack(activeTrack);
     practiceZoneIndex = 0;
   };
@@ -276,6 +315,7 @@ async function boot() {
     trackView = await createTrackView(gameScene, activeTrack);
     colliders = createTrackColliders(activeTrack);
     coneMeshes = trackView.coneMeshes;
+    cornerMarkers = trackView.cornerMarkers;
     onlineGhosts.setTrack(activeTrack);
   };
 
@@ -287,9 +327,16 @@ async function boot() {
     tireTracks.reset();
     tireSmoke.reset();
     sessionTime = activeMode === "drift-attack" ? runLength : Infinity;
+    sessionEndsAt = performance.now() + runLength * 1000;
+    fixedStepRunner.reset();
     cameraShake = 0;
+    playerRouteProbe.elapsed = 0;
+    playerRouteProbe.previousGear = car.gear;
+    playerRouteProbe.shiftEvents.length = 0;
+    playerRouteProbe.score = 0;
     runoffTime = 0;
     carView.applyCustomization(customization);
+    resetChaseCamera(gameCamera, car);
   };
 
   const showGarage = () => {
@@ -310,6 +357,7 @@ async function boot() {
     onlineInputDebt = 0;
     onlineGhosts.clearRemotePlayers();
     clearActiveQueuePad();
+    fixedStepRunner.reset();
     carView.root.visible = true;
     tireTracks.root.visible = true;
     tireSmoke.root.visible = true;
@@ -566,7 +614,7 @@ async function boot() {
   hud.root.hidden = true;
 
   const onResize = () => {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.15));
     renderer.setSize(window.innerWidth, window.innerHeight);
     const aspect = window.innerWidth / window.innerHeight;
     gameCamera.aspect = aspect;
@@ -624,9 +672,26 @@ async function boot() {
   }
 
   function updateEvent(dt: number) {
-    const input = readInput();
+    const liveInput = readInput();
+    const probeTime = playerRouteProbe.elapsed;
+    const probeSlideTime = Math.max(0, probeTime - 5.5);
+    const input = playerRouteProbeEnabled && activeMode === "drift-attack"
+      ? {
+          ...liveInput,
+          throttle: probeTime < 5.5 ? 1 : 0.82,
+          brake: 0,
+          steer: probeTime < 5.5 ? 0 : Math.sin(probeSlideTime * 1.35) * 0.62,
+          handbrake: probeSlideTime > 0 && probeSlideTime % 4.65 < 0.14,
+          reset: false,
+          confirm: false,
+          menu: false,
+        }
+      : liveInput;
 
     if (activeMode === "map-editor") {
+      fixedStepRunner.reset();
+      lastFixedSteps = 0;
+      lastDroppedSeconds = 0;
       if (input.menu) {
         showGarage();
         return;
@@ -649,6 +714,9 @@ async function boot() {
     }
 
     if (queueStaging) {
+      fixedStepRunner.reset();
+      lastFixedSteps = 0;
+      lastDroppedSeconds = 0;
       if (input.confirm && onlineRoom) {
         const local = onlineRoom.players.find((player) => player.id === onlinePlayerId);
         onlineClient.setReady(!local?.ready);
@@ -665,9 +733,11 @@ async function boot() {
       onlineGhosts.update(dt);
       tireSmoke.reset();
       carView.sync(car);
+      updateCornerMarkerFlex(cornerMarkers, car, dt);
       engineSound.update(car, activeTuning);
       cameraShake = Math.max(0, cameraShake - dt * 1.7);
-      updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit());
+      updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), colliders.barriers);
+      updateSceneLighting(gameScene, car.position);
       hud.update(car, drift);
       hud.updateTimer(Infinity);
       hud.setOnlineStatus(onlineRoom ? `Queue Pad ${onlineRoom.roomCode}` : "Opening Queue Pad");
@@ -708,7 +778,7 @@ async function boot() {
     if (activeMode === "drift-attack") {
       sessionTime = onlineMatchActive && onlineRoom?.matchEndsAt
         ? Math.max(0, (onlineRoom.matchEndsAt - Date.now()) / 1000)
-        : sessionTime - dt;
+        : Math.max(0, (sessionEndsAt - performance.now()) / 1000);
       if (sessionTime <= 0 && !onlineMatchActive) {
         sessionTime = 0;
         finishRun();
@@ -716,30 +786,52 @@ async function boot() {
       }
     }
 
-    const substeps = Math.max(1, Math.ceil(dt / (1 / 120)));
-    for (let i = 0; i < substeps; i++) {
-      updateCar(car, input, activeTuning, dt / substeps, isOnTrack(car.position, activeTrack));
-    }
+    let frameImpact = 0;
+    let scoringSurface = isOnTrack(car.position, activeTrack);
+    const fixedStats = fixedStepRunner.advance(dt, (stepDt) => {
+      if (playerRouteProbeEnabled && activeMode === "drift-attack") playerRouteProbe.elapsed += stepDt;
+      const gearBeforeStep = car.gear;
+      updateCar(car, input, activeTuning, stepDt, isOnTrack(car.position, activeTrack), handlingProfile);
+
+      if (playerRouteProbeEnabled && activeMode === "drift-attack" && car.gear !== gearBeforeStep) {
+        playerRouteProbe.shiftEvents.push({
+          from: gearBeforeStep,
+          to: car.gear,
+          mph: car.speed * 2.237,
+          rpm: car.rpm,
+          rpmFraction: car.rpm / activeTuning.redlineRpm,
+        });
+      }
+      playerRouteProbe.previousGear = car.gear;
+
+      const stepOnTrack = isOnTrack(car.position, activeTrack);
+      const stepInRunoff = isInRunoff(car.position, activeTrack);
+      if (stepOnTrack) runoffTime = 0;
+      else if (stepInRunoff) runoffTime += stepDt;
+      else runoffTime = 999;
+      scoringSurface = stepOnTrack || (stepInRunoff && runoffTime <= 1.15);
+
+      const boundaryImpact = keepCarNearTrack(car, activeTrack);
+      const collisionImpact = updateTrackCollision(car, colliders, stepDt, activeTuning);
+      const stepImpact = Math.max(boundaryImpact, collisionImpact);
+      frameImpact = Math.max(frameImpact, stepImpact);
+
+      if (activeMode === "drift-attack") {
+        updateDriftScore(drift, car, stepDt, scoringSurface, getDriftZone(car.position, activeTrack), stepImpact);
+        if (playerRouteProbeEnabled) playerRouteProbe.score = drift.totalScore + drift.comboScore;
+      }
+      if (onlineMatchActive) onlineInputDebt += stepDt;
+    });
+    lastFixedSteps = fixedStats.steps;
+    lastDroppedSeconds = fixedStats.droppedSeconds;
 
     const onTrack = isOnTrack(car.position, activeTrack);
-    const inRunoff = isInRunoff(car.position, activeTrack);
-    if (onTrack) runoffTime = 0;
-    else if (inRunoff) runoffTime += dt;
-    else runoffTime = 999;
-
-    const scoringSurface = onTrack || (inRunoff && runoffTime <= 1.15);
-    const impact = keepCarNearTrack(car, activeTrack);
     if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
-    if (impact > 0) cameraShake = Math.max(cameraShake, impact * 0.75);
-
-    if (activeMode === "drift-attack") {
-      updateDriftScore(drift, car, dt, scoringSurface, getDriftZone(car.position, activeTrack));
-    }
+    if (frameImpact > 0) cameraShake = Math.max(cameraShake, frameImpact * 0.75);
 
     if (onlineMatchActive) {
-      onlineInputDebt += dt;
       if (onlineInputDebt >= 1 / 20) {
-        onlineInputDebt = 0;
+        onlineInputDebt %= 1 / 20;
         onlineClient.sendInput({
           seq: ++onlineInputSeq,
           steer: input.steer,
@@ -765,7 +857,6 @@ async function boot() {
       }
     }
 
-    updateTrackCollision(car, colliders, dt, activeTuning);
     syncConeMeshes(coneMeshes, colliders.cones);
     if (onlineMatchActive && onlineRoom) onlineGhosts.setRemotePlayers(onlineRoom.players, onlinePlayerId);
     onlineGhosts.root.visible = activeMode === "online-lobby" || onlineMatchActive;
@@ -777,9 +868,11 @@ async function boot() {
     tireTracks.update(car, onTrack);
     tireSmoke.update(car, onTrack, dt);
     carView.sync(car);
+    updateCornerMarkerFlex(cornerMarkers, car, dt);
     engineSound.update(car, activeTuning);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
-    updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit());
+    updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), colliders.barriers);
+    updateSceneLighting(gameScene, car.position);
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
     if (activeMode === "free-drive") {
@@ -824,8 +917,9 @@ async function boot() {
   }
 
   let prevAppState: AppState = appState;
-  function frame() {
-    const dt = Math.min(clock.getDelta(), 1 / 30);
+  function frame(timestamp?: number) {
+    timer.update(timestamp);
+    const dt = Math.min(timer.getDelta(), 0.25);
 
     if (appState !== prevAppState) {
       if (appState === "event") engineSound.resume();
@@ -834,6 +928,8 @@ async function boot() {
     }
 
     if (appState === "garage") {
+      lastFixedSteps = 0;
+      lastDroppedSeconds = 0;
       garageView.update(dt);
       garageView.render();
     } else if (appState === "event") {
@@ -842,10 +938,12 @@ async function boot() {
       renderer.render(gameScene, gameCamera);
     }
 
+    performanceMonitor.update(dt, lastFixedSteps, lastDroppedSeconds);
+
     requestAnimationFrame(frame);
   }
 
-  frame();
+  requestAnimationFrame(frame);
 }
 
 boot().catch((error) => {

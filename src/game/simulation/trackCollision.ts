@@ -1,6 +1,4 @@
-import { CatmullRomCurve3, Vector3 } from "three";
 import type { CarState, CarTuning, TrackConfig } from "../types";
-import { getRoadWidth, isTracksideClearZone } from "./trackLayout";
 
 export type Barrier = {
   x: number;
@@ -36,38 +34,61 @@ const defaultCarHalfWidth = 1.38;
 
 export function createTrackColliders(track: TrackConfig): TrackColliders {
   const barriers: Barrier[] = [];
-  const cones: Cone[] = [];
+  if (track.id === "indoor-drift-lab" && track.roadPath?.length) {
+    const padding = Math.max(48, track.roadWidth + track.boundaryMargin * 0.86);
+    const minX = Math.min(...track.roadPath.map((point) => point.x)) - padding;
+    const maxX = Math.max(...track.roadPath.map((point) => point.x)) + padding;
+    const minZ = Math.min(...track.roadPath.map((point) => point.z)) - padding;
+    const maxZ = Math.max(...track.roadPath.map((point) => point.z)) + padding;
+    const centerX = (minX + maxX) / 2;
+    const centerZ = (minZ + maxZ) / 2;
+    const innerWidth = maxX - minX - 9;
+    const innerDepth = maxZ - minZ - 9;
+    barriers.push(
+      { x: centerX, z: centerZ - innerDepth / 2, angle: 0, halfLength: innerWidth / 2, halfWidth: 0.4 },
+      { x: centerX, z: centerZ + innerDepth / 2, angle: 0, halfLength: innerWidth / 2, halfWidth: 0.4 },
+      { x: centerX - innerWidth / 2, z: centerZ, angle: Math.PI / 2, halfLength: innerDepth / 2, halfWidth: 0.4 },
+      { x: centerX + innerWidth / 2, z: centerZ, angle: Math.PI / 2, halfLength: innerDepth / 2, halfWidth: 0.4 },
+    );
 
-  if (!track.roadPath || track.roadPath.length < 4) return { barriers, cones };
+    const pit = track.practiceAreas?.find((area) => area.type === "rect");
+    if (pit?.type === "rect") {
+      const angle = pit.heading ?? 0;
+      const normalX = Math.sin(angle);
+      const normalZ = Math.cos(angle);
+      const depth = 12.2;
+      const width = Math.min(96, pit.width - 18);
+      const offset = -(pit.depth / 2 - depth / 2 - 1.2);
+      barriers.push({
+        x: pit.x + normalX * offset,
+        z: pit.z + normalZ * offset,
+        angle,
+        halfLength: width / 2,
+        halfWidth: depth / 2,
+      });
+    }
 
-  const points = track.roadPath.map((p) => new Vector3(p.x, 0, p.z));
-  const curve = new CatmullRomCurve3(points, true, "catmullrom", 0.48);
-  const samples = curve.getPoints(240);
-  const roadWidth = getRoadWidth(track);
-
-  for (let i = 6; i < samples.length; i += 24) {
-    const prev = samples[(i - 1 + samples.length) % samples.length];
-    const next = samples[(i + 1) % samples.length];
-    if (isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track)) continue;
-
-    const tangent = next.clone().sub(prev).normalize();
-    const normal = new Vector3(-tangent.z, 0, tangent.x);
-
+    const start = track.roadPath[0];
+    const next = track.roadPath[1];
+    const length = Math.hypot(next.x - start.x, next.z - start.z) || 1;
+    const tangentX = (next.x - start.x) / length;
+    const tangentZ = (next.z - start.z) / length;
+    const normalX = -tangentZ;
+    const normalZ = tangentX;
+    const angle = Math.atan2(-tangentZ, tangentX);
     for (const side of [-1, 1]) {
-      const pos = samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 + 2.4));
-      cones.push({
-        x: pos.x,
-        z: pos.z,
-        vx: 0,
-        vz: 0,
-        spin: 0,
-        radius: 0.38,
-        knocked: false,
+      barriers.push({
+        x: track.start.x + tangentX * 13 + normalX * side * (track.roadWidth / 2 + 1.55),
+        z: track.start.z + tangentZ * 13 + normalZ * side * (track.roadWidth / 2 + 1.55),
+        angle,
+        halfLength: 0.32,
+        halfWidth: 0.32,
       });
     }
   }
 
-  return { barriers, cones };
+  // Cones and corner markers remain visual-only so they cannot create phantom blockers.
+  return { barriers, cones: [] };
 }
 
 function getCarCollisionCircles(car: CarState, tuning?: CarTuning): CollisionCircle[] {
@@ -114,14 +135,14 @@ function resolveBarrierCircle(car: CarState, barrier: Barrier, circle: Collision
   let overlap = 0;
 
   if (dist > 0.001) {
-    if (dist >= circle.radius) return;
+    if (dist >= circle.radius) return 0;
     pushLocalX = distX / dist;
     pushLocalZ = distZ / dist;
     overlap = circle.radius - dist;
   } else {
     const xPenetration = barrier.halfLength + circle.radius - Math.abs(localX);
     const zPenetration = barrier.halfWidth + circle.radius - Math.abs(localZ);
-    if (xPenetration <= 0 || zPenetration <= 0) return;
+    if (xPenetration <= 0 || zPenetration <= 0) return 0;
 
     if (xPenetration < zPenetration) {
       pushLocalX = localX < 0 ? -1 : 1;
@@ -148,13 +169,16 @@ function resolveBarrierCircle(car: CarState, barrier: Barrier, circle: Collision
     const leverZ = circle.z - car.position.z;
     const hitOffset = leverX * pushWorldZ - leverZ * pushWorldX;
     car.yawVelocity += hitOffset * Math.abs(normalSpeed) * 0.012;
+    return Math.min(1, Math.abs(normalSpeed) / 18);
   }
+  return 0;
 }
 
 export function updateTrackCollision(car: CarState, colliders: TrackColliders, dt: number, tuning?: CarTuning) {
+  let strongestImpact = 0;
   for (const barrier of colliders.barriers) {
     for (const circle of getCarCollisionCircles(car, tuning)) {
-      resolveBarrierCircle(car, barrier, circle);
+      strongestImpact = Math.max(strongestImpact, resolveBarrierCircle(car, barrier, circle));
     }
   }
 
@@ -194,6 +218,7 @@ export function updateTrackCollision(car: CarState, colliders: TrackColliders, d
       cone.knocked = true;
       car.velocity.x *= 0.985;
       car.velocity.z *= 0.985;
+      strongestImpact = Math.max(strongestImpact, Math.min(0.52, impactSpeed / 26));
     }
   }
 
@@ -211,4 +236,5 @@ export function updateTrackCollision(car: CarState, colliders: TrackColliders, d
   }
 
   car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+  return strongestImpact;
 }

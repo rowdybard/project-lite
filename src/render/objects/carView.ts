@@ -1,10 +1,12 @@
 import {
   BoxGeometry,
+  CanvasTexture,
   CircleGeometry,
   CylinderGeometry,
   Group,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   PointLight,
 } from "three";
@@ -87,10 +89,34 @@ function prepPaintMaterial(material: MeshStandardMaterial, paintHex: number) {
   material.lightMap = null;
   material.vertexColors = false;
   material.flatShading = false;
-  material.roughness = 0.48;
-  material.metalness = 0.18;
-  material.envMapIntensity = 0.48;
+  material.roughness = 0.34;
+  material.metalness = 0.08;
+  material.envMapIntensity = 0.82;
+  if (material instanceof MeshPhysicalMaterial) {
+    material.clearcoat = 0.72;
+    material.clearcoatRoughness = 0.2;
+  }
   material.needsUpdate = true;
+}
+
+function createContactShadowMaterial() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(64, 64, 8, 64, 64, 62);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 0.78)");
+  gradient.addColorStop(0.5, "rgba(0, 0, 0, 0.42)");
+  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  return new MeshBasicMaterial({
+    color: 0x0a0c0d,
+    map: new CanvasTexture(canvas),
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+  });
 }
 
 export function createCarView(scale = 1) {
@@ -100,7 +126,7 @@ export function createCarView(scale = 1) {
   root.add(bodyGroup);
   const contactShadow = new Mesh(
     new CircleGeometry(1, 36),
-    new MeshBasicMaterial({ color: 0x050607, transparent: true, opacity: 0.34, depthWrite: false }),
+    createContactShadowMaterial(),
   );
   contactShadow.rotation.x = -Math.PI / 2;
   contactShadow.position.y = 0.14;
@@ -123,11 +149,13 @@ export function createCarView(scale = 1) {
   let importedWheels: ImportedWheel[] = [];
   let importedReady: Promise<void> = Promise.resolve();
   importedRoot.scale.setScalar(1.15);
-  const paintMaterial = new MeshStandardMaterial({
+  const paintMaterial = new MeshPhysicalMaterial({
     color: 0xbfc3be,
-    roughness: 0.48,
-    metalness: 0.18,
-    envMapIntensity: 0.48,
+    roughness: 0.34,
+    metalness: 0.08,
+    clearcoat: 0.72,
+    clearcoatRoughness: 0.2,
+    envMapIntensity: 0.82,
   });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });
@@ -376,11 +404,18 @@ export function createCarView(scale = 1) {
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const newMaterials = materials.map((m, i) => {
         if (!indices.includes(i)) return m;
-        const mat = m as MeshStandardMaterial;
-        const cloned = mat.clone() as MeshStandardMaterial;
-        prepPaintMaterial(cloned, paintHex);
-        cloned.needsUpdate = true;
-        return cloned;
+        const source = m as MeshStandardMaterial;
+        const paint = new MeshPhysicalMaterial({
+          color: paintHex,
+          roughness: 0.34,
+          metalness: 0.08,
+          clearcoat: 0.72,
+          clearcoatRoughness: 0.2,
+          envMapIntensity: 0.82,
+          side: source.side,
+        });
+        prepPaintMaterial(paint, paintHex);
+        return paint;
       });
       mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
     }

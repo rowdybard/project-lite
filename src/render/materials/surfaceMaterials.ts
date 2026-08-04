@@ -125,13 +125,17 @@ export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) 
   const material = createPbrMaterial({
     id: "Asphalt025A",
     repeat,
-    color: 0x4a4a4a,
-    roughness: 0.97,
-    normalScale: 1.4,
-    aoIntensity: 0.82,
+    color: 0x56595a,
+    roughness: 0.94,
+    normalScale: 0.92,
+    aoIntensity: 0.62,
     displacementScale: 0,
   });
-  material.envMapIntensity = 0.12;
+  // Keep the real color/normal/AO read, but avoid the roughness map turning the
+  // racing line into a wet-looking mirror under the low sun.
+  material.roughnessMap = null;
+  material.envMapIntensity = 0.08;
+  material.needsUpdate = true;
   return material;
 }
 

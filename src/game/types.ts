@@ -64,6 +64,7 @@ export type CarState = {
   frontWheelAngle: number;
   wheelSpin: number;
   rearWheelSpin: number;
+  powerSlip: number;
   bodyPitch: number;
   bodyRoll: number;
   weightForward: number;
@@ -77,10 +78,19 @@ export type CarState = {
   shiftCooldown: number;
   tireHeat: number;
   rearSlipVisual: number;
+  rearReleaseMemory: number;
   steerAxis: number;
+  correctionTimer: number;
+  correctionRightX: number;
+  correctionRightZ: number;
+  correctionSideSpeed: number;
+  correctionDirection: number;
   throttleAxis: number;
   brakeAxis: number;
   reverseEngageTimer: number;
+  filteredLongitudinalAcceleration: number;
+  filteredLateralAcceleration: number;
+  offTrackAmount: number;
 };
 
 export type InputState = {
@@ -147,4 +157,16 @@ export type DriftState = {
   callout: string;
   calloutTimer: number;
   onTrack: boolean;
+  tier: number;
+  tierName: string;
+  tierProgress: number;
+  flow: number;
+  tractionQuality: number;
+  angleQuality: number;
+  speedQuality: number;
+  scoreRate: number;
+  transitionCooldown: number;
+  contactCooldown: number;
+  spinTime: number;
+  loopTime: number;
 };

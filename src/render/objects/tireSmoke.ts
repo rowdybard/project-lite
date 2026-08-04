@@ -1,10 +1,20 @@
-import { Group, Mesh, MeshBasicMaterial, SphereGeometry } from "three";
+import {
+  BufferGeometry,
+  DynamicDrawUsage,
+  Float32BufferAttribute,
+  Group,
+  Points,
+  ShaderMaterial,
+} from "three";
 import type { CarState } from "../../game/types";
 
 type Puff = {
-  mesh: Mesh<SphereGeometry, MeshBasicMaterial>;
+  x: number;
+  y: number;
+  z: number;
   life: number;
   maxLife: number;
+  size: number;
 };
 
 const rearOffsets = [-1.08, 1.08];
@@ -13,51 +23,97 @@ const maxPuffs = 90;
 
 export function createTireSmoke() {
   const root = new Group();
+  const positions = new Float32Array(maxPuffs * 3);
+  const sizes = new Float32Array(maxPuffs);
+  const alphas = new Float32Array(maxPuffs);
+  const geometry = new BufferGeometry();
+  const positionAttribute = new Float32BufferAttribute(positions, 3);
+  const sizeAttribute = new Float32BufferAttribute(sizes, 1);
+  const alphaAttribute = new Float32BufferAttribute(alphas, 1);
+  positionAttribute.setUsage(DynamicDrawUsage);
+  sizeAttribute.setUsage(DynamicDrawUsage);
+  alphaAttribute.setUsage(DynamicDrawUsage);
+  geometry.setAttribute("position", positionAttribute);
+  geometry.setAttribute("particleSize", sizeAttribute);
+  geometry.setAttribute("particleAlpha", alphaAttribute);
+  geometry.setDrawRange(0, 0);
+
+  const material = new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      pixelRatio: { value: Math.min(window.devicePixelRatio, 1.25) },
+      smokeColor: { value: [0.74, 0.76, 0.74] },
+    },
+    vertexShader: `
+      attribute float particleSize;
+      attribute float particleAlpha;
+      uniform float pixelRatio;
+      varying float vAlpha;
+      void main() {
+        vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * viewPosition;
+        gl_PointSize = particleSize * pixelRatio * (520.0 / max(1.0, -viewPosition.z));
+        vAlpha = particleAlpha;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 smokeColor;
+      varying float vAlpha;
+      void main() {
+        float distanceFromCenter = length(gl_PointCoord - vec2(0.5));
+        float softEdge = smoothstep(0.5, 0.12, distanceFromCenter);
+        gl_FragColor = vec4(smokeColor, vAlpha * softEdge);
+      }
+    `,
+  });
+  const particles = new Points(geometry, material);
+  particles.frustumCulled = false;
+  particles.renderOrder = 12;
+  root.add(particles);
+
   const puffs: Puff[] = [];
   let spawnDebt = 0;
 
-  function rearWheelPositions(car: CarState) {
+  function spawn(car: CarState, strength: number) {
     const sin = Math.sin(car.heading);
     const cos = Math.cos(car.heading);
-    return rearOffsets.map((x) => ({
-      x: car.position.x + x * cos + rearAxleZ * sin,
-      z: car.position.z - x * sin + rearAxleZ * cos,
-    }));
+    for (const offset of rearOffsets) {
+      if (puffs.length >= maxPuffs) puffs.shift();
+      const maxLife = 0.72 + strength * 0.5;
+      puffs.push({
+        x: car.position.x + offset * cos + rearAxleZ * sin,
+        y: 0.3,
+        z: car.position.z - offset * sin + rearAxleZ * cos,
+        life: maxLife,
+        maxLife,
+        size: 0.54 + strength * 0.64,
+      });
+    }
   }
 
-  function spawn(car: CarState, strength: number) {
-    for (const point of rearWheelPositions(car)) {
-      const material = new MeshBasicMaterial({
-        color: 0xc6c8c5,
-        depthWrite: false,
-        opacity: 0.18 + strength * 0.24,
-        transparent: true,
-      });
-      const mesh = new Mesh(new SphereGeometry(0.34 + strength * 0.36, 10, 8), material);
-      mesh.position.set(point.x, 0.28, point.z);
-      mesh.scale.set(1.25, 0.32, 1);
-      root.add(mesh);
-      puffs.push({ mesh, life: 0.75 + strength * 0.45, maxLife: 0.75 + strength * 0.45 });
+  function syncBuffers() {
+    for (let i = 0; i < puffs.length; i++) {
+      const puff = puffs[i];
+      const life01 = Math.max(0, puff.life / puff.maxLife);
+      positions[i * 3] = puff.x;
+      positions[i * 3 + 1] = puff.y;
+      positions[i * 3 + 2] = puff.z;
+      sizes[i] = puff.size * (1.25 + (1 - life01) * 1.8);
+      alphas[i] = life01 * life01 * 0.34;
     }
-
-    while (puffs.length > maxPuffs) {
-      const puff = puffs.shift();
-      if (!puff) break;
-      root.remove(puff.mesh);
-      puff.mesh.geometry.dispose();
-      puff.mesh.material.dispose();
-    }
+    geometry.setDrawRange(0, puffs.length);
+    positionAttribute.needsUpdate = true;
+    sizeAttribute.needsUpdate = true;
+    alphaAttribute.needsUpdate = true;
   }
 
   return {
     root,
     reset() {
       spawnDebt = 0;
-      for (const puff of puffs.splice(0)) {
-        root.remove(puff.mesh);
-        puff.mesh.geometry.dispose();
-        puff.mesh.material.dispose();
-      }
+      puffs.length = 0;
+      geometry.setDrawRange(0, 0);
     },
     update(car: CarState, onTrack: boolean, dt: number) {
       const activeSlide = Math.max(0, car.rearSlipVisual - 0.18);
@@ -73,17 +129,10 @@ export function createTireSmoke() {
       for (let i = puffs.length - 1; i >= 0; i--) {
         const puff = puffs[i];
         puff.life -= dt;
-        puff.mesh.position.y += dt * 0.44;
-        puff.mesh.scale.multiplyScalar(1 + dt * 0.75);
-        puff.mesh.material.opacity = Math.max(0, (puff.life / puff.maxLife) * 0.35);
-
-        if (puff.life <= 0) {
-          puffs.splice(i, 1);
-          root.remove(puff.mesh);
-          puff.mesh.geometry.dispose();
-          puff.mesh.material.dispose();
-        }
+        puff.y += dt * 0.46;
+        if (puff.life <= 0) puffs.splice(i, 1);
       }
+      syncBuffers();
     },
   };
 }

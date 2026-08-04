@@ -1,6 +1,6 @@
 {
   "activeCar": "starter-coupe",
-  "activeTrack": "harbor-grand-circuit",
+  "activeTrack": "indoor-drift-lab",
   "cars": {
     "starter-coupe": {
       "name": "Project Lite Coupe",
@@ -80,15 +80,15 @@
         }
       ]
     },
-    "harbor-grand-circuit": {
-      "id": "harbor-grand-circuit",
-      "name": "Harbor Grand Circuit",
+    "indoor-drift-lab": {
+      "id": "indoor-drift-lab",
+      "name": "Project Lite Drift Lab",
       "start": {
         "x": -78,
         "z": 88,
         "heading": 1.42
       },
-      "roadWidth": 19,
+      "roadWidth": 22.5,
       "boundaryMargin": 42,
       "roadPath": [
         {
@@ -146,6 +146,24 @@
         {
           "x": -118,
           "z": 44
+        }
+      ],
+      "practiceAreas": [
+        {
+          "type": "rect",
+          "x": -20,
+          "z": 57,
+          "width": 120,
+          "depth": 42,
+          "heading": -0.14
+        },
+        {
+          "type": "rect",
+          "x": 10,
+          "z": 16,
+          "width": 72,
+          "depth": 30,
+          "heading": -0.06
         }
       ],
       "checkpoints": [

@@ -24,6 +24,12 @@ export function createEngineSound() {
   let intakeFilter: BiquadFilterNode;
   let intakeGain: GainNode;
 
+  // Tire scrub: one persistent filtered-noise voice, modulated from physical slip.
+  let tireNoise: AudioBufferSourceNode;
+  let tireFilter: BiquadFilterNode;
+  let tireHighPass: BiquadFilterNode;
+  let tireGain: GainNode;
+
   let started = false;
   let muted = false;
 
@@ -107,6 +113,21 @@ export function createEngineSound() {
     intakeNoise.loop = true;
     intakeNoise.connect(intakeFilter).connect(intakeGain).connect(masterGain);
 
+    tireGain = ctx.createGain();
+    tireGain.gain.value = 0;
+    tireHighPass = ctx.createBiquadFilter();
+    tireHighPass.type = "highpass";
+    tireHighPass.frequency.value = 620;
+    tireHighPass.Q.value = 0.55;
+    tireFilter = ctx.createBiquadFilter();
+    tireFilter.type = "bandpass";
+    tireFilter.frequency.value = 1450;
+    tireFilter.Q.value = 0.72;
+    tireNoise = ctx.createBufferSource();
+    tireNoise.buffer = createNoiseBuffer(ctx, 2);
+    tireNoise.loop = true;
+    tireNoise.connect(tireHighPass).connect(tireFilter).connect(tireGain).connect(masterGain);
+
     // Start all sources
     fundamental.start();
     harmonic2.start();
@@ -114,6 +135,7 @@ export function createEngineSound() {
     harmonic4.start();
     exhaustNoise.start();
     intakeNoise.start();
+    tireNoise.start();
 
     started = true;
   }
@@ -161,6 +183,23 @@ export function createEngineSound() {
     const intakeVol = throttle * rpmNorm * 0.25;
     intakeGain.gain.setTargetAtTime(clamp(intakeVol, 0, 0.3), t, 0.08);
     intakeFilter.frequency.setTargetAtTime(400 + rpmNorm * 800, t, 0.05);
+
+    const speedGate = clamp((car.speed - 5.5) / 18, 0, 1);
+    const rearSlip = clamp((Math.abs(car.rearSlipAngle) - 5) / 30, 0, 1);
+    const bodySlip = clamp((car.slipAngle - 4) / 34, 0, 1);
+    const wheelSlip = clamp((car.powerSlip - 0.07) / 0.68, 0, 1);
+    const lockedRear = car.handbrakeAmount * clamp((car.speed - 7) / 18, 0, 1);
+    const tractionLoss = Math.max(
+      rearSlip * 0.66 + bodySlip * 0.34,
+      wheelSlip * 0.7 + rearSlip * 0.3,
+      lockedRear * 0.82,
+    );
+    const tireVol = clamp((tractionLoss - 0.1) / 0.9, 0, 1) * speedGate * 0.19;
+    const tireAttack = tireVol > tireGain.gain.value ? 0.035 : 0.14;
+    tireGain.gain.setTargetAtTime(tireVol, t, tireAttack);
+    tireFilter.frequency.setTargetAtTime(1050 + car.speed * 13 + tractionLoss * 720, t, 0.055);
+    tireHighPass.frequency.setTargetAtTime(540 + speedGate * 260, t, 0.08);
+    tireNoise.playbackRate.setTargetAtTime(0.82 + speedGate * 0.28 + tractionLoss * 0.16, t, 0.06);
   }
 
   function setMuted(value: boolean) {

@@ -1,5 +1,11 @@
 import type { CarState, CarTuning, InputState, TrackConfig, Vec2 } from "../types";
 import { getRoadHalfWidth } from "./trackLayout";
+import {
+  computeStabilityEnvelope,
+  stabilityTuning,
+  updateRearReleaseMemory,
+  type HandlingProfileId,
+} from "./handlingStability";
 
 const degToRad = Math.PI / 180;
 const radToDeg = 180 / Math.PI;
@@ -8,6 +14,8 @@ const length = (value: Vec2) => Math.hypot(value.x, value.z);
 const lerp = (from: number, to: number, t: number) => from + (to - from) * t;
 const smooth = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
 const signed = (value: number) => (Math.abs(value) < 0.001 ? 0 : Math.sign(value));
+const moveTowards = (from: number, to: number, maxDelta: number) =>
+  Math.abs(to - from) <= maxDelta ? to : from + Math.sign(to - from) * maxDelta;
 
 function closestTrackPoint(point: Vec2, track: TrackConfig) {
   if (!track.roadPath || track.roadPath.length < 2) return null;
@@ -53,6 +61,20 @@ function torqueCurve(rpm: number, tuning: CarTuning) {
   return clamp(Math.min(buildUp, topEndFalloff), 0.28, 1.05);
 }
 
+export const drivetrainTuning = {
+  straightRearCapacity: 1.85,
+  cornerRearCapacity: 1,
+  overloadWindow: 0.8,
+  slipRiseRate: 9.5,
+  slipHoldRate: 3.6,
+  slipReleaseRate: 8.5,
+  wheelOverspeed: 0.28,
+  driveLossAtFullSlip: 0.16,
+  lateralGripLossAtFullSlip: 0.38,
+  powerGripFloorAtFullSlip: 0.72,
+  lateralSlipCoupling: 0.4,
+} as const;
+
 export function createCarState(track: TrackConfig): CarState {
   return {
     position: { x: track.start.x, z: track.start.z },
@@ -71,6 +93,7 @@ export function createCarState(track: TrackConfig): CarState {
     frontWheelAngle: 0,
     wheelSpin: 0,
     rearWheelSpin: 0,
+    powerSlip: 0,
     bodyPitch: 0,
     bodyRoll: 0,
     weightForward: 0.5,
@@ -84,10 +107,19 @@ export function createCarState(track: TrackConfig): CarState {
     shiftCooldown: 0,
     tireHeat: 0,
     rearSlipVisual: 0,
+    rearReleaseMemory: 0,
     steerAxis: 0,
+    correctionTimer: 0,
+    correctionRightX: 1,
+    correctionRightZ: 0,
+    correctionSideSpeed: 0,
+    correctionDirection: 0,
     throttleAxis: 0,
     brakeAxis: 0,
     reverseEngageTimer: 0,
+    filteredLongitudinalAcceleration: 0,
+    filteredLateralAcceleration: 0,
+    offTrackAmount: 0,
   };
 }
 
@@ -110,6 +142,7 @@ export function resetCar(car: CarState, track: TrackConfig, spawn: TrackConfig["
   car.frontWheelAngle = 0;
   car.wheelSpin = 0;
   car.rearWheelSpin = 0;
+  car.powerSlip = 0;
   car.bodyPitch = 0;
   car.bodyRoll = 0;
   car.weightForward = 0.5;
@@ -123,19 +156,50 @@ export function resetCar(car: CarState, track: TrackConfig, spawn: TrackConfig["
   car.shiftCooldown = 0;
   car.tireHeat = 0;
   car.rearSlipVisual = 0;
+  car.rearReleaseMemory = 0;
   car.steerAxis = 0;
+  car.correctionTimer = 0;
+  car.correctionRightX = 1;
+  car.correctionRightZ = 0;
+  car.correctionSideSpeed = 0;
+  car.correctionDirection = 0;
   car.throttleAxis = 0;
   car.brakeAxis = 0;
   car.reverseEngageTimer = 0;
+  car.filteredLongitudinalAcceleration = 0;
+  car.filteredLateralAcceleration = 0;
+  car.offTrackAmount = 0;
   return car;
 }
 
-export function updateCar(car: CarState, input: InputState, tuning: CarTuning, dt: number, onTrack = true) {
+export function updateCar(
+  car: CarState,
+  input: InputState,
+  tuning: CarTuning,
+  dt: number,
+  onTrack = true,
+  handlingProfile: HandlingProfileId = "polished",
+) {
   const steerTarget = Math.abs(input.steer) < 0.05 ? 0 : input.steer;
+  const previousSteerAxis = car.steerAxis;
+  const correctionStarted =
+    Math.abs(previousSteerAxis) > 0.2 && Math.abs(steerTarget) > 0.5 &&
+    Math.sign(previousSteerAxis) !== Math.sign(steerTarget) && car.speed > stabilityTuning.highSpeedCorrectionStart;
+  if (correctionStarted) {
+    car.correctionDirection = Math.sign(steerTarget);
+    car.correctionTimer = stabilityTuning.correctionMomentumHoldSeconds;
+    car.correctionRightX = Math.cos(car.heading);
+    car.correctionRightZ = -Math.sin(car.heading);
+    car.correctionSideSpeed = car.velocity.x * car.correctionRightX + car.velocity.z * car.correctionRightZ;
+  } else {
+    car.correctionTimer = Math.max(0, car.correctionTimer - dt);
+  }
   car.steerAxis = lerp(car.steerAxis, steerTarget, smooth(tuning.steerResponse, dt));
+  const steerRate = (car.steerAxis - previousSteerAxis) / Math.max(dt, 1 / 240);
   car.throttleAxis = lerp(car.throttleAxis, input.throttle, smooth(tuning.throttleResponse, dt));
   car.brakeAxis = lerp(car.brakeAxis, input.brake, smooth(tuning.throttleResponse * 0.82, dt));
-  car.handbrakeAmount = lerp(car.handbrakeAmount, input.handbrake ? 1 : 0, smooth(input.handbrake ? 9 : 5.2, dt));
+  car.handbrakeAmount = moveTowards(car.handbrakeAmount, input.handbrake ? 1 : 0, (input.handbrake ? 7.8 : 9.5) * dt);
+  car.offTrackAmount = moveTowards(car.offTrackAmount, onTrack ? 0 : 1, (onTrack ? 5.8 : 2.2) * dt);
 
   const forward = { x: Math.sin(car.heading), z: Math.cos(car.heading) };
   const right = { x: Math.cos(car.heading), z: -Math.sin(car.heading) };
@@ -162,7 +226,12 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   }
   const currentRatio = tuning.gearRatios[car.gear - 1] ?? tuning.gearRatios[0];
   const wheelRpm = (Math.abs(forwardSpeed) / (2 * Math.PI * tuning.wheelRadius)) * 60;
-  const coupledRpm = wheelRpm * currentRatio * tuning.finalDrive;
+  const wheelOverspeed =
+    handlingProfile === "polished"
+      ? 1 + car.powerSlip * car.throttleAxis * drivetrainTuning.wheelOverspeed
+      : 1;
+  const roadCoupledRpm = wheelRpm * currentRatio * tuning.finalDrive;
+  const coupledRpm = roadCoupledRpm * wheelOverspeed;
 
   // Free-rev: throttle lifts RPM up to redline when wheels are slipping at launch
   const launchSlip = clamp(1 - Math.abs(forwardSpeed) / 5, 0, 1) * car.throttleAxis;
@@ -183,7 +252,7 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   // During a shift the clutch is open — RPM floats freely and drops quickly
   const clutchEngaged = car.shiftCooldown <= 0;
   const clutchSlip = Math.abs(car.rpm - coupledRpm) / Math.max(tuning.redlineRpm, 1);
-  const inertiaRate = clutchEngaged ? lerp(4.5, 9, 1 - clutchSlip) : 22;
+  const inertiaRate = clutchEngaged ? lerp(4.5, 9, 1 - clutchSlip) + car.powerSlip * 3.5 : 22;
   car.rpm = lerp(car.rpm, rpmTarget, smooth(inertiaRate, dt));
 
   const rpmForGear = (gear: number) => wheelRpm * (tuning.gearRatios[gear - 1] ?? tuning.gearRatios[0]) * tuning.finalDrive;
@@ -210,52 +279,36 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
     const slidePowerDemand =
       car.throttleAxis > 0.42 &&
       Math.abs(forwardSpeed) > tuning.driftMinSpeed + 2 &&
-      (car.driftAmount > 0.2 || car.rearSlipVisual > 0.22 || car.slipAngle > 10);
-    const slideDownshiftWindow = car.gear <= 3 ? 900 : 1300;
-    const slideDownshift =
-      slidePowerDemand &&
-      car.gear > 1 &&
-      previousGearRpm < tuning.redlineRpm * 0.93 &&
-      car.rpm < tuning.shiftDownRpm + slideDownshiftWindow;
-    const holdGearInSlide = slidePowerDemand && car.rpm < tuning.shiftUpRpm - 150;
-    const highLoadUpshift =
-      car.gear >= 3 &&
-      car.throttleAxis > 0.62 &&
-      car.rpm > tuning.shiftUpRpm * 0.91 &&
-      nextGearRpm > tuning.shiftDownRpm * 0.92;
-
-    // Upshift when RPM hits shift point and next gear stays above stall
+      (car.driftAmount > 0.2 ||
+        car.rearSlipVisual > 0.22 ||
+        car.slipAngle > 10 ||
+        (car.powerSlip > 0.12 && Math.abs(car.steerAxis) > 0.38));
+    const slideUpshiftReady =
+      (car.rpm >= tuning.shiftUpRpm && roadCoupledRpm >= tuning.shiftUpRpm * 0.88) ||
+      ((car.slipAngle > 36 || Math.abs(car.rearSlipAngle) > 40) &&
+        car.powerSlip > 0.32 &&
+        nextGearRpm >= tuning.shiftDownRpm * 0.9);
+    const normalUpshiftReady = car.rpm >= tuning.shiftUpRpm;
     const shouldUpshift =
-      !holdGearInSlide &&
       !brakingToStop &&
-      (car.rpm > tuning.shiftUpRpm || highLoadUpshift) &&
       car.gear < maxGear &&
-      nextGearRpm > tuning.shiftDownRpm * 0.52;
+      nextGearRpm >= tuning.shiftDownRpm * 0.9 &&
+      (slidePowerDemand ? slideUpshiftReady : normalUpshiftReady);
 
-    // Kickdown: full throttle demands lower gear for acceleration
-    const shouldKickdown =
-      car.throttleAxis > 0.78 &&
-      car.gear > 1 &&
-      previousGearRpm < tuning.redlineRpm * 0.96 &&
-      car.rpm < tuning.shiftDownRpm + 1050;
-
-    // Downshift when lugging or kickdown requested
+    const powerKickdown = car.throttleAxis > 0.72 && roadCoupledRpm < tuning.shiftDownRpm * 1.08;
+    const coastDownshift = car.throttleAxis <= 0.72 && roadCoupledRpm < tuning.shiftDownRpm;
+    const slideDownshift = slidePowerDemand && roadCoupledRpm < tuning.shiftDownRpm * 1.12;
     const shouldDownshift =
       car.gear > 1 &&
       (absForwardSpeed > 2.0 || brakingToStop || crawling) &&
-      previousGearRpm < tuning.redlineRpm * 0.96 &&
-      (car.rpm < tuning.shiftDownRpm * (brakingToStop ? 1.12 : 1) || shouldKickdown || slideDownshift);
+      previousGearRpm < tuning.redlineRpm * 0.95 &&
+      (powerKickdown || coastDownshift || slideDownshift ||
+        (brakingToStop && roadCoupledRpm < tuning.shiftDownRpm * 1.12));
 
     if (shouldUpshift) {
       applyShift(car.gear + 1, slidePowerDemand ? 0.13 : 0.2, tuning.redlineRpm * 0.88);
     } else if (shouldDownshift) {
-      const doubleKickdown =
-        shouldKickdown &&
-        !slideDownshift &&
-        car.gear > 2 &&
-        rpmForGear(car.gear - 2) < tuning.redlineRpm * 0.94 &&
-        rpmForGear(car.gear - 2) > tuning.shiftDownRpm * 0.8;
-      applyShift(car.gear - (doubleKickdown ? 2 : 1), shouldKickdown || slideDownshift ? 0.11 : 0.15, tuning.redlineRpm);
+      applyShift(car.gear - 1, powerKickdown || slideDownshift ? 0.11 : 0.15, tuning.redlineRpm);
     }
   }
 
@@ -287,7 +340,7 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const reverseActive = wantsReverse && reverseRamp > 0;
   const brakePressure = Math.pow(car.brakeAxis, 1.28) * lerp(0.68, 0.94, clamp(Math.abs(forwardSpeed) / 24, 0, 1));
   const liftOff = clamp((0.38 - car.throttleAxis) / 0.38, 0, 1);
-  let drive =
+  const requestedDrive =
     tuning.acceleration *
     car.throttleAxis *
     gearTorque *
@@ -295,6 +348,45 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
     tuning.engineTorque *
     shiftTorque *
     (1 - rearLockIntent * 0.72);
+  const rearCorneringLoad = clamp(
+    Math.abs(car.rearSlipAngle) * degToRad / (16 * degToRad) + Math.abs(sideSpeed) / 11,
+    0,
+    1,
+  );
+  const rearLongitudinalCapacity =
+    tuning.rearGrip *
+    lerp(drivetrainTuning.straightRearCapacity, drivetrainTuning.cornerRearCapacity, rearCorneringLoad);
+  const tractionOverload = clamp(
+    (requestedDrive - rearLongitudinalCapacity) /
+      Math.max(rearLongitudinalCapacity * drivetrainTuning.overloadWindow, 4),
+    0,
+    1,
+  );
+  const throttleSlipGate = clamp((car.throttleAxis - 0.42) / 0.58, 0, 1);
+  const lateralPowerSlip =
+    rearCorneringLoad *
+    throttleSlipGate *
+    clamp((speed - tuning.driftMinSpeed) / 22, 0, 1) *
+    clamp((gearTorque * enginePull * tuning.engineTorque) / 0.85, 0.35, 1.2) *
+    drivetrainTuning.lateralSlipCoupling;
+  const launchTurnSlip =
+    throttleSlipGate *
+    Math.pow(Math.abs(car.steerAxis), 1.08) *
+    clamp((16 - speed) / 12, 0, 1) *
+    clamp((gearTorque * enginePull * tuning.engineTorque - 0.28) / 0.72, 0, 1) *
+    0.82;
+  const powerSlipTarget =
+    handlingProfile === "polished"
+      ? Math.max(tractionOverload * throttleSlipGate, lateralPowerSlip, launchTurnSlip) * shiftTorque
+      : 0;
+  const powerSlipRate =
+    powerSlipTarget > car.powerSlip
+      ? drivetrainTuning.slipRiseRate
+      : car.throttleAxis < 0.25
+        ? drivetrainTuning.slipReleaseRate
+        : drivetrainTuning.slipHoldRate;
+  car.powerSlip = lerp(car.powerSlip, powerSlipTarget, smooth(powerSlipRate, dt));
+  let drive = requestedDrive * lerp(1, 1 - drivetrainTuning.driveLossAtFullSlip, car.powerSlip);
   if (car.brakeAxis > 0 && forwardSpeed > 0.15) drive -= tuning.brakeForce * brakePressure;
   if (wantsReverse && !reverseActive && Math.abs(forwardSpeed) < 0.35) drive -= forwardSpeed * 8;
   if (reverseActive) drive -= tuning.reverseAcceleration * car.brakeAxis * reverseRamp;
@@ -311,151 +403,114 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const physicsWheelAngle = forwardSpeed < -0.5 ? -car.frontWheelAngle : car.frontWheelAngle;
   const frontSlip = Math.atan2(frontPatchSideSpeed, safeForwardSpeed) - physicsWheelAngle;
   const rearSlip = Math.atan2(rearPatchSideSpeed, safeForwardSpeed);
-  const counterSteering = signed(car.frontWheelAngle) !== 0 && signed(car.frontWheelAngle) === signed(sideSpeed);
-  const counterSteerQuality = counterSteering ? clamp(Math.abs(car.frontWheelAngle) / (effectiveMaxSteer * 0.68), 0, 1) : 0;
-  const slideControl = clamp((Math.abs(rearSlip) - 7 * degToRad) / (30 * degToRad), 0, 1);
-  const slideSign = signed(sideSpeed) || car.driftDirection || 1;
-  const steerSign = signed(car.steerAxis);
-  const transitionIntent =
-    steerSign !== 0 && steerSign !== slideSign && car.driftAmount > 0.42 && speed > tuning.driftMinSpeed + 4
-      ? clamp((Math.abs(car.steerAxis) - 0.32) / 0.58, 0, 1) *
-        clamp(Math.abs(sideSpeed) / 14, 0, 1) *
-        clamp((car.rearSlipVisual - 0.15) * 1.25, 0, 1)
-      : 0;
-  const transitionWeight =
-    transitionIntent * clamp(Math.abs(car.bodyRoll) * 0.8 + Math.abs(sideSpeed) / 24, 0, 1) * 0.48;
-  const throttleGripLoss =
-    car.throttleAxis *
-    tuning.throttleGripLoss *
-    clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 24, 0, 1) *
-    clamp(gearTorque * enginePull * tuning.engineTorque, 0.45, 1.85);
-  const throttleSteerRelease =
-    car.throttleAxis *
-    Math.abs(car.steerAxis) *
-    clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 20, 0, 1) *
-    clamp(gearTorque * enginePull * tuning.engineTorque, 0.5, 1.8) *
-    0.17;
-  const sustainedTurnRelease =
-    car.throttleAxis *
-    Math.pow(Math.abs(car.steerAxis), 1.15) *
-    clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 22, 0, 1) *
-    clamp(1 - counterSteerQuality * 0.62, 0.32, 1) *
-    0.13;
-  const rearSlipRelease = clamp((Math.abs(rearSlip) - 8 * degToRad) / (34 * degToRad), 0, 1) * 0.1;
-  const rearSlideRelease = slideControl * (0.05 + car.throttleAxis * 0.04 + (1 - counterSteerQuality) * 0.03);
-  const transitionRearRelease = transitionWeight * (0.035 + car.throttleAxis * 0.018);
-  const rearGripRelease = clamp(
-    throttleGripLoss +
-      throttleSteerRelease +
-      sustainedTurnRelease +
-      rearSlipRelease +
-      rearSlideRelease +
-      transitionRearRelease,
-    0,
-    0.76,
+  const stability = computeStabilityEnvelope({
+    profile: handlingProfile,
+    tuning,
+    speed,
+    forwardSpeed,
+    sideSpeed,
+    rearSlip,
+    frontWheelAngle: car.frontWheelAngle,
+    effectiveMaxSteer,
+    steerAxis: car.steerAxis,
+    steerRate,
+    correctionIntent: clamp(car.correctionTimer / stabilityTuning.correctionMomentumHoldSeconds, 0, 1),
+    correctionDirection: car.correctionDirection,
+    throttle: car.throttleAxis,
+    liftOff,
+    driftAmount: car.driftAmount,
+    rearSlipVisual: car.rearSlipVisual,
+    driftDirection: car.driftDirection,
+    bodyRoll: car.bodyRoll,
+    engineLoad: clamp(gearTorque * enginePull * tuning.engineTorque, 0.45, 1.85),
+    powerSlip: handlingProfile === "polished" ? car.powerSlip : 0,
+    rearLockIntent,
+    driftShiftSustain,
+  });
+  car.rearReleaseMemory = updateRearReleaseMemory(
+    car.rearReleaseMemory,
+    {
+      instantRelease: stability.rearGripRelease,
+      throttle: car.throttleAxis,
+      speed,
+      driftMinSpeed: tuning.driftMinSpeed,
+      rearSlip,
+      sideSpeed,
+      driftAmount: car.driftAmount,
+      rearSlipVisual: car.rearSlipVisual,
+      rearLockIntent,
+      powerSlip: handlingProfile === "polished" ? car.powerSlip * Math.pow(Math.abs(car.steerAxis), 0.8) : 0,
+    },
+    dt,
   );
-  const lowSpeedRegrip =
-    liftOff *
-    clamp((24 - speed) / 16, 0, 1) *
-    clamp((speed - 4) / 10, 0, 1) *
-    clamp((Math.abs(rearSlip) - 5 * degToRad) / (26 * degToRad), 0, 1) *
-    (1 - rearLockIntent * 0.65);
-  const effectiveRearGripRelease = clamp(rearGripRelease - lowSpeedRegrip * 0.34, 0, 0.76);
-  const surfaceGrip = onTrack ? 1 : tuning.offTrackGrip;
-  const brakeTransfer = clamp(brakePressure * 0.95 + rearLockIntent * 0.55, 0, 1);
-  const throttleTransfer = car.throttleAxis * clamp(Math.abs(forwardSpeed) / 12, 0, 1);
-  const frontLoad = 1 + brakeTransfer * 0.22 - throttleTransfer * 0.08;
-  const rearLoad = 1 + throttleTransfer * 0.14 - brakeTransfer * 0.28;
-  const lateralRelease = rearLockIntent * clamp(0.25 + Math.abs(car.steerAxis) * 0.5 + Math.abs(rearSlip) / (44 * degToRad), 0, 1);
-  const handbrakeCurve = Math.pow(lateralRelease, 0.82);
-  const frontSlideBite = 1 + slideControl * (0.1 + counterSteerQuality * 0.22) + transitionWeight * 0.08;
+  const poweredReleaseMemory = car.rearReleaseMemory * car.throttleAxis;
+  const surfaceGrip = lerp(1, tuning.offTrackGrip, car.offTrackAmount);
+  const longitudinalTransfer = clamp(-car.filteredLongitudinalAcceleration * 0.018 + rearLockIntent * 0.14, -0.12, 0.24);
+  const lateralLoadSensitivity = 1 - clamp(Math.abs(car.filteredLateralAcceleration) * 0.004, 0, 0.045);
+  const frontLoad = (1 + longitudinalTransfer) * lateralLoadSensitivity;
+  const rearLoad = (1 - longitudinalTransfer * 1.08) * lateralLoadSensitivity;
+  const lateralRelease = rearLockIntent * clamp(
+    0.72 + Math.abs(car.steerAxis) * 0.42 + Math.abs(rearSlip) / (50 * degToRad),
+    0,
+    1,
+  );
+  const handbrakeCurve = Math.pow(lateralRelease, 0.72);
   const frontGrip =
     tuning.frontGrip *
     surfaceGrip *
     frontLoad *
-    frontSlideBite *
+    stability.frontGripScale *
     (1 - Math.abs(car.frontWheelAngle / effectiveMaxSteer) * speed01 * 0.1);
   const baseRearGrip = lerp(tuning.rearGrip * rearLoad, tuning.handbrakeRearGrip, handbrakeCurve);
+  const drivenGripScale =
+    handlingProfile === "polished"
+      ? 1 - car.powerSlip * lerp(0.1, drivetrainTuning.lateralGripLossAtFullSlip, Math.pow(Math.abs(car.steerAxis), 0.8))
+      : 1;
+  const drivenGripFloor =
+    tuning.handbrakeRearGrip *
+    surfaceGrip *
+    lerp(
+      1,
+      drivetrainTuning.powerGripFloorAtFullSlip,
+      car.powerSlip * Math.pow(Math.abs(car.steerAxis), 0.8),
+    );
   const rearGrip = Math.max(
-    tuning.handbrakeRearGrip * surfaceGrip,
-    baseRearGrip * surfaceGrip * (1 - effectiveRearGripRelease) * (1 + lowSpeedRegrip * 0.42) +
-      tuning.counterSteerAssist * counterSteerQuality,
+    drivenGripFloor,
+    baseRearGrip * surfaceGrip * (1 - Math.max(stability.rearGripRelease, car.rearReleaseMemory)) *
+      drivenGripScale *
+      (1 + stability.recovery * 0.36 * (1 - poweredReleaseMemory * 0.85)) +
+      stability.rearGripAssist * (1 - poweredReleaseMemory * 0.62),
   );
   const frontLateralAcceleration = tireAcceleration(frontSlip, tuning.frontCorneringStiffness, frontGrip, 14, 42, 0.08);
-  const rearLateralAcceleration = tireAcceleration(rearSlip, tuning.rearCorneringStiffness, rearGrip, 9.5, 40, 0.32);
-  const lateralAcceleration = (frontLateralAcceleration + rearLateralAcceleration) * (onTrack ? 1 : 0.82);
+  const rearLateralAcceleration = tireAcceleration(
+    rearSlip,
+    tuning.rearCorneringStiffness * lerp(1, 0.08, rearLockIntent),
+    rearGrip,
+    9.5,
+    40,
+    0.32,
+  );
+  // During a rapid correction, preserve front-axle bite so the car can bend its
+  // trajectory into the corner. Only the rear's translational shove is softened.
+  const lateralAcceleration =
+    (frontLateralAcceleration + rearLateralAcceleration * stability.frontTranslationScale) * (onTrack ? 1 : 0.82);
   let yawAcceleration =
     (tuning.frontAxle * frontLateralAcceleration - tuning.rearAxle * rearLateralAcceleration) / tuning.yawInertia;
-  const powerOversteerYaw =
-    car.steerAxis *
-    car.throttleAxis *
-    clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 18, 0, 1) *
-    clamp(rearGripRelease / 0.7, 0, 1) *
-    (1 - counterSteerQuality * 0.7) *
-    (5.2 / tuning.yawInertia) *
-    0.62;
-  yawAcceleration += powerOversteerYaw;
-  const transitionYaw =
-    steerSign *
-    transitionWeight *
-    clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 18, 0, 1) *
-    (1.35 / tuning.yawInertia);
-  yawAcceleration += transitionYaw;
+  yawAcceleration += stability.yawAcceleration;
 
   forwardSpeed += (longitudinalAcceleration + sideSpeed * car.yawVelocity) * dt;
   sideSpeed += (lateralAcceleration - forwardSpeed * car.yawVelocity) * dt;
   car.yawVelocity += yawAcceleration * dt;
-  const lowSpeedYawDamping = lerp(3.2, 1, clamp(speed / 12, 0, 1));
-  const driftHold = clamp((Math.abs(rearSlip) - 8 * degToRad) / (28 * degToRad), 0, 1);
-  const counterSteerYawDamping = counterSteerQuality * driftHold * 1.55;
-  const transitionCatchDamping = transitionWeight * 0.9;
-  const lowSpeedCatchDamping = lowSpeedRegrip * (1.7 + clamp((Math.abs(sideSpeed) - 1.5) / 8, 0, 1) * 2.1);
-  car.yawVelocity *= Math.max(0, 1 - tuning.yawDamping * lowSpeedYawDamping * dt);
-  car.yawVelocity *= Math.max(0, 1 - counterSteerYawDamping * dt);
-  car.yawVelocity *= Math.max(0, 1 - transitionCatchDamping * dt);
-  car.yawVelocity *= Math.max(0, 1 - lowSpeedRegrip * 1.8 * dt);
+  car.yawVelocity *= Math.max(0, 1 - stability.yawDampingRate * (1 - rearLockIntent * 0.52) * dt);
 
   forwardSpeed = clamp(forwardSpeed, -tuning.maxReverseSpeed, tuning.maxForwardSpeed);
-
-  const slipSeverity = clamp(Math.abs(sideSpeed) / 18 + Math.abs(rearSlip) / (42 * degToRad), 0, 1.6);
-  const slideScrub = tuning.slideDrag * slipSeverity * Math.abs(sideSpeed);
-  const realSlideHold = clamp(Math.max(Math.abs(rearSlip) / (34 * degToRad), Math.abs(sideSpeed) / 13), 0, 1);
-  const lockedRearScrub = rearLockIntent * clamp(speed / 22, 0.15, 1.2);
-  const liftOffSlideDrag =
-    liftOff *
-    realSlideHold *
-    clamp((Math.abs(rearSlip) - 8 * degToRad) / (30 * degToRad), 0, 1) *
-    clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 18, 0, 1);
-  const lateralScrubFactor = lerp(0.72, 0.55, realSlideHold) + transitionWeight * 0.08;
-  const speedDragLoad = lerp(0.06, 1, Math.max(realSlideHold, car.driftAmount * 0.85));
-  const poweredSlideRelief =
-    car.throttleAxis * realSlideHold * clamp((Math.abs(forwardSpeed) - tuning.driftMinSpeed) / 18, 0, 1);
-  const poweredForwardDrag = lerp(1, 0.62, poweredSlideRelief);
-  const poweredSlideScrub = lerp(1, 0.44, poweredSlideRelief);
-  const poweredLateralScrub = lerp(1, 0.82, poweredSlideRelief);
-  const driftShiftScrubRelief = lerp(1, 0.72, driftShiftSustain);
-  forwardSpeed *= Math.max(
-    0,
-    1 -
-      (tuning.driftDrag * speed * speedDragLoad * poweredForwardDrag * driftShiftScrubRelief +
-        slideScrub * poweredSlideScrub * driftShiftScrubRelief +
-        liftOffSlideDrag * 0.72 +
-        lockedRearScrub * 0.72) *
-        dt,
-  );
-  sideSpeed *= Math.max(
-    0,
-    1 -
-      (tuning.driftDrag * speed * (0.18 + speedDragLoad * 0.57) +
-        tuning.slideDrag * lateralScrubFactor * speed * poweredLateralScrub +
-        liftOffSlideDrag * 0.34 +
-        lockedRearScrub * 0.46) *
-        dt,
-  );
-  sideSpeed *= Math.max(0, 1 - lowSpeedCatchDamping * dt);
+  forwardSpeed *= Math.max(0, 1 - stability.forwardScrubRate * dt);
+  sideSpeed *= Math.max(0, 1 - stability.lateralScrubRate * dt);
+  sideSpeed *= Math.max(0, 1 - stability.lateralRecoveryRate * (1 - poweredReleaseMemory * 0.82) * dt);
   if (!onTrack) {
-    forwardSpeed *= Math.max(0, 1 - tuning.offTrackDrag * dt);
-    sideSpeed *= Math.max(0, 1 - tuning.offTrackDrag * 1.35 * dt);
+    const progressiveOffTrackDrag = tuning.offTrackDrag * (0.18 + car.offTrackAmount * 0.34);
+    forwardSpeed *= Math.max(0, 1 - progressiveOffTrackDrag * dt);
+    sideSpeed *= Math.max(0, 1 - progressiveOffTrackDrag * 1.28 * dt);
   }
 
   car.heading += car.yawVelocity * dt;
@@ -472,7 +527,9 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   const rearSlipSignal = clamp((Math.abs(rearSlip) - 5 * degToRad) / (30 * degToRad), 0, 1.35);
   const driftSignal = Math.min(Math.max(bodySlipSignal, rearSlipSignal), bodySlipSignal * 0.55 + rearSlipSignal * 0.78);
   const driftTarget =
-    speed > tuning.driftMinSpeed && driftSignal > 0.28 ? clamp(driftSignal * (1 - lowSpeedRegrip * 0.55), 0, 1) : 0;
+    speed > tuning.driftMinSpeed && driftSignal > 0.23
+      ? clamp(driftSignal * (1 - stability.recovery * 0.42 * (1 - poweredReleaseMemory * 0.9)), 0, 1)
+      : 0;
 
   car.speed = length(car.velocity);
   car.slipAngle = Math.abs(bodySlip) * radToDeg;
@@ -483,14 +540,26 @@ export function updateCar(car: CarState, input: InputState, tuning: CarTuning, d
   car.gripAmount = clamp(rearGrip / tuning.rearGrip - car.driftAmount * 0.15, 0.08, 1);
   car.driftDirection = signed(sideSpeed) || car.driftDirection || 1;
   car.wheelSpin += (forwardSpeed / tuning.wheelRadius) * dt;
-  const freeRearSpin = car.rearWheelSpin + (forwardSpeed / tuning.wheelRadius) * dt;
+  const drivenWheelSpeed =
+    forwardSpeed + signed(forwardSpeed || 1) * car.powerSlip * car.throttleAxis * (4 + gearTorque * 10);
+  const freeRearSpin = car.rearWheelSpin + (drivenWheelSpeed / tuning.wheelRadius) * dt;
   car.rearWheelSpin = lerp(freeRearSpin, car.rearWheelSpin, rearLockIntent);
   car.rearSlipVisual = lerp(car.rearSlipVisual, clamp(Math.abs(rearSlip) / (26 * degToRad), 0, 1), smooth(10, dt));
   const heatTarget = clamp(car.rearSlipVisual * 0.78 + car.handbrakeAmount * 0.35 + car.throttleAxis * car.driftAmount * 0.25, 0, 1);
   car.tireHeat = lerp(car.tireHeat, heatTarget, smooth(heatTarget > car.tireHeat ? 1.8 : 0.34, dt));
 
-  const longitudinalLoad = clamp(brakeTransfer * 0.82 - throttleTransfer * 0.46 - longitudinalAcceleration * 0.006, -1, 1);
-  const lateralLoad = clamp(lateralAcceleration * 0.044 + car.yawVelocity * 0.16 + sideSpeed * 0.012, -1, 1);
+  car.filteredLongitudinalAcceleration = lerp(
+    car.filteredLongitudinalAcceleration,
+    longitudinalAcceleration,
+    smooth(7.2, dt),
+  );
+  car.filteredLateralAcceleration = lerp(
+    car.filteredLateralAcceleration,
+    lateralAcceleration,
+    smooth(8.4, dt),
+  );
+  const longitudinalLoad = clamp(-car.filteredLongitudinalAcceleration * 0.036 + rearLockIntent * 0.16, -1, 1);
+  const lateralLoad = clamp(car.filteredLateralAcceleration * 0.052 + car.yawVelocity * 0.12, -1, 1);
   car.bodyPitch = lerp(car.bodyPitch, longitudinalLoad, smooth(5.8, dt));
   car.bodyRoll = lerp(car.bodyRoll, lateralLoad, smooth(7.2, dt));
   car.weightForward = clamp(0.5 + car.bodyPitch * 0.23, 0.22, 0.78);

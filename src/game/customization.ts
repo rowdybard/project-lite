@@ -81,9 +81,12 @@ export const carTuningPaths: Record<string, string> = {
   "pack-muscle-2": "/assets/cars/imports/muscle2-tuning.json",
 };
 
+// The editor remains compiled and data-compatible, but is deliberately hidden until its interaction model is repaired.
+export const mapEditorEnabled = new URLSearchParams(window.location.search).get("devMapEditor") === "1";
+
 export const modeOptions: CustomizationOption[] = [
   { id: "online-lobby", label: "Online" },
-  { id: "map-editor", label: "Map Editor" },
+  ...(mapEditorEnabled ? [{ id: "map-editor", label: "Map Editor (Dev)" }] : []),
   { id: "drift-attack", label: "Drift Attack" },
   { id: "free-drive", label: "Practice Grounds" },
   { id: "drag-race", label: "Drag Race", disabled: true },
@@ -91,7 +94,7 @@ export const modeOptions: CustomizationOption[] = [
 ];
 
 export function isPlayableMode(mode: string): mode is ModeId {
-  return mode === "online-lobby" || mode === "map-editor" || mode === "drift-attack" || mode === "free-drive";
+  return mode === "online-lobby" || (mapEditorEnabled && mode === "map-editor") || mode === "drift-attack" || mode === "free-drive";
 }
 
 export const customizationCategories: CustomizationCategory[] = [
