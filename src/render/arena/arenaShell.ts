@@ -204,8 +204,8 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
   const bleacherRise = 0.68;
   const bleacherRun = 0.88;
   const bleacherFrontOffset = 28;
-  const bleacherBaseY = 6.75;
-  const bleacherSupportY = 5.85;
+  const bleacherBaseY = 0.4;
+  const bleacherSupportY = 0;
   const bleacherSeatMatrices: Matrix4[] = [];
   const bleacherStepMatrices: Matrix4[] = [];
   const bleacherFrameMatrices: Matrix4[] = [];
@@ -232,8 +232,10 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
       matrix.compose(bleacherPosition, rotation, bleacherScale);
       bleacherSeatMatrices.push(matrix.clone());
 
-      place(along, rowOffset + 0.46, seatY - 0.34);
-      bleacherScale.set(span, 0.1, 0.64);
+      const stepHeight = row === 0 ? seatY - 0.16 : 0.1;
+      const stepY = row === 0 ? stepHeight * 0.5 : seatY - 0.34;
+      place(along, rowOffset + 0.46, stepY);
+      bleacherScale.set(span, stepHeight, 0.64);
       matrix.compose(bleacherPosition, rotation, bleacherScale);
       bleacherStepMatrices.push(matrix.clone());
 
@@ -272,8 +274,8 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
     for (const bankOffset of bankOffsets) addBleacherBank(wall, bankOffset, bankSpan);
   }
 
-  const bleacherSeats = new InstancedMesh(new BoxGeometry(1, 0.14, 0.5), bleacherMaterial, bleacherSeatMatrices.length);
-  const bleacherSteps = new InstancedMesh(new BoxGeometry(1, 0.1, 0.64), bleacherMaterial, bleacherStepMatrices.length);
+  const bleacherSeats = new InstancedMesh(new BoxGeometry(1, 1, 1), bleacherMaterial, bleacherSeatMatrices.length);
+  const bleacherSteps = new InstancedMesh(new BoxGeometry(1, 1, 1), bleacherMaterial, bleacherStepMatrices.length);
   const bleacherFrames = new InstancedMesh(new BoxGeometry(1, 1, 1), steelMaterial, bleacherFrameMatrices.length);
   const bleacherRails = new InstancedMesh(new BoxGeometry(1, 1, 1), steelMaterial, bleacherRailMatrices.length);
   bleacherSeatMatrices.forEach((m, i) => bleacherSeats.setMatrixAt(i, m));

@@ -5,14 +5,23 @@ import {
   onlineMaxPlayers,
   sanitizeRoomCode,
   type ClientOnlineMessage,
+  type LeaderboardBoard,
   type OnlineInputTelemetry,
   type OnlinePlayerState,
   type OnlineRoomState,
   type ServerOnlineMessage,
 } from "../src/net/protocol";
+import {
+  Leaderboard,
+  maxLeaderboardSubmissionBytes,
+  type LeaderboardRpcResult,
+} from "./leaderboard";
+
+export { Leaderboard };
 
 export type Env = {
   DRIFT_ROOMS: DurableObjectNamespace<DriftRoom>;
+  LEADERBOARD: DurableObjectNamespace<Leaderboard>;
 };
 
 type PlayerSession = {
@@ -33,9 +42,111 @@ function json(data: unknown, init?: ResponseInit) {
     headers: {
       "content-type": "application/json",
       "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-headers": "Content-Type",
       ...init?.headers,
     },
   });
+}
+
+type ParsedBody = { ok: true; value: unknown } | { ok: false; response: Response };
+
+async function readBoundedJson(request: Request, maxBytes: number): Promise<ParsedBody> {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.startsWith("application/json")) {
+    return { ok: false, response: json({ error: "Content-Type must be application/json." }, { status: 415 }) };
+  }
+
+  const contentLength = request.headers.get("content-length");
+  if (contentLength) {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isFinite(declaredBytes) || declaredBytes < 0) {
+      return { ok: false, response: json({ error: "Content-Length is invalid." }, { status: 400 }) };
+    }
+    if (declaredBytes > maxBytes) {
+      return { ok: false, response: json({ error: "Submission payload is too large." }, { status: 413 }) };
+    }
+  }
+  if (!request.body) return { ok: false, response: json({ error: "Submission body is required." }, { status: 400 }) };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      receivedBytes += chunk.value.byteLength;
+      if (receivedBytes > maxBytes) {
+        await reader.cancel("Submission payload is too large.");
+        return { ok: false, response: json({ error: "Submission payload is too large." }, { status: 413 }) };
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(receivedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    return { ok: false, response: json({ error: "Submission body is not valid JSON." }, { status: 400 }) };
+  }
+}
+
+function rpcResponse<T>(result: LeaderboardRpcResult<T>) {
+  return result.ok ? json(result.value) : json({ error: result.error }, { status: result.status });
+}
+
+function isLeaderboardBoard(value: string | undefined): value is LeaderboardBoard {
+  return value === "daily" || value === "all-time";
+}
+
+async function handleLeaderboardRequest(request: Request, env: Env, url: URL) {
+  const segments = url.pathname.split("/").filter(Boolean);
+  const leaderboard = env.LEADERBOARD.getByName("global");
+
+  if (request.method === "GET" && segments.length === 3 && segments[1] === "leaderboard") {
+    if (segments[2] === "daily-seed") return rpcResponse(await leaderboard.getDailyInfo(Date.now()));
+    if (!isLeaderboardBoard(segments[2])) return json({ error: "Unknown leaderboard board." }, { status: 404 });
+    const requestedLimit = Number(url.searchParams.get("limit") ?? "50");
+    return rpcResponse(await leaderboard.getBoard(segments[2], requestedLimit, Date.now()));
+  }
+
+  if (
+    request.method === "POST" &&
+    segments.length === 3 &&
+    segments[1] === "leaderboard" &&
+    segments[2] === "submit"
+  ) {
+    const body = await readBoundedJson(request, maxLeaderboardSubmissionBytes);
+    if (!body.ok) return body.response;
+    return rpcResponse(await leaderboard.submit(body.value, Date.now()));
+  }
+
+  if (request.method === "GET" && segments.length === 3 && segments[1] === "replay") {
+    let replayId: string;
+    try {
+      replayId = decodeURIComponent(segments[2]);
+    } catch {
+      return json({ error: "Replay id is invalid." }, { status: 400 });
+    }
+    const replay = await leaderboard.getReplay(replayId);
+    if (!replay.ok) return rpcResponse(replay);
+    return replay.value ? json(replay.value) : json({ error: "Replay not found." }, { status: 404 });
+  }
+
+  if (request.method !== "GET" && request.method !== "POST") {
+    return json({ error: "Method not allowed." }, { status: 405, headers: { Allow: "GET, POST, OPTIONS" } });
+  }
+  return json({ error: "Not found" }, { status: 404 });
 }
 
 function safeName(value: unknown) {
@@ -283,13 +394,40 @@ export class DriftRoom {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
-    if (url.pathname === "/api/health") return json({ ok: true, service: "project-lite-online" });
-    if (url.pathname !== "/api/ws") return json({ error: "Not found" }, { status: 404 });
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET, POST, OPTIONS",
+          "access-control-allow-headers": "Content-Type",
+          "access-control-max-age": "86400",
+        },
+      });
+    }
 
-    const requestedRoom = sanitizeRoomCode(url.searchParams.get("room") || "") || makeRoomCode();
-    const id = env.DRIFT_ROOMS.idFromName(requestedRoom);
-    const room = env.DRIFT_ROOMS.get(id);
-    url.searchParams.set("room", requestedRoom);
-    return room.fetch(new Request(url, request));
+    try {
+      if (url.pathname === "/api/health") return json({ ok: true, service: "project-lite-online" });
+      if (url.pathname.startsWith("/api/leaderboard/") || url.pathname.startsWith("/api/replay/")) {
+        return await handleLeaderboardRequest(request, env, url);
+      }
+      if (url.pathname !== "/api/ws") return json({ error: "Not found" }, { status: 404 });
+
+      const requestedRoom = sanitizeRoomCode(url.searchParams.get("room") || "") || makeRoomCode();
+      const id = env.DRIFT_ROOMS.idFromName(requestedRoom);
+      const room = env.DRIFT_ROOMS.get(id);
+      url.searchParams.set("room", requestedRoom);
+      return await room.fetch(new Request(url, request));
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          message: "request failed",
+          method: request.method,
+          path: url.pathname,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return json({ error: "Internal server error." }, { status: 500 });
+    }
   },
 };

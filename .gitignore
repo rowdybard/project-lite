@@ -13,6 +13,8 @@ dist-ssr
 *.local
 .wrangler/
 .wrangler-local/
+.wrangler-dry-run/
+.tmp-*.mjs
 
 # Windsurf browser preview temp profiles
 .chrome-test-*/

@@ -1,5 +1,31 @@
 import type { CarState, DriftState } from "../game/types";
 
+export type EndlessHudStats = {
+  stage: number;
+  gatesPassed: number;
+  distance: number;
+  nextGateDistance: number;
+  potential: number;
+  objective: string;
+  objectiveProgress: string;
+  bestDelta: number;
+  risk: "Low" | "Medium" | "High";
+};
+
+export type EndlessResults = {
+  finalScore: number;
+  bestCombo: number;
+  stage: number;
+  gatesPassed: number;
+  distance: number;
+  duration: number;
+  failReason: "crash" | "clock" | "quit";
+  objectivesCompleted: number;
+  isPersonalBest: boolean;
+  bestScore: number;
+  nextTarget: string;
+};
+
 const formatScore = (value: number) => Math.round(value).toLocaleString("en-US");
 const formatTime = (seconds: number) => `${seconds.toFixed(1)}s`;
 const forwardSpeed = (car: CarState) =>
@@ -33,6 +59,24 @@ export function createHud() {
       </div>
       <div class="drift-score__callout" data-callout hidden>Drift</div>
     </div>
+    <section class="endless-hud" data-endless-panel hidden>
+      <div class="endless-hud__topline">
+        <span>Stage <strong data-endless-stage>1</strong></span>
+        <span>Gates <strong data-endless-gates>0</strong></span>
+        <span>Distance <strong data-endless-distance>0 m</strong></span>
+        <span>Next gate <strong data-endless-next-gate>--</strong></span>
+      </div>
+      <div class="endless-hud__objective">
+        <span>Objective</span>
+        <strong data-endless-objective>Find your flow</strong>
+        <em data-endless-progress>0%</em>
+      </div>
+      <div class="endless-hud__risk" data-endless-risk>
+        <span>Potential <strong data-endless-potential>+0</strong></span>
+        <span>Best <strong data-endless-delta>Even</strong></span>
+        <span>Risk <strong data-endless-risk-label>Low</strong></span>
+      </div>
+    </section>
     <div class="speedometer">
       <div class="speedometer__gear" data-gear>1</div>
       <div class="speedometer__readout"><span data-speed>0</span><small>mph</small></div>
@@ -42,6 +86,8 @@ export function createHud() {
     <div class="hud__hint" data-hint>R restart</div>
   `;
   document.body.append(root);
+
+  let mode: "online-lobby" | "drift-attack" | "endless" | "free-drive" = "drift-attack";
 
   return {
     root,
@@ -69,23 +115,45 @@ export function createHud() {
       callout.hidden = drift.calloutTimer <= 0;
     },
     updateTimer(secondsRemaining: number) {
-      root.querySelector("[data-time-label]")!.textContent = "Time";
+      root.querySelector("[data-time-label]")!.textContent = mode === "endless" ? "Clock" : "Time";
       root.querySelector("[data-time]")!.textContent = Number.isFinite(secondsRemaining)
         ? `${Math.max(0, secondsRemaining).toFixed(1)}s`
         : "Free";
+      root.classList.toggle("is-clock-critical", mode === "endless" && secondsRemaining <= 10);
     },
     setCarName(name: string) {
       root.querySelector("[data-car-name]")!.textContent = name;
     },
-    setMode(mode: "online-lobby" | "drift-attack" | "free-drive") {
+    setMode(nextMode: "online-lobby" | "drift-attack" | "endless" | "free-drive") {
+      mode = nextMode;
       root.classList.toggle("is-free-drive", mode === "free-drive");
       root.classList.toggle("is-online-lobby", mode === "online-lobby");
+      root.classList.toggle("is-endless", mode === "endless");
+      (root.querySelector("[data-endless-panel]") as HTMLElement).hidden = mode !== "endless";
       root.querySelector("[data-hint]")!.textContent =
         mode === "online-lobby"
           ? "Drive onto a trailer - E confirm - R reset - Esc garage"
+          : mode === "endless"
+            ? "Pass gates for time - heavy crashes end the run - R retry - Esc garage"
           : mode === "free-drive"
             ? "R reset zone - C next zone - Esc garage"
             : "R restart";
+    },
+    setEndlessStats(stats: EndlessHudStats) {
+      root.querySelector("[data-endless-stage]")!.textContent = stats.stage.toString();
+      root.querySelector("[data-endless-gates]")!.textContent = stats.gatesPassed.toString();
+      root.querySelector("[data-endless-distance]")!.textContent = `${Math.round(stats.distance).toLocaleString("en-US")} m`;
+      root.querySelector("[data-endless-next-gate]")!.textContent = Number.isFinite(stats.nextGateDistance)
+        ? `${Math.max(0, Math.round(stats.nextGateDistance))} m`
+        : "--";
+      root.querySelector("[data-endless-potential]")!.textContent = `+${formatScore(stats.potential)}`;
+      root.querySelector("[data-endless-objective]")!.textContent = stats.objective;
+      root.querySelector("[data-endless-progress]")!.textContent = stats.objectiveProgress;
+      root.querySelector("[data-endless-delta]")!.textContent = stats.bestDelta === 0
+        ? "Even"
+        : `${stats.bestDelta > 0 ? "+" : ""}${formatScore(stats.bestDelta)}`;
+      root.querySelector("[data-endless-risk-label]")!.textContent = stats.risk;
+      (root.querySelector("[data-endless-risk]") as HTMLElement).dataset.risk = stats.risk.toLowerCase();
     },
     setPracticeZone(label: string) {
       root.querySelector("[data-time-label]")!.textContent = "Zone";
@@ -94,6 +162,82 @@ export function createHud() {
     setOnlineStatus(label: string) {
       root.querySelector("[data-time-label]")!.textContent = "Online";
       root.querySelector("[data-time]")!.textContent = label;
+    },
+  };
+}
+
+export function createEndlessResultsOverlay(callbacks: {
+  onRetry: () => void;
+  onDailyRetry: () => void;
+  onLeaderboard: () => void;
+  onGarage: () => void;
+}) {
+  const root = document.createElement("div");
+  root.className = "session-overlay endless-results";
+  root.hidden = true;
+  root.innerHTML = `
+    <section class="session-card session-card--endless">
+      <p class="session-card__eyebrow" data-endless-end-reason>Run Complete</p>
+      <div class="session-card__score-label">Final score</div>
+      <h1 data-endless-final-score>0</h1>
+      <p class="endless-results__pb" data-endless-pb></p>
+      <div class="session-card__stats endless-results__stats">
+        <span>Best combo <strong data-endless-final-combo>0</strong></span>
+        <span>Highest stage <strong data-endless-final-stage>1</strong></span>
+        <span>Distance <strong data-endless-final-distance>0 m</strong></span>
+        <span>Gates <strong data-endless-final-gates>0</strong></span>
+        <span>Survived <strong data-endless-final-duration>0.0s</strong></span>
+        <span>Objectives <strong data-endless-final-objectives>0</strong></span>
+      </div>
+      <div class="endless-results__target">
+        <span>Next target</span>
+        <strong data-endless-next-target>Beat this score</strong>
+      </div>
+      <p class="endless-results__submission" data-endless-submission>Saving run...</p>
+      <div class="session-card__actions endless-results__actions">
+        <button data-endless-retry type="button">Run Again</button>
+        <button data-endless-daily type="button">Daily Seed</button>
+        <button class="session-card__secondary" data-endless-board type="button">Leaderboard</button>
+        <button class="session-card__secondary" data-endless-garage type="button">Garage</button>
+      </div>
+    </section>
+  `;
+  document.body.append(root);
+  root.querySelector("[data-endless-retry]")!.addEventListener("click", callbacks.onRetry);
+  root.querySelector("[data-endless-daily]")!.addEventListener("click", callbacks.onDailyRetry);
+  root.querySelector("[data-endless-board]")!.addEventListener("click", callbacks.onLeaderboard);
+  root.querySelector("[data-endless-garage]")!.addEventListener("click", callbacks.onGarage);
+
+  return {
+    root,
+    show(summary: EndlessResults) {
+      root.hidden = false;
+      root.querySelector("[data-endless-end-reason]")!.textContent = summary.failReason === "crash"
+        ? "Run ended - heavy crash"
+        : summary.failReason === "clock"
+          ? "Run ended - clock expired"
+          : "Run ended";
+      root.querySelector("[data-endless-final-score]")!.textContent = formatScore(summary.finalScore);
+      root.querySelector("[data-endless-final-combo]")!.textContent = formatScore(summary.bestCombo);
+      root.querySelector("[data-endless-final-stage]")!.textContent = summary.stage.toString();
+      root.querySelector("[data-endless-final-distance]")!.textContent = `${Math.round(summary.distance).toLocaleString("en-US")} m`;
+      root.querySelector("[data-endless-final-gates]")!.textContent = summary.gatesPassed.toString();
+      root.querySelector("[data-endless-final-duration]")!.textContent = formatTime(summary.duration);
+      root.querySelector("[data-endless-final-objectives]")!.textContent = summary.objectivesCompleted.toString();
+      root.querySelector("[data-endless-next-target]")!.textContent = summary.nextTarget;
+      root.querySelector("[data-endless-pb]")!.textContent = summary.isPersonalBest
+        ? "New personal best"
+        : `Personal best ${formatScore(summary.bestScore)}`;
+      root.querySelector("[data-endless-pb]")!.classList.toggle("is-pb", summary.isPersonalBest);
+      root.querySelector("[data-endless-submission]")!.textContent = "Saving run...";
+    },
+    setSubmission(message: string, isError = false) {
+      const status = root.querySelector("[data-endless-submission]") as HTMLElement;
+      status.textContent = message;
+      status.classList.toggle("is-error", isError);
+    },
+    hide() {
+      root.hidden = true;
     },
   };
 }

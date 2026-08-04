@@ -66,6 +66,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
   let previewCamera: PerspectiveCamera | null = null;
   let rafId = 0;
   let lastFrame = 0;
+  let applyToken = 0;
   let orbitYaw = 0.8;
   let orbitPitch = 0.3;
   let orbitDistance = 9;
@@ -166,6 +167,14 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
     if (budget) {
       budget.textContent = `${system.capacity} instances (cap ${particleBudgetLimits.perSystem}, global ${particleBudgetLimits.global}) · rate ${state.rate}/s (max ${particleBudgetLimits.maxRate})`;
     }
+  }
+
+  function installTexture(nextTexture: Texture, nextLabel: string) {
+    const previousTexture = texture;
+    texture = nextTexture;
+    textureLabel = nextLabel;
+    rebuildSystem();
+    previousTexture.dispose();
   }
 
   function scheduleRebuild() {
@@ -389,15 +398,28 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
   }
 
   function applyPreset(preset: VfxPreset) {
-    state = JSON.parse(JSON.stringify(preset)) as VfxPreset;
+    const nextState = JSON.parse(JSON.stringify(preset)) as VfxPreset;
+    const token = ++applyToken;
     const apply = async () => {
-      texture.dispose();
-      texture = await loadPresetTexture(state);
-      textureLabel = state.texture.kind === "builtin"
-        ? builtinTextureIds.find((item) => item.id === (state.texture as { id: BuiltinTextureId }).id)?.label ?? "Built-in"
-        : "Uploaded PNG";
-      renderControls();
-      rebuildSystem();
+      try {
+        const nextTexture = await loadPresetTexture(nextState);
+        if (token !== applyToken) {
+          nextTexture.dispose();
+          return;
+        }
+
+        state = nextState;
+        const nextTextureState = nextState.texture;
+        const nextLabel = nextTextureState.kind === "builtin"
+          ? builtinTextureIds.find((item) => item.id === nextTextureState.id)?.label ?? "Built-in"
+          : "Uploaded PNG";
+        installTexture(nextTexture, nextLabel);
+        renderControls();
+      } catch (error) {
+        if (token !== applyToken) return;
+        console.error("VFX preset apply failed", error);
+        setStatus("Failed to load preset texture. Previous preview kept.");
+      }
     };
     void apply();
   }
@@ -414,10 +436,12 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
         builtinTextureIds.map((item) => ({ value: item.id, label: item.label })),
         () => (state.texture.kind === "builtin" ? state.texture.id : ""),
         (value) => {
-          texture.dispose();
-          texture = createBuiltinTexture(value as BuiltinTextureId);
-          textureLabel = builtinTextureIds.find((item) => item.id === value)?.label ?? "Built-in";
+          applyToken += 1;
           state.texture = { kind: "builtin", id: value as BuiltinTextureId };
+          installTexture(
+            createBuiltinTexture(value as BuiltinTextureId),
+            builtinTextureIds.find((item) => item.id === value)?.label ?? "Built-in",
+          );
           setStatus("");
         },
       ),
@@ -428,22 +452,25 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
     uploadButton.type = "button";
     uploadButton.textContent = "Upload PNG";
     uploadButton.addEventListener("click", () => {
+      const token = ++applyToken;
       void pickPngFile().then(async (file) => {
         if (!file) return;
         try {
           const result = await uploadPng(file);
-          texture.dispose();
-          texture = result.texture;
-          textureLabel = file.name;
+          if (token !== applyToken) {
+            result.texture.dispose();
+            return;
+          }
           state.texture = { kind: "upload", dataUrl: result.dataUrl };
+          installTexture(result.texture, file.name);
           setStatus(
             result.hasAlpha
               ? `Loaded ${file.name} (${result.width}×${result.height})`
               : `${file.name}: no alpha channel — alpha approximated from luminance`,
           );
           renderControls();
-          rebuildSystem();
         } catch (error) {
+          if (token !== applyToken) return;
           setStatus(error instanceof Error ? error.message : "Upload failed.");
         }
       });
@@ -731,17 +758,22 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
     event.preventDefault();
     const file = event.dataTransfer?.files?.[0];
     if (!file) return;
+    const token = ++applyToken;
     void uploadPng(file).then(
       (result) => {
-        texture.dispose();
-        texture = result.texture;
-        textureLabel = file.name;
+        if (token !== applyToken) {
+          result.texture.dispose();
+          return;
+        }
         state.texture = { kind: "upload", dataUrl: result.dataUrl };
+        installTexture(result.texture, file.name);
         setStatus(result.hasAlpha ? `Loaded ${file.name}` : `${file.name}: no alpha channel — alpha approximated from luminance`);
         renderControls();
-        rebuildSystem();
       },
-      (error: unknown) => setStatus(error instanceof Error ? error.message : "Upload failed."),
+      (error: unknown) => {
+        if (token !== applyToken) return;
+        setStatus(error instanceof Error ? error.message : "Upload failed.");
+      },
     );
   });
 
@@ -765,7 +797,11 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
 
   function hide() {
     root.hidden = true;
+    applyToken += 1;
+    window.clearTimeout(rebuildTimer);
+    rebuildTimer = 0;
     cancelAnimationFrame(rafId);
+    disposeSystem();
   }
 
   return { root, show, hide };

@@ -9,6 +9,7 @@ import {
   NormalBlending,
   Quaternion,
   ShaderMaterial,
+  SRGBColorSpace,
   Vector3,
   type DataTexture,
   type Texture,
@@ -195,7 +196,9 @@ export function createRadialSpriteTexture(size = 128, innerAlpha = 0.75) {
   gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
-  return new CanvasTexture(canvas);
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
 }
 
 export function createGpuParticleSystem(options: ParticleSystemOptions): GpuParticleSystem {

@@ -15,6 +15,7 @@ type GarageUiCallbacks = {
   onProfileChange: (profile: PlayerProfile) => void;
   onStart: () => void;
   onOpenVfxLab: () => void;
+  onOpenLeaderboard: () => void;
 };
 
 function optionButton(option: { id: string; label: string; color?: number; disabled?: boolean }, active: boolean) {
@@ -75,6 +76,7 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
           <div class="garage-car-grid" data-cars></div>
         </section>
         <button class="garage-start" type="button">Start Event</button>
+        <button class="garage-leaderboard" type="button">Leaderboards + Replays</button>
         <button class="garage-vfx" type="button">VFX Lab</button>
       </aside>
       <section class="garage-panel">
@@ -174,6 +176,7 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
     startButton.addEventListener("click", requestStart);
 
     root.querySelector(".garage-vfx")!.addEventListener("click", () => callbacks.onOpenVfxLab());
+    root.querySelector(".garage-leaderboard")!.addEventListener("click", () => callbacks.onOpenLeaderboard());
 
     const profileName = root.querySelector<HTMLInputElement>("[data-profile-name]")!;
     profileName.addEventListener("change", () => callbacks.onProfileChange({ name: profileName.value }));

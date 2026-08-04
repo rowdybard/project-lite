@@ -4,10 +4,19 @@ compatibility_date = "2026-05-15"
 
 [durable_objects]
 bindings = [
-  { name = "DRIFT_ROOMS", class_name = "DriftRoom" }
+  { name = "DRIFT_ROOMS", class_name = "DriftRoom" },
+  { name = "LEADERBOARD", class_name = "Leaderboard" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DriftRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Leaderboard"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
 

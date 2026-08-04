@@ -1,6 +1,6 @@
 import type { CarTuning } from "./types";
 
-export type ModeId = "online-lobby" | "map-editor" | "drift-attack" | "free-drive" | "drag-race" | "lap-race";
+export type ModeId = "online-lobby" | "map-editor" | "drift-attack" | "endless" | "free-drive" | "drag-race" | "lap-race";
 export type CustomizationSlot =
   | "selectedCar"
   | "paint"
@@ -88,13 +88,14 @@ export const modeOptions: CustomizationOption[] = [
   { id: "online-lobby", label: "Online" },
   ...(mapEditorEnabled ? [{ id: "map-editor", label: "Map Editor (Dev)" }] : []),
   { id: "drift-attack", label: "Drift Attack" },
+  { id: "endless", label: "Endless" },
   { id: "free-drive", label: "Practice Grounds" },
   { id: "drag-race", label: "Drag Race", disabled: true },
   { id: "lap-race", label: "Lap Race", disabled: true },
 ];
 
 export function isPlayableMode(mode: string): mode is ModeId {
-  return mode === "online-lobby" || (mapEditorEnabled && mode === "map-editor") || mode === "drift-attack" || mode === "free-drive";
+  return mode === "online-lobby" || (mapEditorEnabled && mode === "map-editor") || mode === "drift-attack" || mode === "endless" || mode === "free-drive";
 }
 
 export const customizationCategories: CustomizationCategory[] = [

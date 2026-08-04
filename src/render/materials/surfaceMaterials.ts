@@ -126,15 +126,15 @@ export function createAsphaltMaterial(repeat: SurfaceRepeat = { x: 22, y: 80 }) 
   const material = createPbrMaterial({
     id: "Asphalt025A",
     repeat,
-    color: 0x56595a,
+    color: 0x3a3d3e,
     roughness: 0.94,
     normalScale: 0.92,
     aoIntensity: 0.62,
     displacementScale: 0,
   });
-  // Indoors: keep the real roughness map (no low sun to wet-mirror the racing line)
-  // and let the floor pick up a bit more of the baked arena environment.
-  material.envMapIntensity = 0.22;
+  // Keep the real roughness map while restraining environment reflections so the
+  // racing line reads as dry asphalt instead of a wet mirror.
+  material.envMapIntensity = 0.12;
   applyAsphaltDetail(material);
   material.needsUpdate = true;
   return material;
@@ -163,18 +163,18 @@ function createIndoorGritAsphaltMaterial(
 }
 
 export function createIndoorAsphaltMaterial(repeat: SurfaceRepeat = { x: 1, y: 1 }) {
-  return createIndoorGritAsphaltMaterial(repeat, 0x34383a, 1.14, 0.07, {
+  return createIndoorGritAsphaltMaterial(repeat, 0x23272a, 1.14, 0.03, {
     detailTiling: 4.6,
-    detailStrength: 0.7,
+    detailStrength: 0.85,
     roughNoiseTiling: 0.3,
-    roughNoiseAmount: 0.22,
+    roughNoiseAmount: 0.34,
   });
 }
 
 export function createIndoorTrackEdgeMaterial(repeat: SurfaceRepeat = { x: 1, y: 1 }) {
-  return createIndoorGritAsphaltMaterial(repeat, 0x202426, 1.28, 0.03, {
+  return createIndoorGritAsphaltMaterial(repeat, 0x161a1c, 1.28, 0.03, {
     detailTiling: 5.6,
-    detailStrength: 0.82,
+    detailStrength: 0.95,
     roughNoiseTiling: 0.34,
     roughNoiseAmount: 0.26,
   });

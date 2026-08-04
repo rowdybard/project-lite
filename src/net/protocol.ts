@@ -105,6 +105,76 @@ export type ServerOnlineMessage =
       message: string;
     };
 
+export type LeaderboardBoard = "daily" | "all-time";
+
+export type LeaderboardEntry = {
+  id: string;
+  playerName: string;
+  carId: string;
+  score: number;
+  distance: number;
+  gatesPassed: number;
+  duration: number;
+  createdAt: number;
+  verified: boolean;
+};
+
+export type LeaderboardResponse = {
+  entries: LeaderboardEntry[];
+  total: number;
+  dailySeed: number;
+  dailyResetAt: number;
+};
+
+export type DailySeedResponse = {
+  seed: number;
+  resetAt: number;
+};
+
+export type SubmitLeaderboardRequest<TReplay = unknown> = {
+  board: LeaderboardBoard;
+  playerName: string;
+  replay: TReplay;
+};
+
+export type SubmitResponse = {
+  accepted: boolean;
+  rank: number | null;
+  message: string;
+  id: string | null;
+  verified: boolean;
+};
+
+export type ApiErrorResponse = {
+  error: string;
+};
+
+export const utcDayMilliseconds = 86_400_000;
+
+function mixDailySeed(value: number) {
+  let mixed = value >>> 0;
+  mixed = Math.imul(mixed ^ (mixed >>> 16), 0x21f0aaad);
+  mixed = Math.imul(mixed ^ (mixed >>> 15), 0x735a2d97);
+  return (mixed ^ (mixed >>> 15)) >>> 0;
+}
+
+export function dailyDayKeyForTimestamp(timestamp: number) {
+  return Math.floor(timestamp / utcDayMilliseconds);
+}
+
+export function dailySeedForDayKey(dayKey: number) {
+  return mixDailySeed((dayKey ^ 0x4452_4946) >>> 0) || 1;
+}
+
+/** The canonical Daily board seed and next UTC-midnight reset. */
+export function dailySeedForTimestamp(timestamp: number): DailySeedResponse {
+  const dayKey = dailyDayKeyForTimestamp(timestamp);
+  return {
+    seed: dailySeedForDayKey(dayKey),
+    resetAt: (dayKey + 1) * utcDayMilliseconds,
+  };
+}
+
 export function sanitizeRoomCode(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 }

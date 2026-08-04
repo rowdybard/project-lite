@@ -74,16 +74,22 @@ function createSparkTexture() {
 }
 
 export function createBuiltinTexture(id: BuiltinTextureId): Texture {
+  let texture: Texture;
   switch (id) {
     case "spark":
-      return createSparkTexture();
+      texture = createSparkTexture();
+      break;
     case "droplet":
-      return createStreakTexture(16, 128, 0.85);
+      texture = createStreakTexture(16, 128, 0.85);
+      break;
     case "flame":
-      return createRadialSpriteTexture(128, 0.95);
+      texture = createRadialSpriteTexture(128, 0.95);
+      break;
     default:
-      return createRadialSpriteTexture();
+      texture = createRadialSpriteTexture();
   }
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
 }
 
 export const builtinPresets: VfxPreset[] = [
@@ -110,8 +116,9 @@ export const builtinPresets: VfxPreset[] = [
       { t: 1, value: 3.05 },
     ],
     opacityOverLife: [
-      { t: 0, value: 0.34 },
-      { t: 0.5, value: 0.12 },
+      { t: 0, value: 0.42 },
+      { t: 0.18, value: 0.68 },
+      { t: 0.58, value: 0.38 },
       { t: 1, value: 0 },
     ],
     colorOverLife: [{ t: 0, r: 0.92, g: 0.93, b: 0.94 }],
@@ -168,13 +175,13 @@ export const builtinPresets: VfxPreset[] = [
     gravity: -6,
     drag: 0,
     curlNoise: 0,
-    startSize: [0.03, 0.05],
+    startSize: [0.06, 0.1],
     rotationSpeed: [0, 0],
     stretch: 0.09,
     groundFade: 0,
     sizeOverLife: [{ t: 0, value: 1 }],
     opacityOverLife: [
-      { t: 0, value: 0 },
+      { t: 0, value: 0.3 },
       { t: 0.15, value: 0.5 },
       { t: 0.85, value: 0.5 },
       { t: 1, value: 0 },
@@ -197,7 +204,7 @@ export const builtinPresets: VfxPreset[] = [
     gravity: -14,
     drag: 1.4,
     curlNoise: 0,
-    startSize: [0.05, 0.1],
+    startSize: [0.08, 0.14],
     rotationSpeed: [0, 0],
     stretch: 0.05,
     groundFade: 0,
@@ -220,14 +227,14 @@ const num = (value: unknown, fallback: number) => (typeof value === "number" && 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 function cleanRange(value: unknown, fallback: [number, number]): [number, number] {
-  if (!Array.isArray(value) || value.length !== 2) return fallback;
+  if (!Array.isArray(value) || value.length !== 2) return [fallback[0], fallback[1]];
   const a = num(value[0], fallback[0]);
   const b = num(value[1], fallback[1]);
   return a <= b ? [a, b] : [b, a];
 }
 
 function cleanScalarStops(value: unknown, fallback: ScalarStop[]): ScalarStop[] {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+  if (!Array.isArray(value) || value.length === 0) return fallback.map((stop) => ({ ...stop }));
   return value.slice(0, 8).map((stop) => ({
     t: clamp(num(stop?.t, 0), 0, 1),
     value: clamp(num(stop?.value, 1), 0, 8),
@@ -235,7 +242,7 @@ function cleanScalarStops(value: unknown, fallback: ScalarStop[]): ScalarStop[] 
 }
 
 function cleanColorStops(value: unknown, fallback: ColorStop[]): ColorStop[] {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+  if (!Array.isArray(value) || value.length === 0) return fallback.map((stop) => ({ ...stop }));
   return value.slice(0, 8).map((stop) => ({
     t: clamp(num(stop?.t, 0), 0, 1),
     r: clamp(num(stop?.r, 1), 0, 1),
@@ -248,6 +255,7 @@ function cleanColorStops(value: unknown, fallback: ColorStop[]): ColorStop[] {
 export function validatePreset(raw: unknown): VfxPreset | null {
   if (typeof raw !== "object" || raw === null) return null;
   const data = raw as Record<string, unknown>;
+  const fallback = builtinPresets[0];
   const textureRaw = data.texture as Record<string, unknown> | undefined;
   const texture: VfxPreset["texture"] =
     textureRaw?.kind === "upload" && typeof textureRaw.dataUrl === "string" && textureRaw.dataUrl.startsWith("data:image/png")
@@ -279,24 +287,21 @@ export function validatePreset(raw: unknown): VfxPreset | null {
     billboard: data.billboard === "velocity" ? "velocity" : "camera",
     space: data.space === "local" ? "local" : "world",
     emitter,
-    rate: clamp(num(data.rate, 60), 0, particleBudgetLimits.maxRate),
-    life: cleanRange(data.life, [0.8, 1.4]),
-    speed: cleanRange(data.speed, [0.4, 1.2]),
-    gravity: clamp(num(data.gravity, 0), -30, 30),
-    drag: clamp(num(data.drag, 0.4), 0, 6),
-    curlNoise: clamp(num(data.curlNoise, 0), 0, 2),
-    startSize: cleanRange(data.startSize, [0.5, 0.9]),
-    rotationSpeed: cleanRange(data.rotationSpeed, [-1, 1]),
-    stretch: clamp(num(data.stretch, 0.12), 0, 1),
-    groundFade: clamp(num(data.groundFade, 0), 0, 2),
-    sizeOverLife: cleanScalarStops(data.sizeOverLife, [{ t: 0, value: 1 }]),
-    opacityOverLife: cleanScalarStops(data.opacityOverLife, [
-      { t: 0, value: 1 },
-      { t: 1, value: 0 },
-    ]),
-    colorOverLife: cleanColorStops(data.colorOverLife, [{ t: 0, r: 1, g: 1, b: 1 }]),
+    rate: clamp(num(data.rate, fallback.rate), 0, particleBudgetLimits.maxRate),
+    life: cleanRange(data.life, fallback.life),
+    speed: cleanRange(data.speed, fallback.speed),
+    gravity: clamp(num(data.gravity, fallback.gravity), -30, 30),
+    drag: clamp(num(data.drag, fallback.drag), 0, 6),
+    curlNoise: clamp(num(data.curlNoise, fallback.curlNoise), 0, 2),
+    startSize: cleanRange(data.startSize, fallback.startSize),
+    rotationSpeed: cleanRange(data.rotationSpeed, fallback.rotationSpeed),
+    stretch: clamp(num(data.stretch, fallback.stretch), 0, 1),
+    groundFade: clamp(num(data.groundFade, fallback.groundFade), 0, 2),
+    sizeOverLife: cleanScalarStops(data.sizeOverLife, fallback.sizeOverLife),
+    opacityOverLife: cleanScalarStops(data.opacityOverLife, fallback.opacityOverLife),
+    colorOverLife: cleanColorStops(data.colorOverLife, fallback.colorOverLife),
     flipbook,
-    maxInstances: clamp(Math.round(num(data.maxInstances, 512)), 32, particleBudgetLimits.perSystem),
+    maxInstances: clamp(Math.round(num(data.maxInstances, fallback.maxInstances)), 32, particleBudgetLimits.perSystem),
   };
 }
 

@@ -718,11 +718,14 @@ function createIndoorTrackEdges(samples: Vector3[], roadWidth: number) {
       const tangent = next.clone().sub(previous).normalize();
       const normal = new Vector3(-tangent.z, 0, tangent.x);
       const distance01 = cumulativeDistances[i] / Math.max(totalDistance, 1);
+      const gutterBreakup =
+        Math.sin(distance01 * Math.PI * 46 + sideIndex * 1.7) * 0.0035
+        + Math.sin(distance01 * Math.PI * 132 + sideIndex * 0.9) * 0.0015;
       for (let profileIndex = 0; profileIndex < profile.length; profileIndex++) {
         const point = samples[i].clone().addScaledVector(normal, side * profile[profileIndex]);
         const y = profileIndex === 0
-          ? roadSurfaceY(distance01, side * 0.5) + 0.003
-          : roadBaseY - (profileIndex === 1 ? 0.034 : 0.052);
+          ? roadSurfaceY(distance01, side * 0.5) + 0.014
+          : roadBaseY - (profileIndex === 1 ? 0.028 : 0.052) + gutterBreakup * (profileIndex === 1 ? 1 : 0.65);
         positions.push(point.x, y, point.z);
         uvs.push(profile[profileIndex] / asphaltTextureMeters, cumulativeDistances[i] / asphaltTextureMeters);
       }
@@ -1455,7 +1458,7 @@ function createTrackLandmarks(samples: Vector3[], roadWidth: number, dressing: D
 function createPaintedLines(samples: Vector3[], roadWidth: number, indoor = false) {
   const group = new Group();
   const edgeMaterial = prepGroundOverlayMaterial(
-    createRoadPaintMaterial({ x: 1.8, y: 1 }, indoor ? 0x8b908d : 0xcfc8b7, indoor ? 0.46 : 0.68),
+    createRoadPaintMaterial({ x: 1.8, y: 1 }, indoor ? 0x8b908d : 0xcfc8b7, indoor ? 0.56 : 0.68),
   );
   const seamMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(indoor ? 0x0c1012 : 0x15191d, indoor ? 0.42 : 0.26));
   const distances = buildRoadDistances(samples);
@@ -1485,17 +1488,49 @@ function createPaintedLines(samples: Vector3[], roadWidth: number, indoor = fals
     }
   }
 
+  if (indoor) {
+    const rumbleMaterial = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0x555b59, 0.44));
+    const rumbleGeometry = groundDecalGeometry(0.72, 0.38);
+    const rumble = new InstancedMesh(rumbleGeometry, rumbleMaterial, Math.ceil(samples.length / 2) * 2);
+    const marker = new Object3D();
+    let rumbleIndex = 0;
+
+    for (let i = 0; i < samples.length; i += 2) {
+      const previous = samples[(i - 1 + samples.length) % samples.length];
+      const next = samples[(i + 1) % samples.length];
+      const tangent = next.clone().sub(previous).normalize();
+      const normal = new Vector3(-tangent.z, 0, tangent.x);
+      const angle = yawForTangentX(tangent);
+
+      for (const side of [-1, 1]) {
+        const lateral = side * (roadWidth / 2 + 0.1);
+        marker.position.copy(samples[i]).addScaledVector(normal, lateral);
+        marker.position.y = roadSurfaceYAt(distances, i, side * roadWidth / 2, roadWidth, 0.028);
+        marker.rotation.set(0, angle, 0);
+        marker.scale.set(1, 1, 1);
+        marker.updateMatrix();
+        rumble.setMatrixAt(rumbleIndex, marker.matrix);
+        rumbleIndex += 1;
+      }
+    }
+
+    rumble.count = rumbleIndex;
+    rumble.instanceMatrix.needsUpdate = true;
+    rumble.computeBoundingSphere();
+    group.add(prepGroundOverlay(rumble, 11));
+  }
+
   return group;
 }
 
 function createRoadWearDecals(samples: Vector3[], roadWidth: number, indoor = false) {
   const group = new Group();
-  const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 2.8, y: 1.2 }, indoor ? 0.5 : 0.34));
-  const stainMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(0x121517, indoor ? 0.34 : 0.22));
+  const rubberMaterial = prepGroundOverlayMaterial(createRubberMaterial({ x: 2.8, y: 1.2 }, indoor ? 0.58 : 0.34));
+  const stainMaterial = prepGroundOverlayMaterial(createProceduralStainMaterial(indoor ? 0x080a0b : 0x121517, indoor ? 0.42 : 0.22));
   const rubberGeometry = groundDecalGeometry(6.4, 3.2);
   const stainGeometry = groundDecalGeometry(3.8, 0.52);
   const sampleCount = Math.ceil(samples.length / 5);
-  const rubberStride = indoor ? 3 : 12;
+  const rubberStride = indoor ? 2 : 12;
   const stainStride = indoor ? 1 : 2;
   const rubberCount = Math.ceil(sampleCount / rubberStride);
   const stainCount = Math.ceil(sampleCount / stainStride);
@@ -1595,6 +1630,7 @@ function createCurbs(
     red.envMapIntensity = 0.12;
     white.envMapIntensity = 0.12;
   }
+  const distances = buildRoadDistances(samples);
 
   for (let i = 0; i < samples.length; i += 10) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
@@ -1606,11 +1642,15 @@ function createCurbs(
     const angle = yawForTangentX(tangent);
 
     for (const side of [-1, 1]) {
-      const position = samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 + 0.35));
+      const lateral = side * (roadWidth / 2 + 0.35);
+      const position = samples[i].clone().addScaledVector(normal, lateral);
       if (!dressing.allows(position, 0.1)) continue;
-      const curb = new Mesh(new BoxGeometry(1.85, 0.1, 0.72), (i / 10) % 2 === 0 ? red : white);
+      const curbHeight = indoor ? 0.14 : 0.1;
+      const curb = new Mesh(new BoxGeometry(1.85, curbHeight, 0.72), (i / 10) % 2 === 0 ? red : white);
       curb.position.copy(position);
-      curb.position.y = 0.12;
+      curb.position.y = indoor
+        ? roadSurfaceYAt(distances, i, lateral, roadWidth, curbHeight * 0.5 + 0.006)
+        : 0.12;
       curb.rotation.y = angle;
       curb.castShadow = true;
       curb.receiveShadow = true;
