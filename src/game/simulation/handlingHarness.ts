@@ -207,6 +207,98 @@ function normalizeAngle(angle: number) {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
+function tightCornerProbe(tuning: CarTuning, track: TrackConfig) {
+  const car = atSpeed(track, 11);
+  car.gear = Math.min(2, tuning.gearRatios.length);
+  const startHeading = car.heading;
+  const coast = runFor(car, tuning, "polished", 0.7, () => ({
+    ...idleInput,
+    steer: 0.78,
+  }));
+  const coastHeadingDeg = Math.abs(normalizeAngle(car.heading - startHeading)) * (180 / Math.PI);
+  const coastEndMph = car.speed * 2.237;
+  const commitment = car.lowSpeedTurnCommitment;
+  const powered = runFor(car, tuning, "polished", 0.8, () => ({
+    ...idleInput,
+    throttle: 0.72,
+    steer: 0.68,
+  }));
+  return {
+    commitment,
+    coastHeadingDeg,
+    coastRearSlip: coast.maxRearSlip,
+    coastAngle: coast.maxAngle,
+    coastEndMph,
+    poweredRearSlip: powered.maxRearSlip,
+    poweredAngle: powered.maxAngle,
+    poweredEndMph: car.speed * 2.237,
+  };
+}
+
+function zeroThrottleSteerProbe(tuning: CarTuning, track: TrackConfig) {
+  const car = createCarState(track);
+  const start = { ...car.position };
+  runFor(car, tuning, "polished", 1.2, () => ({
+    ...idleInput,
+    steer: 1,
+  }));
+  return {
+    displacement: Math.hypot(car.position.x - start.x, car.position.z - start.z),
+    speed: car.speed,
+    yawVelocity: car.yawVelocity,
+  };
+}
+
+function slideBrakeProbe(tuning: CarTuning, track: TrackConfig) {
+  const coastCar = atSpeed(track, 25);
+  coastCar.gear = Math.min(3, tuning.gearRatios.length);
+  runFor(coastCar, tuning, "polished", 1.1, () => ({
+    ...idleInput,
+    throttle: 0.86,
+    steer: 0.62,
+  }));
+  runFor(coastCar, tuning, "polished", 0.8, (_time, state) => ({
+    ...idleInput,
+    steer: -state.driftDirection * 0.18,
+  }));
+
+  const car = atSpeed(track, 25);
+  car.gear = Math.min(3, tuning.gearRatios.length);
+  runFor(car, tuning, "polished", 1.1, () => ({
+    ...idleInput,
+    throttle: 0.86,
+    steer: 0.62,
+  }));
+  const entryMph = car.speed * 2.237;
+  const entryAngle = car.slipAngle;
+  const startHeading = car.heading;
+  const braking = runFor(car, tuning, "polished", 0.8, (_time, state) => ({
+    ...idleInput,
+    brake: 0.62,
+    steer: -state.driftDirection * 0.18,
+  }));
+  const exitMph = car.speed * 2.237;
+  const exitAngle = car.slipAngle;
+  const brakeHeadingDeg = Math.abs(normalizeAngle(car.heading - startHeading)) * (180 / Math.PI);
+  const throttleRecovery = runFor(car, tuning, "polished", 0.8, (_time, state) => ({
+    ...idleInput,
+    throttle: 0.78,
+    steer: -state.driftDirection * 0.2,
+  }));
+  return {
+    entryMph,
+    entryAngle,
+    coastMph: coastCar.speed * 2.237,
+    coastAngle: coastCar.slipAngle,
+    exitMph,
+    exitAngle,
+    brakeHeadingDeg,
+    brakingPeakRearSlip: braking.maxRearSlip,
+    recoveredMph: car.speed * 2.237,
+    recoveryAngle: throttleRecovery.maxAngle,
+  };
+}
+
 function hardCorrectionProbe(tuning: CarTuning, track: TrackConfig) {
   const car = atSpeed(track, 30);
   car.gear = Math.min(3, tuning.gearRatios.length);
@@ -526,6 +618,9 @@ export function runHandlingHarness(tuning: CarTuning, track: TrackConfig) {
   const drivetrain = drivetrainReport(tuning, track, "polished");
   const hardCorrection = hardCorrectionProbe(tuning, track);
   const highSpeedFishtail = highSpeedFishtailProbe(tuning, track);
+  const tightCorner = tightCornerProbe(tuning, track);
+  const slideBrake = slideBrakeProbe(tuning, track);
+  const zeroThrottleSteer = zeroThrottleSteerProbe(tuning, track);
   const scoringExploits = scoringExploitProbe(track);
   const scoringDelta = Math.abs(score60.total - score120.total) / Math.max(1, score120.total);
   const checks = {
@@ -568,6 +663,25 @@ export function runHandlingHarness(tuning: CarTuning, track: TrackConfig) {
       highSpeedFishtail.directionChanges >= 2 &&
       highSpeedFishtail.peakRearSlip > 14 &&
       highSpeedFishtail.peakRpmFlare > 180,
+    tightCornerRotation:
+      tightCorner.commitment > 0.35 &&
+      tightCorner.coastHeadingDeg > 8 &&
+      tightCorner.coastRearSlip > 4 &&
+      tightCorner.coastEndMph > 10,
+    tightCornerPowerContinuation:
+      tightCorner.poweredRearSlip > 8 &&
+      tightCorner.poweredAngle > 7,
+    slideBrakePreservesMomentum:
+      slideBrake.exitMph > slideBrake.entryMph * 0.45 &&
+      slideBrake.exitMph < slideBrake.entryMph * 0.94,
+    slideBrakeControlsLine:
+      slideBrake.exitAngle > 5 &&
+      slideBrake.brakeHeadingDeg > 6 &&
+      slideBrake.recoveryAngle > 7,
+    zeroThrottleSteerStationary:
+      zeroThrottleSteer.displacement < 0.001 &&
+      zeroThrottleSteer.speed < 0.001 &&
+      Math.abs(zeroThrottleSteer.yawVelocity) < 0.001,
     reverseScoreSuppressed: scoringExploits.reverseScore === 0,
     donutScoreSuppressed: scoringExploits.donutScore < 10000,
   };
@@ -578,6 +692,9 @@ export function runHandlingHarness(tuning: CarTuning, track: TrackConfig) {
     drivetrain,
     hardCorrection,
     highSpeedFishtail,
+    tightCorner,
+    slideBrake,
+    zeroThrottleSteer,
     scoringExploits,
     checks,
   };

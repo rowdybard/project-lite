@@ -33,6 +33,7 @@ export function createPreviewCarState(): CarState {
     tireHeat: 0,
     rearSlipVisual: 0,
     rearReleaseMemory: 0,
+    lowSpeedTurnCommitment: 0,
     steerAxis: 0,
     correctionTimer: 0,
     correctionRightX: 1,

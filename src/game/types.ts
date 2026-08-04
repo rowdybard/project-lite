@@ -43,6 +43,8 @@ export type CarTuning = {
   wheelbaseScale?: number;
   trackWidthScale?: number;
   massScale?: number;
+  differentialLock?: number;
+  weightTransferScale?: number;
   collisionLength?: number;
   collisionWidth?: number;
 };
@@ -79,6 +81,7 @@ export type CarState = {
   tireHeat: number;
   rearSlipVisual: number;
   rearReleaseMemory: number;
+  lowSpeedTurnCommitment: number;
   steerAxis: number;
   correctionTimer: number;
   correctionRightX: number;

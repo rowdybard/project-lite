@@ -15,7 +15,9 @@ type StabilityInput = {
   steerRate: number;
   correctionIntent: number;
   correctionDirection: number;
+  lowSpeedTurnCommitment: number;
   throttle: number;
+  brake: number;
   liftOff: number;
   driftAmount: number;
   rearSlipVisual: number;
@@ -59,6 +61,9 @@ export const stabilityTuning = {
   correctionMomentumHoldSeconds: 0.38,
   correctionPathAcceleration: 0,
   correctionPathResponse: 0,
+  tightTurnRearRelease: 0.085,
+  tightTurnFrontGrip: 0.14,
+  tightTurnYawDampingScale: 0.7,
 } as const;
 
 const degToRad = Math.PI / 180;
@@ -119,10 +124,19 @@ export function updateRearReleaseMemory(
   const lockRelease = input.rearLockIntent * (0.4 + slipGate * 0.12);
   const target = Math.max(input.instantRelease, holdTarget, lockRelease);
   const canReattach = input.throttle < stabilityTuning.powerHoldMinThrottle || settled;
+  const settledProgress = clamp(
+    1 - Math.max(
+      Math.abs(input.rearSlip) / (15 * degToRad),
+      Math.abs(input.sideSpeed) / 4.2,
+      input.driftAmount / 0.38,
+    ),
+    0,
+    1,
+  );
   const rate = target > current
     ? stabilityTuning.releaseRiseRate
     : canReattach
-      ? stabilityTuning.releaseRecoveryRate
+      ? stabilityTuning.releaseRecoveryRate * lerp(0.55, 1.15, settledProgress)
       : stabilityTuning.releaseHoldRate;
   return lerp(current, target, 1 - Math.exp(-rate * dt));
 }
@@ -265,26 +279,35 @@ function polishedEnvelope(input: StabilityInput): StabilityEnvelope {
   const transitionRelease =
     transitionWeight * (0.03 + powered * 0.015) +
     correctionTransient * (0.07 + powered * 0.025);
+  const tightTurnRelease =
+    input.lowSpeedTurnCommitment *
+    lerp(stabilityTuning.tightTurnRearRelease * 0.68, stabilityTuning.tightTurnRearRelease, steeringLoad);
   const rawRelease = clamp(
-    powerRelease + committedTurnRelease + drivenSlipRelease + saturatedSlipRelease + transitionRelease,
+    powerRelease + committedTurnRelease + drivenSlipRelease + saturatedSlipRelease + transitionRelease + tightTurnRelease,
     0,
     0.72,
   );
 
   const lowSpeedWindow = clamp((25 - input.speed) / 17, 0, 1) * clamp((input.speed - 4) / 9, 0, 1);
+  const recoveryLiftOff = input.liftOff * (1 - input.brake * slideEnvelope * 0.18);
+  const scrubLiftOff = input.liftOff * (1 - clamp(input.brake * 1.35, 0, 0.9));
   const recovery = clamp(
-    input.liftOff * slideEnvelope * lowSpeedWindow * 0.72 + counterSteerQuality * slideEnvelope * (0.22 + input.liftOff * 0.18),
+    recoveryLiftOff * slideEnvelope * lowSpeedWindow * 0.72 +
+      counterSteerQuality * slideEnvelope * (0.22 + recoveryLiftOff * 0.18),
     0,
     1,
-  ) * (1 - input.rearLockIntent * 0.78);
+  ) * (1 - input.rearLockIntent * 0.78) * (1 - input.lowSpeedTurnCommitment * 0.72);
   const rearGripRelease = clamp(rawRelease - recovery * 0.26, 0, 0.72);
   const lowSpeedYawDamping = lerp(3.0, 1, clamp(input.speed / 13, 0, 1));
-  const lateralRecoveryRate = recovery * (1.15 + lowSpeedWindow * 1.4) + overspinCatch * 0.28;
+  const lateralRecoveryRate =
+    recovery * (1.15 + lowSpeedWindow * 1.4) * (1 - input.lowSpeedTurnCommitment * 0.55) +
+    overspinCatch * 0.28;
   const poweredRelief = powered * slideEnvelope;
   const lockedRearScrub = input.rearLockIntent * clamp(input.speed / 24, 0.12, 1.08);
   const baseScrub = input.tuning.driftDrag * input.speed * lerp(0.12, 0.92, slideEnvelope);
   const lateralScrub = input.tuning.slideDrag * input.speed * lerp(0.38, 0.62, slideEnvelope);
-  const liftScrub = input.liftOff * slideEnvelope * speedGate;
+  const liftScrub = scrubLiftOff * slideEnvelope * speedGate;
+  const brakeScrubRelief = clamp(input.brake * slideEnvelope * 1.7, 0, 1);
   const shiftRelief = lerp(1, 0.78, input.driftShiftSustain);
 
   return {
@@ -295,7 +318,8 @@ function polishedEnvelope(input: StabilityInput): StabilityEnvelope {
     recovery,
     frontGripScale:
       1 + slideEnvelope * (0.095 + counterSteerQuality * 0.18) +
-      transitionWeight * 0.035 + correctionTransient * 0.48,
+      transitionWeight * 0.035 + correctionTransient * 0.48 +
+      input.lowSpeedTurnCommitment * stabilityTuning.tightTurnFrontGrip,
     rearGripAssist:
       input.tuning.counterSteerAssist * counterSteerQuality * (0.72 + slideEnvelope * 0.28) +
       overspinCatch * input.tuning.rearGrip * 0.16,
@@ -305,13 +329,15 @@ function polishedEnvelope(input: StabilityInput): StabilityEnvelope {
       signed(input.correctionDirection) * correctionTransient * stabilityTuning.correctionYawAuthority *
       (5.2 / input.tuning.yawInertia),
     yawDampingRate:
-      input.tuning.yawDamping * lowSpeedYawDamping +
-      slideEnvelope * (counterSteerQuality * 1.3 + input.liftOff * lowSpeedWindow * 0.85) +
+      input.tuning.yawDamping * lowSpeedYawDamping *
+      lerp(1, stabilityTuning.tightTurnYawDampingScale, input.lowSpeedTurnCommitment) +
+      slideEnvelope * (counterSteerQuality * 1.3 + recoveryLiftOff * lowSpeedWindow * 0.85) +
       transitionWeight * 0.1 + overspinCatch * 2.5,
     lateralRecoveryRate,
     forwardScrubRate:
-      (baseScrub * lerp(1, 0.66, poweredRelief) +
-        input.tuning.slideDrag * Math.abs(input.sideSpeed) * slideEnvelope * lerp(1, 0.58, poweredRelief) +
+      (baseScrub * lerp(1, 0.66, poweredRelief) * lerp(1, 0.08, brakeScrubRelief) +
+        input.tuning.slideDrag * Math.abs(input.sideSpeed) * slideEnvelope *
+          lerp(1, 0.58, poweredRelief) * lerp(1, 0.18, brakeScrubRelief) +
         liftScrub * 0.62 + lockedRearScrub * 0.76) * shiftRelief,
     lateralScrubRate:
       lateralScrub * lerp(1, 0.84, poweredRelief) + baseScrub * 0.34 + liftScrub * 0.42 + lockedRearScrub * 0.5,

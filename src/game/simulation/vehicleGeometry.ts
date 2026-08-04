@@ -21,6 +21,18 @@ export function applyVehicleGeometryTuning(base: CarTuning): CarTuning {
 
   tuning.frontGrip *= clamp(1 + (trackWidthScale - 1) * 0.24, 0.98, 1.04);
   tuning.rearGrip *= clamp(1 + (trackWidthScale - 1) * 0.2, 0.98, 1.04);
+  tuning.frontCorneringStiffness *= clamp(1 + (trackWidthScale - 1) * 0.16 - longWheelbase * 0.08, 0.96, 1.05);
+  tuning.rearCorneringStiffness *= clamp(1 + longWheelbase * 0.12 + (massScale - 1) * 0.08, 0.96, 1.05);
+  tuning.differentialLock = clamp(
+    tuning.differentialLock ?? 0.68 + (tuning.engineTorque - 1) * 0.12 - longWheelbase * 0.08,
+    0.58,
+    0.82,
+  );
+  tuning.weightTransferScale = clamp(
+    tuning.weightTransferScale ?? 1 + (massScale - 1) * 0.3 - (trackWidthScale - 1) * 0.18,
+    0.92,
+    1.1,
+  );
 
   if (!tuning.collisionLength) {
     tuning.collisionLength = (tuning.frontAxle + tuning.rearAxle) * 1.55 + 1.05;
