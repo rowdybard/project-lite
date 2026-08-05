@@ -89,12 +89,12 @@ function prepPaintMaterial(material: MeshStandardMaterial, paintHex: number) {
   material.lightMap = null;
   material.vertexColors = false;
   material.flatShading = false;
-  material.roughness = 0.42;
-  material.metalness = 0.08;
-  material.envMapIntensity = 0.85;
+  material.roughness = 0.38;
+  material.metalness = 0.06;
+  material.envMapIntensity = 0.55;
   if (material instanceof MeshPhysicalMaterial) {
-    material.clearcoat = 0.6;
-    material.clearcoatRoughness = 0.26;
+    material.clearcoat = 0.75;
+    material.clearcoatRoughness = 0.22;
     applyProceduralPaint(material, paintHex);
   } else {
     // Strip the procedural normal map on non-physical materials so it doesn't leak.
@@ -159,11 +159,11 @@ export function createCarView(scale = 1) {
   importedRoot.scale.setScalar(1.15);
   const paintMaterial = new MeshPhysicalMaterial({
     color: 0xbfc3be,
-    roughness: 0.42,
-    metalness: 0.08,
-    clearcoat: 0.6,
-    clearcoatRoughness: 0.26,
-    envMapIntensity: 0.85,
+    roughness: 0.38,
+    metalness: 0.06,
+    clearcoat: 0.75,
+    clearcoatRoughness: 0.22,
+    envMapIntensity: 0.55,
   });
   const wheelSideMaterial = new MeshStandardMaterial({ color: 0x2d3338, roughness: 0.55, metalness: 0.08 });
   const trimMaterial = new MeshStandardMaterial({ color: 0x242c34, roughness: 0.56, metalness: 0.08 });
@@ -423,6 +423,11 @@ export function createCarView(scale = 1) {
           side: source.side,
         });
         prepPaintMaterial(paint, paintHex);
+        paint.roughnessMap = source.roughnessMap;
+        paint.metalnessMap = source.metalnessMap;
+        paint.aoMap = source.aoMap;
+        paint.aoMapIntensity = source.aoMapIntensity;
+        paint.needsUpdate = true;
         return paint;
       });
       mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];

@@ -7,8 +7,12 @@ export type AssetManifest = {
   tracks: Record<string, TrackConfig>;
 };
 
+export function assetUrl(path: string) {
+  return new URL(path.replace(/^\/+/, ""), document.baseURI).toString();
+}
+
 export async function loadManifest(): Promise<AssetManifest> {
-  const response = await fetch("/assets/manifest.json");
+  const response = await fetch(assetUrl("assets/manifest.json"));
   if (!response.ok) {
     throw new Error(`Could not load asset manifest: ${response.status}`);
   }
@@ -17,7 +21,7 @@ export async function loadManifest(): Promise<AssetManifest> {
 }
 
 export async function loadJson<T>(path: string): Promise<T> {
-  const response = await fetch(path);
+  const response = await fetch(assetUrl(path));
   if (!response.ok) {
     throw new Error(`Could not load ${path}: ${response.status}`);
   }

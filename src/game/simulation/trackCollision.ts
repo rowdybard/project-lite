@@ -6,6 +6,7 @@ export type Barrier = {
   angle: number;
   halfLength: number;
   halfWidth: number;
+  cameraObstruction?: boolean;
 };
 
 export type Cone = {
@@ -87,8 +88,70 @@ export function createTrackColliders(track: TrackConfig): TrackColliders {
     }
   }
 
+  if (track.id === "practice-grounds") {
+    barriers.push(...createPracticeGarageBarriers(track));
+  }
+
   // Cones and corner markers remain visual-only so they cannot create phantom blockers.
   return { barriers, cones: [] };
+}
+
+function createPracticeGarageBarriers(track: TrackConfig): Barrier[] {
+  const barriers: Barrier[] = [];
+  const start = track.start;
+  const heading = start.heading;
+  const cos = Math.cos(heading);
+  const sin = Math.sin(heading);
+  const width = 38;
+  const depth = 44;
+
+  // Transform local (lx, lz) to world coordinates
+  const toWorld = (lx: number, lz: number) => ({
+    x: start.x + lx * cos + lz * sin,
+    z: start.z - lx * sin + lz * cos,
+  });
+
+  // Back wall (local: z = -depth/2)
+  const backCenter = toWorld(0, -depth / 2);
+  barriers.push({
+    x: backCenter.x,
+    z: backCenter.z,
+    angle: heading,
+    halfLength: width / 2,
+    halfWidth: 0.4,
+    cameraObstruction: false,
+  });
+
+  // Side walls (local: x = ±width/2)
+  for (const sideX of [-width / 2, width / 2]) {
+    const sideCenter = toWorld(sideX, 0);
+    barriers.push({
+      x: sideCenter.x,
+      z: sideCenter.z,
+      angle: heading + Math.PI / 2,
+      halfLength: depth / 2,
+      halfWidth: 0.4,
+      cameraObstruction: false,
+    });
+  }
+
+  // Frame posts (0.5m × 0.5m) at crossbeam positions
+  const postZ = [-depth / 2 + 3, -11, 0, 11, depth / 2 - 3];
+  for (const lz of postZ) {
+    for (const lx of [-width / 2 + 0.8, width / 2 - 0.8]) {
+      const pos = toWorld(lx, lz);
+      barriers.push({
+        x: pos.x,
+        z: pos.z,
+        angle: heading,
+        halfLength: 0.35,
+        halfWidth: 0.35,
+        cameraObstruction: false,
+      });
+    }
+  }
+
+  return barriers;
 }
 
 function getCarCollisionCircles(car: CarState, tuning?: CarTuning): CollisionCircle[] {

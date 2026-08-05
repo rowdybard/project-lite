@@ -28,7 +28,8 @@ type PbrMaterialOptions = {
 
 const loader = new TextureLoader();
 const textureCache = new Map<string, Texture>();
-const textureRoot = "/assets/textures/ambientcg";
+const textureRoot = `${new URL("assets/textures/ambientcg", document.baseURI).pathname}`;
+const anisotropyLevel = typeof navigator !== "undefined" && (navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) ? 2 : 8;
 
 function texturePath(id: PbrMaterialOptions["id"], map: string) {
   return `${textureRoot}/${id}/${id}_1K-JPG_${map}.jpg`;
@@ -43,7 +44,7 @@ function loadTexture(path: string, repeat: SurfaceRepeat, color = false) {
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.repeat.set(repeat.x, repeat.y);
-  texture.anisotropy = 8;
+  texture.anisotropy = anisotropyLevel;
   if (color) texture.colorSpace = SRGBColorSpace;
   textureCache.set(key, texture);
   return texture;
@@ -117,7 +118,7 @@ function createNoiseTexture(base: string, seed: number, repeat: SurfaceRepeat, c
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.repeat.set(repeat.x, repeat.y);
-  texture.anisotropy = 8;
+  texture.anisotropy = anisotropyLevel;
   if (color) texture.colorSpace = SRGBColorSpace;
   return texture;
 }
@@ -184,12 +185,12 @@ export function createGrassMaterial(repeat: SurfaceRepeat = { x: 48, y: 42 }) {
   const material = createPbrMaterial({
     id: "Grass001",
     repeat,
-    color: 0x5f7442,
+    color: 0x4a5d36,
     roughness: 1,
-    normalScale: 0,
-    aoIntensity: 0,
+    normalScale: 0.42,
+    aoIntensity: 0.4,
   });
-  material.envMapIntensity = 0.02;
+  material.envMapIntensity = 0.008;
   return material;
 }
 

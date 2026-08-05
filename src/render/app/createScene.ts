@@ -11,6 +11,14 @@ import {
 } from "three";
 import type { Vec2 } from "../../game/types";
 
+function isMobileDevice() {
+  return (
+    typeof navigator !== "undefined" &&
+    (navigator.maxTouchPoints > 0 ||
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent))
+  );
+}
+
 type LitScene = Scene & {
   userData: {
     drivingSun?: DirectionalLight;
@@ -29,7 +37,7 @@ export function createScene() {
   const sky = createSkyEnvironment();
   scene.background = sky;
   scene.environment = sky;
-  scene.environmentIntensity = 0.34;
+  scene.environmentIntensity = 0.22;
   scene.fog = new Fog(0x91aab0, 165, 535);
 
   const ambient = new AmbientLight(0xe7eee8, 0.38);
@@ -39,11 +47,13 @@ export function createScene() {
   const sunTarget = new Object3D();
   const sun = new DirectionalLight(0xffd6a1, 2.75);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -62;
-  sun.shadow.camera.right = 62;
-  sun.shadow.camera.top = 62;
-  sun.shadow.camera.bottom = -62;
+  const shadowSize = isMobileDevice() ? 512 : 1024;
+  sun.shadow.mapSize.set(shadowSize, shadowSize);
+  const shadowExtent = isMobileDevice() ? 45 : 62;
+  sun.shadow.camera.left = -shadowExtent;
+  sun.shadow.camera.right = shadowExtent;
+  sun.shadow.camera.top = shadowExtent;
+  sun.shadow.camera.bottom = -shadowExtent;
   sun.shadow.camera.near = 8;
   sun.shadow.camera.far = 180;
   sun.shadow.bias = -0.00008;

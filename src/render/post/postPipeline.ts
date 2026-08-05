@@ -22,9 +22,11 @@ export type PostPipeline = {
 
 export function createPostPipeline(renderer: WebGLRenderer, scene: Scene, camera: Camera): PostPipeline {
   const size = renderer.getDrawingBufferSize(new Vector2());
+  const isMobile = typeof navigator !== "undefined" && (navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
   const composer = new EffectComposer(renderer);
   const renderPass = new RenderPass(scene, camera);
   const bloomPass = new UnrealBloomPass(new Vector2(size.x, size.y), 0.3, 0.3, 1.0);
+  bloomPass.enabled = !isMobile;
   const outputPass = new OutputPass();
   const fxaaPass = new FXAAPass();
   composer.addPass(renderPass);

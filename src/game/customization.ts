@@ -72,11 +72,11 @@ export function getCarLabel(id: string) {
 }
 
 export const carTuningPaths: Record<string, string> = {
-  "pack-suv": "/assets/cars/imports/suv-tuning.json",
-  "pack-pickup": "/assets/cars/imports/pickup-tuning.json",
-  "pack-hatchback": "/assets/cars/imports/hatchback-tuning.json",
-  "pack-sedan": "/assets/cars/imports/sedan-tuning.json",
-  "pack-muscle-2": "/assets/cars/imports/muscle2-tuning.json",
+  "pack-suv": new URL("assets/cars/imports/suv-tuning.json", document.baseURI).pathname,
+  "pack-pickup": new URL("assets/cars/imports/pickup-tuning.json", document.baseURI).pathname,
+  "pack-hatchback": new URL("assets/cars/imports/hatchback-tuning.json", document.baseURI).pathname,
+  "pack-sedan": new URL("assets/cars/imports/sedan-tuning.json", document.baseURI).pathname,
+  "pack-muscle-2": new URL("assets/cars/imports/muscle2-tuning.json", document.baseURI).pathname,
 };
 
 // The editor remains compiled and data-compatible, but is deliberately hidden until its interaction model is repaired.

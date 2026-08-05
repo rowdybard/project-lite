@@ -266,9 +266,9 @@
           "id": "practice-pad",
           "mode": "free-drive",
           "label": "Practice",
-          "x": -150,
-          "z": 22,
-          "heading": 1.55,
+          "x": -140,
+          "z": 112,
+          "heading": 0,
           "radius": 12,
           "color": 6879487
         },
@@ -277,8 +277,8 @@
           "mode": "drift-attack",
           "label": "Drift Attack",
           "x": -104,
-          "z": 28,
-          "heading": 1.42,
+          "z": 112,
+          "heading": 0,
           "radius": 12,
           "color": 15845166
         }
@@ -289,7 +289,7 @@
           "label": "Start Pad",
           "x": -176,
           "z": 22,
-          "heading": 1.55
+          "heading": 0.54
         },
         {
           "id": "skidpad",

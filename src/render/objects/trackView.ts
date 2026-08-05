@@ -1,7 +1,6 @@
 import {
   BoxGeometry,
   BufferGeometry,
-  CanvasTexture,
   CatmullRomCurve3,
   CircleGeometry,
   Color,
@@ -22,7 +21,6 @@ import {
   Quaternion,
   RingGeometry,
   Scene,
-  SRGBColorSpace,
   TorusGeometry,
   Vector3,
 } from "three";
@@ -44,7 +42,6 @@ import {
   createRubberMaterial,
   createShoulderMaterial,
 } from "../materials/surfaceMaterials";
-import { createImportedCarModel } from "./importedCars";
 import { createMapEditStampObject } from "./mapEditObjects";
 
 export type TrackViewResult = {
@@ -52,6 +49,7 @@ export type TrackViewResult = {
   coneMeshes: Mesh[];
   cornerMarkers: CornerMarker[];
   arena?: ArenaShellResult;
+  windUniforms?: { value: number }[];
 };
 
 type CornerMarker = {
@@ -222,9 +220,12 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
 
   const cornerMarkers = createCornerPoles(track, roadWidth, dressing);
   group.add(cornerMarkers.group);
+  const windUniforms: { value: number }[] = [];
   if (!indoor) {
     group.add(createShoulderBlend(track, samples, roadWidth, dressing));
-    group.add(createGrassTufts(samples, roadWidth, dressing));
+    const tufts = createGrassTufts(samples, roadWidth, dressing);
+    if (tufts.userData.windUniform) windUniforms.push(tufts.userData.windUniform);
+    group.add(tufts);
     group.add(createFoliage(samples, roadWidth, dressing));
     group.add(createRunoffPatches(track, samples, roadWidth, dressing));
   }
@@ -232,7 +233,6 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
   group.add(createPaintedLines(samples, roadWidth, indoor));
   group.add(createPracticeAreas(track, samples, roadWidth, indoor));
   group.add(createPracticeGarage(track));
-  group.add(await createModePortals(track));
   group.add(createOnlineLobbyDressing(track));
   group.add(createCurbs(track, samples, roadWidth, dressing, indoor));
   const trackside = createTracksideDepth(track, samples, roadWidth, dressing);
@@ -242,7 +242,7 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
   if (indoor) group.add(createIndoorPaddock(track));
   else group.add(createCircuitFacilities(track, samples, roadWidth));
   group.add(await createMapEditOverlays(mapEdits));
-  return { group, coneMeshes: trackside.coneMeshes, cornerMarkers: cornerMarkers.markers };
+  return { group, coneMeshes: trackside.coneMeshes, cornerMarkers: cornerMarkers.markers, windUniforms };
 }
 
 function createPracticeAreaSurface(
@@ -277,11 +277,19 @@ function createPracticeGarage(track: TrackConfig) {
   const height = 12;
   const concrete = createConcreteMaterial({ x: 5, y: 3 });
   const rubber = createRubberMaterial({ x: 3, y: 2 }, 0.34);
-  const wall = new MeshStandardMaterial({ color: 0x1d252d, roughness: 0.7, metalness: 0.12, envMapIntensity: 0.3 });
+  const wall = new MeshStandardMaterial({ color: 0x222a33, roughness: 0.72, metalness: 0.1, envMapIntensity: 0.25 });
+  const wallTrim = new MeshStandardMaterial({ color: 0x2f3942, roughness: 0.6, metalness: 0.15, envMapIntensity: 0.3 });
   const roof = new MeshStandardMaterial({ color: 0x111820, roughness: 0.62, metalness: 0.36, envMapIntensity: 0.38 });
   const frame = new MeshStandardMaterial({ color: 0x273541, roughness: 0.42, metalness: 0.68, envMapIntensity: 0.46 });
   const accent = new MeshStandardMaterial({ color: 0xd0a63e, emissive: 0x3b2300, emissiveIntensity: 0.7, roughness: 0.42, metalness: 0.28 });
   const fixture = new MeshStandardMaterial({ color: 0xf4f8ff, emissive: 0xaed9ff, emissiveIntensity: 3.2, roughness: 0.25 });
+  const cabinet = new MeshStandardMaterial({ color: 0x2a3338, roughness: 0.55, metalness: 0.25, envMapIntensity: 0.3 });
+  const cabinetTop = new MeshStandardMaterial({ color: 0x1a2024, roughness: 0.4, metalness: 0.3, envMapIntensity: 0.35 });
+  const screenEmissive = new MeshStandardMaterial({ color: 0x0a1015, emissive: 0x4488cc, emissiveIntensity: 0.8, roughness: 0.3 });
+  const tireMat = new MeshStandardMaterial({ color: 0x0d0d0d, roughness: 0.88, metalness: 0 });
+  const yellowPaint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xe6b840, 0.7));
+  const whitePaint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xf7f0df, 0.7));
+  const oilStain = prepGroundOverlayMaterial(createProceduralStainMaterial(0x0a0a0a, 0.32));
 
   group.position.set(position.x, 0, position.z);
   group.rotation.y = position.heading;
@@ -294,10 +302,32 @@ function createPracticeGarage(track: TrackConfig) {
   servicePad.position.y = 0.018;
   servicePad.receiveShadow = true;
   group.add(servicePad);
+
+  // Painted floor markings: parking bay outline + safety yellow lines around service pad
+  const bayOutline = createGroundDecal(8, 16, whitePaint, 10);
+  bayOutline.position.set(0, 0.022, 2);
+  group.add(bayOutline);
+  for (const side of [-1, 1]) {
+    const yellowLine = createGroundDecal(0.3, 8.5, yellowPaint, 10);
+    yellowLine.position.set(side * 4.8, 0.022, -2);
+    group.add(yellowLine);
+  }
+  // Oil stain near service pad
+  const stain = createGroundDecal(5, 3, oilStain, 9);
+  stain.position.set(2, 0.02, -5);
+  group.add(stain);
+
+  // Back wall
   const backWall = new Mesh(new BoxGeometry(width, height, 0.42), wall);
   backWall.position.set(0, height / 2, -depth / 2);
   backWall.receiveShadow = true;
   group.add(backWall);
+  // Wall trim band
+  const trimBand = new Mesh(new BoxGeometry(width, 0.6, 0.44), wallTrim);
+  trimBand.position.set(0, 1.2, -depth / 2 + 0.02);
+  group.add(trimBand);
+
+  // Side walls
   for (const x of [-width / 2, width / 2]) {
     const sideWall = new Mesh(new BoxGeometry(0.42, height, depth), wall);
     sideWall.position.set(x, height / 2, 0);
@@ -328,6 +358,45 @@ function createPracticeGarage(track: TrackConfig) {
   const fascia = new Mesh(new BoxGeometry(width + 0.7, 0.7, 0.25), accent);
   fascia.position.set(0, height - 0.7, depth / 2);
   group.add(fascia);
+
+  // Workbenches along back wall
+  for (const x of [-12, 0, 12]) {
+    const bench = new Mesh(new BoxGeometry(8, 1.0, 2.2), cabinet);
+    bench.position.set(x, 0.5, -depth / 2 + 1.5);
+    bench.castShadow = true;
+    bench.receiveShadow = true;
+    group.add(bench);
+    const benchTop = new Mesh(new BoxGeometry(8.2, 0.08, 2.4), cabinetTop);
+    benchTop.position.set(x, 1.04, -depth / 2 + 1.5);
+    benchTop.castShadow = true;
+    group.add(benchTop);
+    // Screen on wall above bench
+    const screen = new Mesh(new BoxGeometry(3, 1.6, 0.08), screenEmissive);
+    screen.position.set(x, 3.5, -depth / 2 + 0.05);
+    group.add(screen);
+  }
+
+  // Tire stacks in corners
+  for (const corner of [
+    { x: -width / 2 + 3, z: -depth / 2 + 4 },
+    { x: width / 2 - 3, z: -depth / 2 + 4 },
+  ]) {
+    for (let i = 0; i < 4; i++) {
+      const tire = new Mesh(new TorusGeometry(0.42, 0.18, 8, 20), tireMat);
+      tire.rotation.x = Math.PI / 2;
+      tire.position.set(corner.x, 0.18 + i * 0.36, corner.z);
+      tire.castShadow = true;
+      group.add(tire);
+    }
+  }
+
+  // Front apron ramp
+  const apron = new Mesh(new PlaneGeometry(width, 6), concrete);
+  apron.rotation.x = -Math.PI / 2;
+  apron.position.set(0, 0.01, depth / 2 + 3);
+  apron.receiveShadow = true;
+  group.add(apron);
+
   return group;
 }
 
@@ -399,7 +468,6 @@ function createOnlineLobbyDressing(track: TrackConfig) {
 
   const paint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0x9fdfff, 0.46));
   const goldPaint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xf1c75b, 0.5));
-  const whitePaint = prepGroundOverlayMaterial(createRoadPaintMaterial({ x: 1, y: 1 }, 0xf7f0df, 0.82));
   const concrete = createConcreteMaterial({ x: 4, y: 2 });
   const rubber = prepGroundOverlayMaterial(createRubberMaterial({ x: 2, y: 1 }, 0.32));
   const metal = new MeshStandardMaterial({ color: 0x111923, roughness: 0.46, metalness: 0.52 });
@@ -459,311 +527,6 @@ function createOnlineLobbyDressing(track: TrackConfig) {
     lamp.position.set(x + (x < 0 ? 3 : -3), 7.86, z);
     group.add(lamp);
   }
-
-  for (const portal of track.portals ?? []) {
-    const heading = portal.heading ?? 0;
-    const approach = new Group();
-    approach.position.set(portal.x, 0.118, portal.z);
-    approach.rotation.y = heading;
-    for (let i = 0; i < 6; i++) {
-      const centerLine = createGroundDecal(0.82, 3.2, whitePaint, 10);
-      centerLine.position.set(0, 0, -13 - i * 6.1);
-      centerLine.receiveShadow = true;
-      approach.add(centerLine);
-
-      for (const side of [-1, 1]) {
-        const chevron = createGroundDecal(5.6 - i * 0.24, 0.5, whitePaint, 10);
-        chevron.position.set(side * 2.25, 0.002, -10.5 - i * 6.1);
-        chevron.rotation.y = side * 0.48;
-        chevron.receiveShadow = true;
-        approach.add(chevron);
-      }
-    }
-
-    const laneEdgeOffset = portal.mode === "drift-attack" ? -5.2 : 5.2;
-    const edgeStripe = createGroundDecal(0.52, 38, portal.mode === "drift-attack" ? goldPaint : paint, 10);
-    edgeStripe.position.set(laneEdgeOffset, 0.004, -22);
-    edgeStripe.receiveShadow = true;
-    approach.add(edgeStripe);
-
-    const label = createGroundPaintLabel(portal.mode === "drift-attack" ? "DRIFT" : "PRACTICE");
-    label.position.set(0, 0.006, -39);
-    approach.add(label);
-
-    for (const x of [-6.8, 6.8]) {
-      const stopBar = createGroundDecal(0.62, 11, whitePaint, 10);
-      stopBar.position.set(x, 0.004, -2.8);
-      stopBar.receiveShadow = true;
-      approach.add(stopBar);
-    }
-    group.add(approach);
-  }
-
-  return group;
-}
-
-function createGroundPaintLabel(label: string) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "rgba(247, 240, 223, 0.9)";
-  ctx.font = "900 72px Arial, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
-  ctx.shadowBlur = 4;
-  ctx.fillText(label, canvas.width / 2, canvas.height / 2 + 4);
-
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  const material = new MeshStandardMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0.9,
-    roughness: 0.9,
-    metalness: 0,
-    depthWrite: false,
-  });
-  prepGroundOverlayMaterial(material);
-  const mesh = new Mesh(new PlaneGeometry(18, 4.5), material);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.renderOrder = 10;
-  return mesh;
-}
-
-async function createModePortals(track: TrackConfig) {
-  const group = new Group();
-  if (!track.portals) return group;
-
-  for (const portal of track.portals) {
-    const color = portal.color ?? (portal.mode === "drift-attack" ? 0xf1c75b : 0x68d8ff);
-    const portalGroup = new Group();
-    portalGroup.position.set(portal.x, 0.03, portal.z);
-    portalGroup.rotation.y = portal.heading ?? 0;
-
-    const glowMaterial = new MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.75,
-      roughness: 0.38,
-      metalness: 0.12,
-      transparent: true,
-      opacity: 0.72,
-    });
-    const frameMaterial = new MeshStandardMaterial({
-      color: 0x111923,
-      emissive: color,
-      emissiveIntensity: 0.18,
-      roughness: 0.52,
-      metalness: 0.45,
-    });
-    const padMaterial = new MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.5,
-      roughness: 0.7,
-      transparent: true,
-      opacity: 0.34,
-    });
-
-    const gateHalfWidth = Math.max(4.8, portal.radius * 0.56);
-    const postHeight = 4.8;
-    for (const side of [-1, 1]) {
-      const post = new Mesh(new BoxGeometry(0.42, postHeight, 0.5), frameMaterial);
-      post.position.set(side * gateHalfWidth, postHeight / 2, 0);
-      post.castShadow = true;
-      portalGroup.add(post);
-    }
-
-    const topBeam = new Mesh(new BoxGeometry(gateHalfWidth * 2 + 0.4, 0.38, 0.52), frameMaterial);
-    topBeam.position.set(0, postHeight, 0);
-    topBeam.castShadow = true;
-    portalGroup.add(topBeam);
-
-    const ring = new Mesh(new TorusGeometry(gateHalfWidth * 0.58, 0.07, 10, 48), glowMaterial);
-    ring.position.set(0, 2.65, -0.06);
-    ring.scale.y = 0.72;
-    portalGroup.add(ring);
-
-    const pad = new Mesh(new RingGeometry(portal.radius * 0.35, portal.radius * 0.78, 64), padMaterial);
-    pad.rotation.x = -Math.PI / 2;
-    pad.position.y = 0.065;
-    portalGroup.add(pad);
-
-    const hauler = await createPortalHauler(color, portal.mode);
-    portalGroup.add(hauler);
-
-    const beamMaterial = new MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.42,
-      roughness: 1,
-      transparent: true,
-      opacity: 0.16,
-      depthWrite: false,
-      side: DoubleSide,
-    });
-    const beam = new Mesh(new CylinderGeometry(4.4, 1.8, 34, 32, 1, true), beamMaterial);
-    beam.position.y = 19;
-    portalGroup.add(beam);
-
-    const smokeMaterial = new MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.26,
-      roughness: 1,
-      transparent: true,
-      opacity: 0.24,
-      depthWrite: false,
-    });
-    for (let i = 0; i < 9; i++) {
-      const puff = new Mesh(new IcosahedronGeometry(1, 1), smokeMaterial);
-      const angle = i * 1.73;
-      const radius = 0.9 + (i % 3) * 0.52;
-      puff.position.set(Math.cos(angle) * radius, 6.5 + i * 3.15, Math.sin(angle) * radius * 0.72);
-      const scale = 1.1 + (i % 4) * 0.28;
-      puff.scale.set(scale * 1.28, scale * 0.72, scale);
-      portalGroup.add(puff);
-    }
-
-    group.add(portalGroup);
-  }
-
-  return group;
-}
-
-async function createPortalHauler(color: number, mode: "drift-attack" | "free-drive") {
-  const group = new Group();
-  const metal = new MeshStandardMaterial({ color: 0x202932, roughness: 0.48, metalness: 0.58 });
-  const deck = new MeshStandardMaterial({ color: 0x303a42, roughness: 0.72, metalness: 0.36 });
-  const dark = new MeshStandardMaterial({ color: 0x0a0d10, roughness: 0.78, metalness: 0.12 });
-  const paint = createRoadPaintMaterial({ x: 1, y: 1 }, 0xf7f0df, 0.86);
-  const accent = new MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 0.62,
-    roughness: 0.5,
-    metalness: 0.22,
-  });
-  const light = new MeshStandardMaterial({
-    color: 0xf6e3a8,
-    emissive: color,
-    emissiveIntensity: 1.35,
-    roughness: 0.28,
-  });
-
-  const trailer = new Group();
-  trailer.position.z = 0.7;
-  group.add(trailer);
-
-  const deckPlate = new Mesh(new BoxGeometry(7.2, 0.24, 11.8), deck);
-  deckPlate.position.set(0, 0.28, 1.0);
-  deckPlate.castShadow = true;
-  deckPlate.receiveShadow = true;
-  trailer.add(deckPlate);
-
-  const bedTop = new Mesh(new BoxGeometry(6.65, 0.035, 11.25), dark);
-  bedTop.position.set(0, 0.43, 1.0);
-  bedTop.receiveShadow = true;
-  trailer.add(bedTop);
-
-  for (const x of [-2.05, 2.05]) {
-    const tireLane = createGroundDecal(0.74, 10.2, paint, 10);
-    tireLane.position.set(x, 0.46, 0.72);
-    tireLane.receiveShadow = true;
-    trailer.add(tireLane);
-  }
-
-  for (const x of [-3.82, 3.82]) {
-    const rail = new Mesh(new BoxGeometry(0.26, 0.45, 11.8), metal);
-    rail.position.set(x, 0.66, 1.0);
-    rail.castShadow = true;
-    trailer.add(rail);
-  }
-
-  for (const z of [-4.7, -2.2, 0.3, 2.8, 5.3]) {
-    const crossBrace = new Mesh(new BoxGeometry(7.55, 0.18, 0.18), metal);
-    crossBrace.position.set(0, 0.23, z);
-    crossBrace.castShadow = true;
-    trailer.add(crossBrace);
-  }
-
-  for (const x of [-2.2, 2.2]) {
-    const ramp = new Mesh(new BoxGeometry(1.65, 0.12, 5.6), metal);
-    ramp.position.set(x, 0.2, -7.1);
-    ramp.rotation.x = -0.08;
-    ramp.castShadow = true;
-    ramp.receiveShadow = true;
-    trailer.add(ramp);
-
-    const rampStripe = createGroundDecal(1.1, 4.5, paint, 10);
-    rampStripe.position.set(x, 0.285, -7.35);
-    rampStripe.rotation.x = -0.08;
-    trailer.add(rampStripe);
-  }
-
-  const axle = new Mesh(new CylinderGeometry(0.11, 0.11, 8.1, 12), metal);
-  axle.rotation.z = Math.PI / 2;
-  axle.position.set(0, 0.36, -2.05);
-  trailer.add(axle);
-
-  const wheelMaterial = new MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.86, metalness: 0.08 });
-  const rimMaterial = new MeshStandardMaterial({ color: 0x7b858d, roughness: 0.42, metalness: 0.42 });
-  for (const x of [-3.68, 3.68]) {
-    for (const z of [-2.9, -1.25]) {
-      const wheel = new Mesh(new CylinderGeometry(0.48, 0.48, 0.38, 20), wheelMaterial);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 0.45, z);
-      wheel.castShadow = true;
-      trailer.add(wheel);
-
-      const rim = new Mesh(new CylinderGeometry(0.24, 0.24, 0.4, 16), rimMaterial);
-      rim.rotation.z = Math.PI / 2;
-      rim.position.copy(wheel.position);
-      trailer.add(rim);
-    }
-  }
-
-  const portalLine = createGroundDecal(6.4, 0.48, accent, 10);
-  portalLine.position.set(0, 0.49, mode === "drift-attack" ? 1.7 : 2.25);
-  trailer.add(portalLine);
-
-  for (const x of [-3.1, 3.1]) {
-    const marker = new Mesh(new BoxGeometry(0.42, 0.42, 0.22), light);
-    marker.position.set(x, 0.84, -4.88);
-    trailer.add(marker);
-  }
-
-  const hitch = new Mesh(new BoxGeometry(1.2, 0.18, 3.2), metal);
-  hitch.position.set(0, 0.32, 7.6);
-  hitch.rotation.y = Math.PI / 4;
-  hitch.castShadow = true;
-  trailer.add(hitch);
-  const hitchMirror = hitch.clone();
-  hitchMirror.rotation.y = -Math.PI / 4;
-  trailer.add(hitchMirror);
-
-  const truck = await createImportedCarModel("pack-pickup");
-  if (truck) {
-    truck.root.position.set(0, 0.02, 12.55);
-    truck.root.rotation.y = 0;
-    truck.root.scale.multiplyScalar(1.78);
-    truck.root.traverse((child) => {
-      if (child instanceof Mesh) child.castShadow = true;
-    });
-    group.add(truck.root);
-  } else {
-    const cab = new Mesh(new BoxGeometry(4.6, 2.1, 7.2), accent);
-    cab.position.set(0, 1.15, 12.35);
-    cab.castShadow = true;
-    group.add(cab);
-  }
-
-  const loadingSign = createGroundPaintLabel(mode === "drift-attack" ? "LOAD DRIFT" : "LOAD PRACTICE");
-  loadingSign.position.set(0, 0.12, -12.6);
-  group.add(loadingSign);
 
   return group;
 }
@@ -1265,8 +1028,31 @@ function createGrassTufts(samples: Vector3[], roadWidth: number, dressing: Dress
     side: DoubleSide,
     roughness: 1,
   });
-  materialA.envMapIntensity = 0.01;
-  materialB.envMapIntensity = 0.01;
+  materialA.envMapIntensity = 0.008;
+  materialB.envMapIntensity = 0.008;
+
+  // Wind sway: offset blade tips based on time and instance position
+  const windUniform = { value: 0 };
+  for (const mat of [materialA, materialB]) {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uWindTime = windUniform;
+      shader.vertexShader = `
+        uniform float uWindTime;
+      ` + shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        {
+          vec3 wPos = (instanceMatrix * vec4(position, 1.0)).xyz;
+          float windPhase = uWindTime * 1.8 + wPos.x * 0.12 + wPos.z * 0.09;
+          float windStrength = max(0.0, position.y) * 0.06;
+          transformed.x += sin(windPhase) * windStrength;
+          transformed.z += cos(windPhase * 0.7) * windStrength * 0.6;
+        }`,
+      );
+    };
+    mat.customProgramCacheKey = () => "grass-wind";
+  }
+
   const tuftCount = Math.min(220, samples.length);
   const tuftsA = new InstancedMesh(createGrassClumpGeometry(0), materialA, tuftCount);
   const tuftsB = new InstancedMesh(createGrassClumpGeometry(Math.PI * 0.44), materialB, tuftCount);
@@ -1315,6 +1101,7 @@ function createGrassTufts(samples: Vector3[], roadWidth: number, dressing: Dress
     tufts.receiveShadow = false;
   }
   group.add(tuftsA, tuftsB);
+  group.userData.windUniform = windUniform;
   return group;
 }
 

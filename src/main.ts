@@ -1,5 +1,5 @@
 import "./style.css";
-import { Group, Mesh, Timer, Vector3, type Texture } from "three";
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D, Timer, Vector3, type Texture } from "three";
 import {
   applyTuningPreset,
   carTuningPaths,
@@ -41,6 +41,7 @@ import { createQueueSlab } from "./render/objects/queueSlab";
 import { createGarageUi } from "./ui/garageUi";
 import { createMainMenu } from "./ui/mainMenu";
 import { createLoadingOverlay } from "./ui/loadingOverlay";
+import { createFullscreenToggle } from "./ui/fullscreenToggle";
 import { createEndlessResultsOverlay, createHud, createResultsOverlay } from "./ui/hud";
 import { createOnlineHud, type OnlineHudPlayer } from "./ui/onlineHud";
 import { createOnlineMatchUi } from "./ui/onlineMatchUi";
@@ -48,7 +49,7 @@ import { createAttachmentTuner } from "./ui/attachmentTuner";
 import { createVfxEditor } from "./ui/vfxEditor";
 import { isImportedCar } from "./render/objects/importedCars";
 import { createEngineSound } from "./audio/engineSound";
-import { createTrackColliders, updateTrackCollision } from "./game/simulation/trackCollision";
+import { createTrackColliders, updateTrackCollision, type Barrier } from "./game/simulation/trackCollision";
 import type { Cone } from "./game/simulation/trackCollision";
 import { createOnlineClient, type OnlineClient } from "./net/onlineClient";
 import { loadPlayerProfile, savePlayerProfile, type PlayerProfile } from "./net/profile";
@@ -80,6 +81,18 @@ import { createReplayOverlay } from "./ui/replayOverlay";
 
 type AppState = "garage" | "event" | "results" | "replay";
 const eventCarScale = 1.55;
+
+function visualizeBarriers(scene: { add: (obj: Object3D) => void }, barriers: Barrier[]) {
+  const geo = new BoxGeometry(1, 2, 1);
+  const mat = new MeshBasicMaterial({ color: 0xff2222, wireframe: true, transparent: true, opacity: 0.7 });
+  for (const b of barriers) {
+    const mesh = new Mesh(geo, mat);
+    mesh.position.set(b.x, 1, b.z);
+    mesh.rotation.y = b.angle;
+    mesh.scale.set(b.halfLength * 2, 1, b.halfWidth * 2);
+    scene.add(mesh);
+  }
+}
 
 if (import.meta.hot) {
   import.meta.hot.accept(() => window.location.reload());
@@ -442,6 +455,9 @@ async function boot() {
     }
     setupArenaLighting();
     colliders = createTrackColliders(activeTrack);
+    if (new URLSearchParams(window.location.search).has("debugColliders")) {
+      visualizeBarriers(gameScene, colliders.barriers);
+    }
     coneMeshes = trackView.coneMeshes;
     cornerMarkers = trackView.cornerMarkers;
     onlineGhosts.setTrack(activeTrack);
@@ -503,7 +519,12 @@ async function boot() {
   };
 
   const mainMenu = createMainMenu({
-    onPlay: () => void startEvent(),
+    onLaunchMode: (mode) => {
+      customization = { ...customization, selectedMode: mode };
+      saveCustomization(customization);
+      garageUi.update(customization);
+      void startEvent();
+    },
     onOptions: () => showOptionsMenu(),
   });
   const loadingOverlay = createLoadingOverlay();
@@ -514,7 +535,6 @@ async function boot() {
 
   const showMainMenu = () => {
     startEventPending = false;
-    portalLaunchPending = false;
     resetInputState();
     appState = "garage";
     results.hide();
@@ -566,6 +586,14 @@ async function boot() {
   };
 
   const showOptionsMenu = () => {
+    if (appState === "event") {
+      resetInputState();
+      appState = "garage";
+      hud.root.hidden = true;
+      onlineHud.hide();
+      car.throttleAxis = 0;
+      car.brakeAxis = 0;
+    }
     mainMenu.hide();
     garageUi.show();
   };
@@ -780,7 +808,6 @@ async function boot() {
     results.show(local ? local.score : finishDriftRun(drift), drift.bestCombo, drift.bestRun);
   };
 
-  let portalLaunchPending = false;
   const leaveOnlineQueue = () => {
     onlineClient.disconnect();
     onlineRoom = null;
@@ -792,17 +819,6 @@ async function boot() {
     onlineGhosts.clearRemotePlayers();
     clearActiveQueuePad();
     if (activeMode === "online-lobby") returnCarToQueuePortal();
-  };
-
-  const launchModeFromPortal = (mode: "drift-attack" | "free-drive") => {
-    if (portalLaunchPending || startEventPending) return;
-    portalLaunchPending = true;
-    customization = { ...customization, selectedMode: mode };
-    saveCustomization(customization);
-    garageUi.update(customization);
-    void startEvent().finally(() => {
-      portalLaunchPending = false;
-    });
   };
 
   let onlineClient: OnlineClient;
@@ -931,6 +947,7 @@ async function boot() {
   const engineSound = createEngineSound();
 
   bindInput();
+  createFullscreenToggle();
   showMainMenu();
 
   function syncConeMeshes(meshes: Mesh[], cones: Cone[]) {
@@ -946,11 +963,10 @@ async function boot() {
     }
   }
 
-  function getNearbyPortal() {
-    if (activeMode !== "free-drive" || !activeTrack.portals) return null;
-    return activeTrack.portals.find((portal) => {
-      return Math.hypot(car.position.x - portal.x, car.position.z - portal.z) <= portal.radius;
-    }) ?? null;
+  function getNearbyGarage() {
+    if (activeMode !== "free-drive" || activeTrack.id !== "practice-grounds") return false;
+    const start = activeTrack.start;
+    return Math.hypot(car.position.x - start.x, car.position.z - start.z) <= 16;
   }
 
   const screenProjector = new Vector3();
@@ -1172,6 +1188,7 @@ async function boot() {
       tireSmoke.reset();
       carView.sync(car);
       updateCornerMarkerFlex(cornerMarkers, car, dt);
+      if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt;
       engineSound.update(car, activeTuning);
       cameraShake = Math.max(0, cameraShake - dt * 1.7);
       updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), colliders.barriers);
@@ -1367,13 +1384,17 @@ async function boot() {
     onlineGhosts.root.visible = activeMode === "online-lobby" || onlineMatchActive;
     onlineGhosts.update(dt);
 
-    const nearbyPortal = getNearbyPortal();
-    if (nearbyPortal && input.confirm) launchModeFromPortal(nearbyPortal.mode);
+    const nearGarage = getNearbyGarage();
+    if (nearGarage && input.confirm) {
+      showOptionsMenu();
+      return;
+    }
 
     tireTracks.update(car, onTrack);
     tireSmoke.update(car, onTrack, dt);
     carView.sync(car);
     updateCornerMarkerFlex(cornerMarkers, car, dt);
+    if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt;
     engineSound.update(car, activeTuning);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
     updateChaseCamera(
@@ -1413,10 +1434,14 @@ async function boot() {
       });
       onlineHud.hide();
     } else if (activeMode === "free-drive") {
-      hud.setPracticeZone(nearbyPortal ? `${nearbyPortal.label} Pad — Press E` : activeTrack.practiceZones?.[practiceZoneIndex]?.label ?? "Practice");
+      hud.setPracticeZone(
+        nearGarage
+          ? "Garage — Press E"
+          : activeTrack.practiceZones?.[practiceZoneIndex]?.label ?? "Practice",
+      );
       onlineHud.hide();
     } else if (activeMode === "online-lobby") {
-      hud.setOnlineStatus(nearbyPortal ? `${nearbyPortal.label} Hauler` : "Cruise Lobby");
+      hud.setOnlineStatus("Cruise Lobby");
       const ghostPlayers = onlineGhosts.getPlayers();
       const onlinePlayers: OnlineHudPlayer[] = [
         {
@@ -1440,11 +1465,7 @@ async function boot() {
       onlineHud.update({
         players: onlinePlayers,
         localPosition: car.position,
-        portalLabel: nearbyPortal
-          ? nearbyPortal.mode === "drift-attack"
-            ? "Press E to open a private Drift Attack queue pad"
-            : `Press E to confirm travel to ${nearbyPortal.label}`
-          : null,
+        portalLabel: null,
       });
     } else {
       onlineHud.hide();

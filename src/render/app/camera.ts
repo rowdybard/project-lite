@@ -75,15 +75,15 @@ function obstructCamera(target: Vector3, cameraPosition: Vector3, barriers: Barr
   const dz = cameraPosition.z - target.z;
 
   for (const barrier of barriers) {
-    if (barrier.halfLength > 20 && barrier.halfWidth > 2) continue;
+    if (barrier.cameraObstruction === false || (barrier.halfLength > 40 && barrier.halfWidth > 5)) continue;
     const cos = Math.cos(barrier.angle);
     const sin = Math.sin(barrier.angle);
     const startX = (target.x - barrier.x) * cos + (target.z - barrier.z) * sin;
     const startZ = -(target.x - barrier.x) * sin + (target.z - barrier.z) * cos;
     const rayX = dx * cos + dz * sin;
     const rayZ = -dx * sin + dz * cos;
-    const halfX = barrier.halfLength + 0.72;
-    const halfZ = barrier.halfWidth + 0.72;
+    const halfX = barrier.halfLength + 0.6;
+    const halfZ = barrier.halfWidth + 0.6;
     let entry = 0;
     let exit = nearest;
 
@@ -101,7 +101,7 @@ function obstructCamera(target: Vector3, cameraPosition: Vector3, barriers: Barr
       exit = Math.min(exit, Math.max(first, second));
     }
 
-    if (entry <= exit && exit >= 0 && entry <= nearest) nearest = Math.max(0.08, entry - 0.045);
+    if (entry <= exit && exit >= 0 && entry <= nearest) nearest = Math.max(0.08, entry - 0.15);
   }
 
   if (nearest < 1) cameraPosition.set(target.x + dx * nearest, cameraPosition.y, target.z + dz * nearest);
@@ -172,6 +172,8 @@ export function updateChaseCamera(
   renderPosition.copy(position).add(shakeOffset);
   collisionTarget.set(car.position.x, 1.15, car.position.z);
   obstructCamera(collisionTarget, renderPosition, barriers);
+  // Ground clamp: never let the camera dip below the terrain
+  if (renderPosition.y < 1.4) renderPosition.y = 1.4;
   camera.position.copy(renderPosition);
 
   const speedFov = Math.min(9, car.speed * 0.19);

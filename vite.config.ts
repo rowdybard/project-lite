@@ -75,6 +75,7 @@ function mapEditWriterPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: "./",
   plugins: [mapEditWriterPlugin()],
 });
 

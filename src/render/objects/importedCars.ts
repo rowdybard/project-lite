@@ -1,4 +1,4 @@
-import { Box3, CylinderGeometry, Group, Mesh, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
+import { Box3, CylinderGeometry, Group, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
@@ -59,7 +59,7 @@ export type ImportedCarModel = {
   bodyMaterialIndices: Map<Mesh, number[]>;
 };
 
-const packPath = "/assets/cars/imports/free_low_poly_vehicles_pack.glb";
+const packPath = `${new URL("assets/cars/imports/free_low_poly_vehicles_pack.glb", document.baseURI).pathname}`;
 
 const importedCarDefinitions: Record<string, ImportedCarDefinition> = {
   "pack-suv": { id: "pack-suv", path: packPath, rootName: "SUV", fitLength: 4.5, attachments: { bodyWidth: 2.07, rearDeckY: 1.29, rearDeckZ: -2.17, roofY: 1.65, frontBumperY: 0.22, frontBumperZ: 2.15, skirtX: 1.03, skirtY: 0.33, skirtZ: -0.07, skirtLength: 2.08, underglowX: 0.82 } },
@@ -98,19 +98,18 @@ function normalizeName(name: string) {
   return name.toLowerCase().replace(/[_\s]+/g, " ").trim();
 }
 
-function stripMaterialTextureNoise(material: MeshStandardMaterial) {
-  material.map = null;
-  material.normalMap = null;
-  material.roughnessMap = null;
-  material.metalnessMap = null;
-  material.aoMap = null;
+function refineImportedMaterial(material: MeshStandardMaterial) {
+  // Keep the original GLTF textures (map, normalMap, roughnessMap) so the car
+  // retains its original detail. Only strip conflicting/unused maps and tune
+  // the material to read well under our lighting.
   material.displacementMap = null;
   material.bumpMap = null;
   material.emissiveMap = null;
   material.lightMap = null;
   material.vertexColors = false;
   material.flatShading = false;
-  material.roughness = Math.max(material.roughness ?? 0.5, 0.42);
+  material.roughness = Math.max(material.roughness ?? 0.5, 0.38);
+  material.envMapIntensity = 0.55;
   material.needsUpdate = true;
 }
 
@@ -168,7 +167,7 @@ function addGeneratedWheelRig(content: Group, bounds: Box3) {
   const rearZ = bounds.min.z + size.z * 0.23;
   const wheelY = bounds.min.y + radius * 0.92;
   const tireMaterial = new MeshStandardMaterial({ color: 0x111111, roughness: 0.86 });
-  const rimMaterial = new MeshStandardMaterial({ color: 0x54606b, roughness: 0.42, metalness: 0.22 });
+  const rimMaterial = new MeshPhysicalMaterial({ color: 0x54606b, roughness: 0.35, metalness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.5 });
   const wheelGeometry = new CylinderGeometry(radius, radius, width, 20);
   const rimGeometry = new CylinderGeometry(radius * 0.5, radius * 0.5, width * 1.08, 16);
   const wheels: ImportedWheel[] = [];
@@ -202,7 +201,7 @@ function addExplicitWheelRig(content: Group, radius: number, track: number, whee
   const width = radius * 0.78;
   const wheelY = radius * 0.92;
   const tireMaterial = new MeshStandardMaterial({ color: 0x111111, roughness: 0.86 });
-  const rimMaterial = new MeshStandardMaterial({ color: 0x54606b, roughness: 0.42, metalness: 0.22 });
+  const rimMaterial = new MeshPhysicalMaterial({ color: 0x54606b, roughness: 0.35, metalness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.5 });
   const wheelGeometry = new CylinderGeometry(radius, radius, width, 20);
   const rimGeometry = new CylinderGeometry(radius * 0.5, radius * 0.5, width * 1.08, 16);
   const wheels: ImportedWheel[] = [];
@@ -332,7 +331,7 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
     const materials = Array.isArray(node.material) ? node.material : [node.material];
     for (const material of materials) {
       const mat = material as MeshStandardMaterial;
-      if (mat && mat.color) stripMaterialTextureNoise(mat);
+      if (mat && mat.color) refineImportedMaterial(mat);
     }
     const nodeName = node.name.toLowerCase();
 

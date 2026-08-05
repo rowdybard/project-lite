@@ -98,7 +98,7 @@ function cleanStamps(value: unknown): MapEditStamp[] {
 }
 
 export async function loadMapEdits(trackId: string): Promise<MapEditStamp[]> {
-  const response = await fetch(`/assets/map-edits/${trackId}.json?t=${Date.now()}`, { cache: "no-store" });
+  const response = await fetch(new URL(`assets/map-edits/${trackId}.json?t=${Date.now()}`, document.baseURI), { cache: "no-store" });
   if (response.status === 404) return [];
   if (!response.ok) throw new Error(`Could not load map edits: ${response.status}`);
   return cleanStamps(await response.json());
