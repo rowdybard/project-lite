@@ -1,6 +1,8 @@
-import type { CarState } from "../types";
+import type { CarState, CarTuning, Vec2 } from "../types";
 import type { EndlessTrack } from "./endlessTrack";
-import type { Vec2 } from "../types";
+import type { CarPose2D, CollisionResult } from "../simulation/collisionTypes";
+import { emptyCollisionResult } from "../simulation/collisionTypes";
+import { resolveVehicleContact, captureCarPose } from "../simulation/collisionSolver";
 
 // Procedural traffic obstacles for endless mode. Slow-moving cars spawn ahead
 // on the track, drifting slightly. Hitting one at speed triggers crash severity.
@@ -16,6 +18,13 @@ export type ObstacleCar = {
   alive: boolean;
   /** Distance along track when spawned. */
   spawnDistance: number;
+  velocity: Vec2;
+  yawVelocity: number;
+  collisionCooldown: number;
+  /** Target heading for recovery after collision. */
+  targetHeading: number;
+  /** Target speed for recovery after collision. */
+  targetSpeed: number;
 };
 
 export type ObstacleManager = {
@@ -23,10 +32,11 @@ export type ObstacleManager = {
   update(track: EndlessTrack, car: CarState, dt: number): void;
   /** Returns impact severity 0..1 if the player car overlaps any obstacle. */
   checkCollision(car: CarState): number;
+  /** Shared collision response using the unified solver. */
+  resolveCollisions(car: CarState, previousPose: CarPose2D, tuning?: CarTuning): CollisionResult;
   reset(): void;
 };
 
-const carHalfLength = 3.15;
 const carHalfWidth = 1.38;
 const spawnDistanceAhead = 180;
 const despawnDistanceBehind = 60;
@@ -65,7 +75,6 @@ export function createObstacleManager(seed: number): ObstacleManager {
     spawnTimer -= dt;
     if (spawnTimer <= 0 && obstacles.length < maxObstacles) {
       spawnTimer = minSpawnInterval + random() * 2.5;
-      // Find a segment ahead on the track to spawn on.
       const targetDistance = progress + spawnDistanceAhead + random() * 80;
       const segments = track.state.segments;
       let spawnSegment = segments[segments.length - 1];
@@ -84,6 +93,7 @@ export function createObstacleManager(seed: number): ObstacleManager {
       const normalZ = tangentX;
       const halfWidth = spawnSegment.roadWidth * 0.5;
       const lateralOffset = (random() - 0.5) * (halfWidth - carHalfWidth - 1.5) * 1.6;
+      const speed = 6 + random() * 8;
       obstacles.push({
         id: nextId++,
         position: {
@@ -91,19 +101,42 @@ export function createObstacleManager(seed: number): ObstacleManager {
           z: centerZ + normalZ * lateralOffset,
         },
         heading: spawnSegment.heading,
-        speed: 6 + random() * 8,
+        speed,
         lateralOffset,
         alive: true,
         spawnDistance: targetDistance,
+        velocity: {
+          x: Math.sin(spawnSegment.heading) * speed,
+          z: Math.cos(spawnSegment.heading) * speed,
+        },
+        yawVelocity: 0,
+        collisionCooldown: 0,
+        targetHeading: spawnSegment.heading,
+        targetSpeed: speed,
       });
     }
 
     // Move obstacles forward along the track.
     for (const obs of obstacles) {
+      // Recover heading/speed after collision
+      if (obs.collisionCooldown > 0) {
+        obs.collisionCooldown -= dt;
+        // Smoothly recover target heading
+        const headingDiff = obs.targetHeading - obs.heading;
+        obs.heading += headingDiff * Math.min(1, dt * 0.8);
+        // Recover target speed
+        obs.speed += (obs.targetSpeed - obs.speed) * Math.min(1, dt * 0.5);
+      }
+
       const moveDist = obs.speed * dt;
-      // Move along heading.
       obs.position.x += Math.sin(obs.heading) * moveDist;
       obs.position.z += Math.cos(obs.heading) * moveDist;
+      // Update velocity from heading/speed
+      obs.velocity.x = Math.sin(obs.heading) * obs.speed;
+      obs.velocity.z = Math.cos(obs.heading) * obs.speed;
+      // Apply yaw velocity
+      obs.heading += obs.yawVelocity * dt;
+      obs.yawVelocity *= Math.exp(-2.0 * dt);
       // Slowly drift laterally for variety.
       const drift = Math.sin(obs.id * 1.7 + track.state.progressDistance * 0.01) * 0.3 * dt;
       const tangentX = Math.sin(obs.heading);
@@ -115,48 +148,40 @@ export function createObstacleManager(seed: number): ObstacleManager {
     }
   };
 
-  const checkCollision = (car: CarState): number => {
-    let strongest = 0;
-    if (!Number.isFinite(car.position.x) || !Number.isFinite(car.position.z)) return 0;
+  const resolveCollisions = (
+    car: CarState,
+    _previousPose: CarPose2D,
+    tuning?: CarTuning,
+  ): CollisionResult => {
+    if (!Number.isFinite(car.position.x) || !Number.isFinite(car.position.z)) {
+      return emptyCollisionResult;
+    }
+
+    let strongestSeverity = 0;
+    let contactCount = 0;
+    const colliderIds: string[] = [];
+
     for (const obs of obstacles) {
       if (!obs.alive) continue;
       if (!Number.isFinite(obs.position.x) || !Number.isFinite(obs.position.z)) continue;
-      const dx = car.position.x - obs.position.x;
-      const dz = car.position.z - obs.position.z;
-      const dist = Math.hypot(dx, dz);
-      const combinedRadius = carHalfLength + carHalfWidth;
-      if (dist > combinedRadius * 1.4) continue;
 
-      // OBB-ish check: project onto obstacle's heading.
-      const cos = Math.cos(obs.heading);
-      const sin = Math.sin(obs.heading);
-      const localX = dx * sin + dz * cos;
-      const localZ = -dx * cos + dz * sin;
-      const overlapX = carHalfLength + carHalfLength - Math.abs(localX);
-      const overlapZ = carHalfWidth + carHalfWidth - Math.abs(localZ);
-      if (overlapX <= 0 || overlapZ <= 0) continue;
-
-      // Collision! Push the player car back.
-      const pushX = dx / (dist || 1);
-      const pushZ = dz / (dist || 1);
-      const pushAmount = Math.min(overlapX, overlapZ) * 0.5;
-      car.position.x += pushX * pushAmount;
-      car.position.z += pushZ * pushAmount;
-
-      const normalSpeed = car.velocity.x * pushX + car.velocity.z * pushZ;
-      if (normalSpeed < 0) {
-        car.velocity.x -= normalSpeed * 1.3 * pushX;
-        car.velocity.z -= normalSpeed * 1.3 * pushZ;
-        car.velocity.x *= 0.82;
-        car.velocity.z *= 0.82;
-        const impact = Math.min(1, Math.abs(normalSpeed) / 16);
-        if (impact > strongest) strongest = impact;
+      const result = resolveVehicleContact(car, obs, tuning);
+      if (result.severity > 0 || result.appliedNormalDelta > 0) {
+        contactCount++;
+        colliderIds.push(`obstacle:${obs.id}`);
+        if (result.severity > strongestSeverity) strongestSeverity = result.severity;
+        // Set cooldown for recovery — obstacle stays alive
+        obs.collisionCooldown = 1.5;
       }
-
-      // Mark obstacle as hit so it despawns.
-      if (strongest > 0.3) obs.alive = false;
     }
-    return strongest;
+
+    car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+    return { severity: strongestSeverity, contactCount, colliderIds };
+  };
+
+  // Legacy compatibility — returns severity only
+  const checkCollision = (car: CarState): number => {
+    return resolveCollisions(car, captureCarPose(car)).severity;
   };
 
   const reset = () => {
@@ -164,5 +189,5 @@ export function createObstacleManager(seed: number): ObstacleManager {
     spawnTimer = 1.5;
   };
 
-  return { obstacles, update, checkCollision, reset };
+  return { obstacles, update, checkCollision, resolveCollisions, reset };
 }

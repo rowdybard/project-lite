@@ -15,6 +15,7 @@ import {
 } from "three";
 import { arenaPalette } from "./palette";
 import { markOwnerTexture } from "../resources/disposeObject3D";
+import { markBoxCollider } from "../resources/colliderAuthoring";
 
 export type SodiumAnchor = { position: Vector3; target: Vector3 };
 
@@ -103,6 +104,7 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
     const shell = new Mesh(new BoxGeometry(wall.width, ceilingY, wall.depth), wallMaterial);
     shell.position.set(wall.x, ceilingY / 2, wall.z);
     shell.receiveShadow = true;
+    markBoxCollider(shell, { profile: "wall", cameraObstruction: true });
     const stripe = new Mesh(new BoxGeometry(wall.width + 0.04, 0.5, wall.depth + 0.05), stripeMaterial);
     stripe.position.set(wall.x, 3.1, wall.z);
     const band = new Mesh(
@@ -287,6 +289,8 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
   bleacherSteps.instanceMatrix.needsUpdate = true;
   bleacherFrames.instanceMatrix.needsUpdate = true;
   bleacherRails.instanceMatrix.needsUpdate = true;
+  // Mark the bleacher steps as soft barriers (drive-height) so cars gently bump into bleacher banks.
+  markBoxCollider(bleacherSteps, { profile: "soft-barrier" });
   bleacherSeats.computeBoundingSphere();
   bleacherSteps.computeBoundingSphere();
   bleacherFrames.computeBoundingSphere();

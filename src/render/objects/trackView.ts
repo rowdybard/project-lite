@@ -44,6 +44,14 @@ import {
 } from "../materials/surfaceMaterials";
 import { createMapEditStampObject } from "./mapEditObjects";
 import { disposeObject3D } from "../resources/disposeObject3D";
+import {
+  collectAuthoredColliders,
+  collectDynamicCones,
+  markBoxCollider,
+  markCircleCollider,
+  markDynamicCone,
+} from "../resources/colliderAuthoring";
+import { createCollisionWorld } from "../../game/simulation/collisionWorld";
 
 export type TrackViewResult = {
   root: Object3D;
@@ -51,6 +59,8 @@ export type TrackViewResult = {
   cornerMarkers: CornerMarker[];
   arena?: ArenaShellResult;
   windUniforms?: { value: number }[];
+  collisionWorld?: import("../../game/simulation/collisionWorld").CollisionWorld;
+  cones?: import("../../game/simulation/trackCollision").Cone[];
   dispose(): void;
 };
 
@@ -159,7 +169,16 @@ export async function createTrackView(scene: Scene | null, track: TrackConfig): 
   if (imported) {
     root.add(imported);
     if (scene) scene.add(root);
-    return { root, coneMeshes: [], cornerMarkers: [], dispose: () => disposeObject3D(root) };
+    const colliders = collectAuthoredColliders(root, track.id);
+    const { meshes: coneMeshes, cones } = collectDynamicCones(root);
+    return {
+      root,
+      coneMeshes,
+      cornerMarkers: [],
+      collisionWorld: createCollisionWorld(colliders),
+      cones,
+      dispose: () => disposeObject3D(root),
+    };
   }
 
   const bounds = getTrackBounds(track);
@@ -192,11 +211,32 @@ export async function createTrackView(scene: Scene | null, track: TrackConfig): 
     optimizeTrackShadows(group);
     root.add(group);
     if (scene) scene.add(root);
-    return { root, coneMeshes, cornerMarkers, arena, windUniforms, dispose: () => disposeObject3D(root) };
+    const colliders = collectAuthoredColliders(root, track.id);
+    const { meshes: dynamicConeMeshes, cones: dynamicCones } = collectDynamicCones(root);
+    const allConeMeshes = [...coneMeshes, ...dynamicConeMeshes];
+    return {
+      root,
+      coneMeshes: allConeMeshes,
+      cornerMarkers,
+      arena,
+      windUniforms,
+      collisionWorld: createCollisionWorld(colliders),
+      cones: dynamicCones,
+      dispose: () => disposeObject3D(root),
+    };
   } else {
     root.add(createRingRoad(track));
     if (scene) scene.add(root);
-    return { root, coneMeshes: [], cornerMarkers: [], arena, dispose: () => disposeObject3D(root) };
+    const colliders = collectAuthoredColliders(root, track.id);
+    return {
+      root,
+      coneMeshes: [],
+      cornerMarkers: [],
+      arena,
+      collisionWorld: createCollisionWorld(colliders),
+      cones: [],
+      dispose: () => disposeObject3D(root),
+    };
   }
 
 }
@@ -328,6 +368,7 @@ function createPracticeGarage(track: TrackConfig) {
   const backWall = new Mesh(new BoxGeometry(width, height, 0.42), wall);
   backWall.position.set(0, height / 2, -depth / 2);
   backWall.receiveShadow = true;
+  markBoxCollider(backWall, { profile: "wall", cameraObstruction: true });
   group.add(backWall);
   // Wall trim band
   const trimBand = new Mesh(new BoxGeometry(width, 0.6, 0.44), wallTrim);
@@ -339,6 +380,7 @@ function createPracticeGarage(track: TrackConfig) {
     const sideWall = new Mesh(new BoxGeometry(0.42, height, depth), wall);
     sideWall.position.set(x, height / 2, 0);
     sideWall.receiveShadow = true;
+    markBoxCollider(sideWall, { profile: "wall", cameraObstruction: true });
     group.add(sideWall);
   }
   const roofMesh = new Mesh(new BoxGeometry(width + 0.8, 0.48, depth + 0.8), roof);
@@ -354,6 +396,7 @@ function createPracticeGarage(track: TrackConfig) {
       const post = new Mesh(new BoxGeometry(0.5, height, 0.5), frame);
       post.position.set(x, height / 2, z);
       post.castShadow = true;
+      markBoxCollider(post, { profile: "post" });
       group.add(post);
     }
   }
@@ -372,6 +415,7 @@ function createPracticeGarage(track: TrackConfig) {
     bench.position.set(x, 0.5, -depth / 2 + 1.5);
     bench.castShadow = true;
     bench.receiveShadow = true;
+    markBoxCollider(bench, { profile: "concrete" });
     group.add(bench);
     const benchTop = new Mesh(new BoxGeometry(8.2, 0.08, 2.4), cabinetTop);
     benchTop.position.set(x, 1.04, -depth / 2 + 1.5);
@@ -388,13 +432,17 @@ function createPracticeGarage(track: TrackConfig) {
     { x: -width / 2 + 3, z: -depth / 2 + 4 },
     { x: width / 2 - 3, z: -depth / 2 + 4 },
   ]) {
+    const stackGroup = new Group();
+    stackGroup.position.set(corner.x, 0, corner.z);
     for (let i = 0; i < 4; i++) {
       const tire = new Mesh(new TorusGeometry(0.42, 0.18, 8, 20), tireMat);
       tire.rotation.x = Math.PI / 2;
-      tire.position.set(corner.x, 0.18 + i * 0.36, corner.z);
+      tire.position.set(0, 0.18 + i * 0.36, 0);
       tire.castShadow = true;
-      group.add(tire);
+      stackGroup.add(tire);
     }
+    markCircleCollider(stackGroup, { profile: "soft-barrier", padding: 0.2 });
+    group.add(stackGroup);
   }
 
   // Front apron ramp
@@ -455,12 +503,14 @@ function createPracticeAreas(track: TrackConfig, samples: Vector3[], roadWidth: 
 
   const gymkhana = track.practiceZones?.find((zone) => zone.id === "gymkhana");
   if (gymkhana) {
+    let coneIdx = 0;
     for (let row = -2; row <= 2; row++) {
       for (let col = -3; col <= 3; col++) {
         if ((row + col) % 2 !== 0) continue;
         const cone = new Mesh(new CylinderGeometry(0.14, 0.36, 0.78, 12), coneMaterial);
         cone.position.set(gymkhana.x + col * 9, 0.39, gymkhana.z + row * 8);
         cone.castShadow = true;
+        markDynamicCone(cone, `gymkhana-${coneIdx++}`, 0.36);
         group.add(cone);
       }
     }
@@ -510,6 +560,7 @@ function createOnlineLobbyDressing(track: TrackConfig) {
     curb.rotation.y = island.r;
     curb.castShadow = true;
     curb.receiveShadow = true;
+    markBoxCollider(curb, { profile: "concrete" });
     group.add(curb);
   }
 
@@ -523,6 +574,7 @@ function createOnlineLobbyDressing(track: TrackConfig) {
     const pole = new Mesh(new CylinderGeometry(0.16, 0.22, 8.4, 10), metal);
     pole.position.set(x, 4.2, z);
     pole.castShadow = true;
+    markCircleCollider(pole, { profile: "post" });
     group.add(pole);
 
     const arm = new Mesh(new BoxGeometry(3.6, 0.16, 0.18), metal);
@@ -711,6 +763,7 @@ function createIndoorPaddock(track: TrackConfig) {
   backWall.position.copy(center).addScaledVector(normal, -depth / 2);
   backWall.position.y = 3.4;
   backWall.rotation.y = angle;
+  markBoxCollider(backWall, { profile: "wall", cameraObstruction: true });
   const roof = new Mesh(new BoxGeometry(width, 0.36, depth), steel);
   roof.position.copy(center);
   roof.position.y = 6.9;
@@ -724,6 +777,7 @@ function createIndoorPaddock(track: TrackConfig) {
     bayDoor.position.copy(bayCenter).addScaledVector(normal, depth / 2 - 0.12);
     bayDoor.position.y = 2.45;
     bayDoor.rotation.y = angle;
+    markBoxCollider(bayDoor, { profile: "wall" });
     const header = new Mesh(new BoxGeometry(bayWidth - 0.45, 0.3, 0.34), accent);
     header.position.copy(bayDoor.position);
     header.position.y = 5.35;
@@ -735,6 +789,7 @@ function createIndoorPaddock(track: TrackConfig) {
       column.position.copy(center).addScaledVector(tangent, (i + 0.5) * bayWidth).addScaledVector(normal, depth / 2);
       column.position.y = 3.35;
       column.rotation.y = angle;
+      markBoxCollider(column, { profile: "post" });
       group.add(column);
     }
   }
@@ -766,6 +821,7 @@ function createIndoorStartGantry(track: TrackConfig) {
     post.position.copy(start).addScaledVector(normal, side * (track.roadWidth / 2 + 1.55));
     post.position.y = 3.4;
     post.rotation.y = angle;
+    markBoxCollider(post, { profile: "post" });
     group.add(post);
   }
 
@@ -892,6 +948,7 @@ function createCornerPoles(track: TrackConfig, roadWidth: number, dressing: Dres
       cap.position.y = 2.38;
       pole.add(shaft, cap);
       anchor.add(base, pole);
+      markCircleCollider(anchor, { profile: "post", padding: 0.05 });
       group.add(anchor);
       markers.push({ anchor, pole, x, z, bendX: 0, bendZ: 0 });
     }
@@ -1526,6 +1583,7 @@ function createTracksideDepth(track: TrackConfig, samples: Vector3[], roadWidth:
   const coneMaterial = new MeshStandardMaterial({ color: 0xe68a2e, roughness: 0.7 });
   const postMaterial = new MeshStandardMaterial({ color: 0xd8d2bd, roughness: 0.74 });
 
+  let tracksideConeIdx = 0;
   for (let i = 6; i < samples.length; i += 24) {
     const previous = samples[(i - 1 + samples.length) % samples.length];
     const next = samples[(i + 1) % samples.length];
@@ -1541,6 +1599,7 @@ function createTracksideDepth(track: TrackConfig, samples: Vector3[], roadWidth:
       cone.position.copy(position);
       cone.position.y = 0.4;
       cone.castShadow = true;
+      markDynamicCone(cone, `trackside-${tracksideConeIdx++}`, 0.38);
       group.add(cone);
       coneMeshes.push(cone);
     }
@@ -1557,6 +1616,7 @@ function createTracksideDepth(track: TrackConfig, samples: Vector3[], roadWidth:
     post.position.copy(position);
     post.position.y = 1.3;
     post.castShadow = true;
+    markCircleCollider(post, { profile: "post", padding: 0.05 });
     group.add(post);
   }
 
@@ -1665,6 +1725,7 @@ function createMetalGuardrails(
       post.rotation.y = angle;
       post.castShadow = true;
       post.receiveShadow = true;
+      markBoxCollider(post, { profile: "guardrail" });
       group.add(post);
 
       if (i % 16 === 0) {
@@ -1718,6 +1779,7 @@ function createJerseyBarrierRuns(
       base.rotation.y = angle;
       base.castShadow = true;
       base.receiveShadow = true;
+      markBoxCollider(base, { profile: "concrete" });
       group.add(base);
 
       const upper = new Mesh(upperGeometry, concreteMaterial);
@@ -1755,19 +1817,26 @@ function createTireBarrierStacks(track: TrackConfig, samples: Vector3[], roadWid
     const base = samples[i].clone().addScaledVector(normal, side * (roadWidth / 2 + 4.75));
     if (!dressing.allows(base, 1.1, 1.25)) continue;
     const rotation = new Quaternion().setFromUnitVectors(defaultNormal, tangent);
+    const stackGroup = new Group();
+    stackGroup.position.copy(base);
 
     for (let column = -2; column <= 2; column++) {
       for (let row = 0; row < 2; row++) {
         const tire = new Mesh(tireGeometry, tireMaterial);
-        tire.position.copy(base).addScaledVector(tangent, column * 0.52).addScaledVector(normal, side * (row * 0.05));
-        tire.position.y = 0.44 + row * 0.52;
+        tire.position.set(
+          column * 0.52,
+          0.44 + row * 0.52,
+          side * (row * 0.05),
+        );
         tire.quaternion.copy(rotation);
         tire.rotation.z += (column + row) * 0.11;
         tire.castShadow = true;
         tire.receiveShadow = true;
-        group.add(tire);
+        stackGroup.add(tire);
       }
     }
+    markCircleCollider(stackGroup, { profile: "soft-barrier", padding: 0.4 });
+    group.add(stackGroup);
   }
 
   return group;
@@ -1879,6 +1948,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
   pitWall.position.set(-26, 0.19, 76);
   pitWall.rotation.y = angle;
   pitWall.castShadow = true;
+  markBoxCollider(pitWall, { profile: "concrete" });
   group.add(pitWall);
 
   const garageRowCenter = new Vector3(-18, 0, 38);
@@ -1891,6 +1961,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
     garage.rotation.y = angle;
     garage.castShadow = true;
     garage.receiveShadow = true;
+    markBoxCollider(garage, { profile: "wall" });
     group.add(garage);
 
     const door = new Mesh(new BoxGeometry(6.8, 2.3, 0.24), glassMaterial);
@@ -1905,6 +1976,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
       column.position.y = 1.35;
       column.rotation.y = angle;
       column.castShadow = true;
+      markBoxCollider(column, { profile: "post" });
       group.add(column);
     }
   }
@@ -1932,6 +2004,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
     standBase.position.y = 1.05;
     standBase.rotation.y = angle;
     standBase.castShadow = true;
+    markBoxCollider(standBase, { profile: "concrete" });
     group.add(standBase);
 
     for (let row = 0; row < 4; row++) {
@@ -1949,6 +2022,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
     post.position.copy(start.clone().addScaledVector(normal, side * (roadWidth / 2 + 1.3)));
     post.position.y = 3.6;
     post.rotation.y = angle;
+    markBoxCollider(post, { profile: "post" });
     gantry.add(post);
 
     const foot = new Mesh(new BoxGeometry(1.2, 0.18, 0.9), wallMaterial);
@@ -1956,6 +2030,7 @@ function createCircuitFacilities(track: TrackConfig, samples: Vector3[], roadWid
     foot.position.y = 0.09;
     foot.rotation.y = angle;
     foot.castShadow = true;
+    markBoxCollider(foot, { profile: "concrete" });
     gantry.add(foot);
   }
 

@@ -1,6 +1,6 @@
 import { PerspectiveCamera, Vector3 } from "three";
 import type { CarState } from "../../game/types";
-import type { Barrier } from "../../game/simulation/trackCollision";
+import type { BoxCollider } from "../../game/simulation/collisionTypes";
 
 const position = new Vector3();
 const positionVelocity = new Vector3();
@@ -69,13 +69,13 @@ function buildTargets(car: CarState, orbitAngle: number) {
   desiredLook.set(car.position.x + lookX * lookAhead, 1.25 + speedBlend * 0.22, car.position.z + lookZ * lookAhead);
 }
 
-function obstructCamera(target: Vector3, cameraPosition: Vector3, barriers: Barrier[]) {
+function obstructCamera(target: Vector3, cameraPosition: Vector3, barriers: readonly BoxCollider[]) {
   let nearest = 1;
   const dx = cameraPosition.x - target.x;
   const dz = cameraPosition.z - target.z;
 
   for (const barrier of barriers) {
-    if (barrier.cameraObstruction === false || (barrier.halfLength > 40 && barrier.halfWidth > 5)) continue;
+    if (!barrier.cameraObstruction || (barrier.halfLength > 40 && barrier.halfWidth > 5)) continue;
     const cos = Math.cos(barrier.angle);
     const sin = Math.sin(barrier.angle);
     const startX = (target.x - barrier.x) * cos + (target.z - barrier.z) * sin;
@@ -135,7 +135,7 @@ export function updateChaseCamera(
   dt: number,
   shake = 0,
   orbitAngle = 0,
-  barriers: Barrier[] = [],
+  barriers: readonly BoxCollider[] = [],
 ) {
   const safeDt = Math.min(Math.max(dt, 0), 0.05);
   if (!initialized) resetChaseCamera(camera, car);

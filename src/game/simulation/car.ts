@@ -1,5 +1,7 @@
 import type { CarState, CarTuning, InputState, TrackConfig, Vec2 } from "../types";
 import { getRoadHalfWidth } from "./trackLayout";
+import type { CarPose2D, CollisionResult } from "./collisionTypes";
+import { collisionResponses, emptyCollisionResult } from "./collisionTypes";
 import {
   computeStabilityEnvelope,
   stabilityTuning,
@@ -666,42 +668,111 @@ export function updateCar(
   car.suspensionRR = clamp(0.5 - frontBias + rightBias, 0, 1);
 }
 
-export function keepCarNearTrack(car: CarState, track: TrackConfig) {
+export function resolveTrackSafetyBoundary(
+  car: CarState,
+  _previousPose: CarPose2D,
+  track: TrackConfig,
+  tuning?: CarTuning,
+): CollisionResult {
+  const response = collisionResponses.boundary;
+  const carHalfWidth = Math.max(1.08, (tuning?.collisionWidth ?? 2.76) * 0.5);
   const closest = closestTrackPoint(car.position, track);
-  if (closest) {
-    const limit = getRoadHalfWidth(track) + track.boundaryMargin;
-    if (closest.distance < limit) return 0;
 
+  if (closest) {
+    const centerLimit = getRoadHalfWidth(track) + track.boundaryMargin - carHalfWidth;
+    if (closest.distance < centerLimit) return emptyCollisionResult;
+
+    // Outward normal (from track center toward car)
     const dx = car.position.x - closest.x;
     const dz = car.position.z - closest.z;
     const distance = Math.max(closest.distance, 0.001);
-    const normal = { x: dx / distance, z: dz / distance };
-    car.position.x = closest.x + normal.x * limit;
-    car.position.z = closest.z + normal.z * limit;
+    // Inward normal (from car toward track center) — points toward legal area
+    const inwardX = -dx / distance;
+    const inwardZ = -dz / distance;
 
-    const outwardSpeed = car.velocity.x * normal.x + car.velocity.z * normal.z;
-    if (outwardSpeed > 0) {
-      car.velocity.x -= normal.x * outwardSpeed * 1.35;
-      car.velocity.z -= normal.z * outwardSpeed * 1.35;
+    // Correct only the excess penetration
+    const excess = closest.distance - centerLimit;
+    const correction = Math.min(
+      response.maxCorrection,
+      Math.max(0, excess - response.correctionSlop) * response.correctionPercent,
+    );
+    car.position.x += inwardX * correction;
+    car.position.z += inwardZ * correction;
+
+    // Velocity response — normal is inward (toward legal area)
+    const normalSpeed = car.velocity.x * inwardX + car.velocity.z * inwardZ;
+    // If moving outward (negative inward speed), apply gentle bounce
+    if (normalSpeed < -response.bounceThreshold) {
+      const closingSpeed = -normalSpeed;
+      const bounceSpeed = Math.min(
+        response.maxBounceSpeed,
+        closingSpeed * response.restitution,
+      );
+
+      const tangentX = car.velocity.x - normalSpeed * inwardX;
+      const tangentZ = car.velocity.z - normalSpeed * inwardZ;
+
+      car.velocity.x = tangentX * response.tangentRetention + inwardX * bounceSpeed;
+      car.velocity.z = tangentZ * response.tangentRetention + inwardZ * bounceSpeed;
+
+      // Gentle yaw impulse
+      const lever = closest.x * inwardZ - closest.z * inwardX;
+      const yawDelta = clamp(
+        lever * bounceSpeed * response.yawImpulseScale,
+        -response.maxYawImpulse,
+        response.maxYawImpulse,
+      );
+      car.yawVelocity += yawDelta;
+
+      const severity = clamp(
+        (closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
+        0,
+        1,
+      );
+      car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+      return { severity, contactCount: 1, colliderIds: ["boundary"] };
     }
 
-    return Math.min(1, Math.abs(outwardSpeed) / 20);
+    car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+    return emptyCollisionResult;
   }
 
-  const limit = (track.roadPath ? track.roadWidth + 34 : track.roadWidth) + track.boundaryMargin;
+  // No road path — radial boundary
+  const limit = (track.roadPath ? track.roadWidth + 34 : track.roadWidth) + track.boundaryMargin - carHalfWidth;
   const distance = Math.hypot(car.position.x, car.position.z);
+  if (distance < limit) return emptyCollisionResult;
 
-  if (distance < limit) return 0;
+  const inwardX = -car.position.x / Math.max(distance, 0.001);
+  const inwardZ = -car.position.z / Math.max(distance, 0.001);
+  const excess = distance - limit;
+  const correction = Math.min(
+    response.maxCorrection,
+    Math.max(0, excess - response.correctionSlop) * response.correctionPercent,
+  );
+  car.position.x += inwardX * correction;
+  car.position.z += inwardZ * correction;
 
-  const normal = { x: car.position.x / distance, z: car.position.z / distance };
-  car.position.x = normal.x * limit;
-  car.position.z = normal.z * limit;
+  const normalSpeed = car.velocity.x * inwardX + car.velocity.z * inwardZ;
+  if (normalSpeed < -response.bounceThreshold) {
+    const closingSpeed = -normalSpeed;
+    const bounceSpeed = Math.min(
+      response.maxBounceSpeed,
+      closingSpeed * response.restitution,
+    );
+    const tangentX = car.velocity.x - normalSpeed * inwardX;
+    const tangentZ = car.velocity.z - normalSpeed * inwardZ;
+    car.velocity.x = tangentX * response.tangentRetention + inwardX * bounceSpeed;
+    car.velocity.z = tangentZ * response.tangentRetention + inwardZ * bounceSpeed;
 
-  const outwardSpeed = car.velocity.x * normal.x + car.velocity.z * normal.z;
-  if (outwardSpeed > 0) {
-    car.velocity.x -= normal.x * outwardSpeed * 1.35;
-    car.velocity.z -= normal.z * outwardSpeed * 1.35;
+    const severity = clamp(
+      (closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
+      0,
+      1,
+    );
+    car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+    return { severity, contactCount: 1, colliderIds: ["boundary"] };
   }
 
-  return Math.min(1, Math.abs(outwardSpeed) / 20);
+  car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+  return emptyCollisionResult;
 }

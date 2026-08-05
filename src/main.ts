@@ -1,5 +1,5 @@
 import "./style.css";
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Material, Object3D, Timer, Vector3, type Texture } from "three";
+import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, Material, Object3D, Timer, Vector3, type Texture } from "three";
 import {
   applyTuningPreset,
   carTuningPaths,
@@ -15,13 +15,14 @@ import {
 } from "./game/customization";
 import { loadJson, loadManifest } from "./game/content/manifest";
 import { bindInput, readInput, getCameraOrbit, resetInputState } from "./game/input/inputMap";
-import { createCarState, keepCarNearTrack, resetCar, updateCar } from "./game/simulation/car";
+import { createCarState, resolveTrackSafetyBoundary, resetCar, updateCar } from "./game/simulation/car";
 import { createFixedStepRunner } from "./game/simulation/fixedStep";
 import {
   mountHandlingHarnessReport,
   runFleetTransmissionHarness,
   runHandlingHarness,
 } from "./game/simulation/handlingHarness";
+import { mountCollisionHarnessReport, runCollisionHarness } from "./game/simulation/collisionHarness";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
 import { applyStandardDriftTransmission } from "./game/simulation/driftTransmission";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
@@ -51,9 +52,12 @@ import { createVfxEditor } from "./ui/vfxEditor";
 import { isImportedCar } from "./render/objects/importedCars";
 import { createGarageView } from "./render/garage/garageView";
 import { createEngineSound } from "./audio/engineSound";
-import { createTrackColliders, updateTrackCollision, type Barrier } from "./game/simulation/trackCollision";
+import { resolveTrackCollisions, type Cone } from "./game/simulation/trackCollision";
+import { captureCarPose } from "./game/simulation/collisionSolver";
+import type { CollisionWorld } from "./game/simulation/collisionWorld";
+import { emptyCollisionResult } from "./game/simulation/collisionTypes";
+import { createCollisionWorld } from "./game/simulation/collisionWorld";
 import { disposeObject3D } from "./render/resources/disposeObject3D";
-import type { Cone } from "./game/simulation/trackCollision";
 import { createOnlineClient, type OnlineClient } from "./net/onlineClient";
 import { loadPlayerProfile, savePlayerProfile, type PlayerProfile } from "./net/profile";
 import {
@@ -84,17 +88,49 @@ import { createReplayOverlay } from "./ui/replayOverlay";
 type AppState = "garage" | "event" | "results" | "replay";
 const eventCarScale = 1.55;
 
-function visualizeBarriers(scene: { add: (obj: Object3D) => void }, barriers: Barrier[]): Group {
+// P0-12: Collision debug visualization — supports oriented boxes, circles, profiles
+const profileColors: Record<string, number> = {
+  wall: 0xff4444,
+  guardrail: 0xff8800,
+  concrete: 0x888888,
+  "soft-barrier": 0x44ff44,
+  post: 0xffff44,
+  vehicle: 0x4488ff,
+  cone: 0xff44ff,
+  boundary: 0x44ffff,
+};
+
+function visualizeColliders(
+  scene: { add: (obj: Object3D) => void },
+  world: CollisionWorld,
+): Group {
   const group = new Group();
-  const geo = new BoxGeometry(1, 2, 1);
-  const mat = new MeshBasicMaterial({ color: 0xff2222, wireframe: true, transparent: true, opacity: 0.7 });
-  for (const b of barriers) {
-    const mesh = new Mesh(geo, mat);
-    mesh.position.set(b.x, 1, b.z);
-    mesh.rotation.y = b.angle;
-    mesh.scale.set(b.halfLength * 2, 1, b.halfWidth * 2);
-    group.add(mesh);
+  const materials = new Map<string, MeshBasicMaterial>();
+  const boxGeo = new BoxGeometry(1, 0.4, 1);
+  const circleGeo = new CylinderGeometry(1, 1, 0.4, 24);
+
+  for (const collider of world.colliders) {
+    const color = profileColors[collider.profile] ?? 0xff4444;
+    let mat = materials.get(collider.profile);
+    if (!mat) {
+      mat = new MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.6 });
+      materials.set(collider.profile, mat);
+    }
+
+    if (collider.shape === "box") {
+      const mesh = new Mesh(boxGeo, mat);
+      mesh.position.set(collider.x, 0.4, collider.z);
+      mesh.rotation.y = collider.angle;
+      mesh.scale.set(collider.halfLength * 2, 1, collider.halfWidth * 2);
+      group.add(mesh);
+    } else {
+      const mesh = new Mesh(circleGeo, mat);
+      mesh.position.set(collider.x, 0.4, collider.z);
+      mesh.scale.set(collider.radius, 1, collider.radius);
+      group.add(mesh);
+    }
   }
+
   scene.add(group);
   return group;
 }
@@ -122,6 +158,30 @@ async function boot() {
 
   const renderer = createRenderer(canvas);
   const performanceMonitor = createPerformanceMonitor(renderer);
+  const collisionStatsEnabled = new URLSearchParams(window.location.search).has("collisionStats");
+  let collisionStatsAccumulator = { samples: 0, totalMicros: 0, maxMicros: 0, lastSeverities: [] as number[] };
+  const updateCollisionStats = (micros: number, severity: number) => {
+    if (!collisionStatsEnabled) return;
+    collisionStatsAccumulator.samples++;
+    collisionStatsAccumulator.totalMicros += micros;
+    if (micros > collisionStatsAccumulator.maxMicros) collisionStatsAccumulator.maxMicros = micros;
+    collisionStatsAccumulator.lastSeverities.push(severity);
+    if (collisionStatsAccumulator.lastSeverities.length > 60) collisionStatsAccumulator.lastSeverities.shift();
+  };
+  let collisionStatsOverlay: HTMLPreElement | null = null;
+  const renderCollisionStats = () => {
+    if (!collisionStatsEnabled) return;
+    if (!collisionStatsOverlay) {
+      collisionStatsOverlay = document.createElement("pre");
+      collisionStatsOverlay.className = "collision-stats";
+      collisionStatsOverlay.style.cssText = "position:fixed;bottom:8px;right:8px;color:#9fe7ff;font:11px/1.4 monospace;background:rgba(0,0,0,0.6);padding:6px 8px;border-radius:4px;pointer-events:none;z-index:9999;";
+      document.body.append(collisionStatsOverlay);
+    }
+    const a = collisionStatsAccumulator;
+    const mean = a.samples > 0 ? a.totalMicros / a.samples : 0;
+    const recentMax = a.lastSeverities.length > 0 ? Math.max(...a.lastSeverities) : 0;
+    collisionStatsOverlay.textContent = `COLLISION STATS\nsamples: ${a.samples}\nmean: ${mean.toFixed(2)}µs\nmax: ${a.maxMicros.toFixed(2)}µs\nrecent max severity: ${recentMax.toFixed(3)}`;
+  };
   const gameScene = createScene();
   const defaultSceneEnvironment = gameScene.environment;
   const gameCamera = createCamera();
@@ -178,6 +238,11 @@ async function boot() {
     (window as Window & { __driftAttackHandlingReport?: typeof report }).__driftAttackHandlingReport = report;
     mountHandlingHarnessReport(report);
   }
+  if (query.has("collisionHarness")) {
+    const collisionReport = runCollisionHarness();
+    (window as Window & { __driftAttackCollisionReport?: typeof collisionReport }).__driftAttackCollisionReport = collisionReport;
+    mountCollisionHarnessReport(collisionReport);
+  }
 
   let activeTrack: TrackConfig = driftTrack;
   let trackView: TrackViewResult = await createTrackView(gameScene, activeTrack);
@@ -198,7 +263,8 @@ async function boot() {
     }
   };
   setupArenaLighting();
-  let colliders = createTrackColliders(activeTrack);
+  let collisionWorld: CollisionWorld = trackView.collisionWorld ?? createCollisionWorld([]);
+  let cones: Cone[] = trackView.cones ?? [];
   let coneMeshes = trackView.coneMeshes;
   let cornerMarkers = trackView.cornerMarkers;
   const carView = createCarView((carEntry.scale ?? 1) * eventCarScale);
@@ -491,12 +557,18 @@ async function boot() {
   type TrackCandidate = {
     track: TrackConfig;
     view: TrackViewResult;
-    colliders: ReturnType<typeof createTrackColliders>;
   };
 
   function createEmptyEndlessTrackViewResult(): TrackViewResult {
     const root = new Group();
-    return { root, coneMeshes: [], cornerMarkers: [], dispose: () => disposeObject3D(root) };
+    return {
+      root,
+      collisionWorld: createCollisionWorld([]),
+      cones: [],
+      coneMeshes: [],
+      cornerMarkers: [],
+      dispose: () => disposeObject3D(root),
+    };
   }
 
   async function buildTrackCandidate(track: TrackConfig): Promise<TrackCandidate> {
@@ -504,14 +576,7 @@ async function boot() {
       track.id === "endless"
         ? createEmptyEndlessTrackViewResult()
         : await createTrackView(null, track);
-
-    try {
-      const nextColliders = createTrackColliders(track);
-      return { track, view, colliders: nextColliders };
-    } catch (error) {
-      view.dispose();
-      throw error;
-    }
+    return { track, view };
   }
 
   // Debug collider visualization — disposes previous on each transition
@@ -528,7 +593,7 @@ async function boot() {
       debugColliderGroup = null;
     }
     if (new URLSearchParams(window.location.search).has("debugColliders")) {
-      debugColliderGroup = visualizeBarriers(gameScene, colliders.barriers);
+      debugColliderGroup = visualizeColliders(gameScene, collisionWorld);
     }
   }
 
@@ -536,7 +601,6 @@ async function boot() {
     // Preserve references to the old state until the candidate is ready
     const oldTrack = activeTrack;
     const oldView = trackView;
-    const oldColliders = colliders;
     const oldEndlessView = endlessTrackView;
 
     // Add the candidate root
@@ -546,10 +610,11 @@ async function boot() {
       // Apply the candidate track's scene mood
       applyTrackMood(gameScene, candidate.track);
 
-      // Install the candidate colliders and references
+      // Install the candidate collision world and references
       activeTrack = candidate.track;
       trackView = candidate.view;
-      colliders = candidate.colliders;
+      collisionWorld = trackView.collisionWorld ?? createCollisionWorld([]);
+      cones = trackView.cones ?? [];
       coneMeshes = trackView.coneMeshes;
       cornerMarkers = trackView.cornerMarkers;
       onlineGhosts.setTrack(activeTrack);
@@ -566,7 +631,8 @@ async function boot() {
       applyTrackMood(gameScene, oldTrack);
       activeTrack = oldTrack;
       trackView = oldView;
-      colliders = oldColliders;
+      collisionWorld = oldView.collisionWorld ?? createCollisionWorld([]);
+      cones = oldView.cones ?? [];
       coneMeshes = oldView.coneMeshes;
       cornerMarkers = oldView.cornerMarkers;
       throw error;
@@ -1278,15 +1344,20 @@ async function boot() {
   const fullscreenToggle = createFullscreenToggle();
   showMainMenu();
 
-  function syncConeMeshes(meshes: Mesh[], cones: Cone[]) {
-    for (let i = 0; i < meshes.length && i < cones.length; i++) {
-      const cone = cones[i];
+  function syncConeMeshes(meshes: readonly Mesh[], cones: readonly Cone[]) {
+    const count = Math.min(meshes.length, cones.length);
+    for (let i = 0; i < count; i += 1) {
       const mesh = meshes[i];
+      const cone = cones[i];
       mesh.position.x = cone.x;
       mesh.position.z = cone.z;
       if (cone.knocked) {
-        mesh.rotation.x += cone.spin * 0.016;
-        mesh.rotation.z += cone.spin * 0.012;
+        mesh.rotation.x = Math.min(
+          Math.PI * 0.5,
+          Math.abs(cone.spin),
+        );
+        mesh.rotation.z = cone.spin;
+        mesh.rotation.y += cone.angularVelocity;
       }
     }
   }
@@ -1412,8 +1483,10 @@ async function boot() {
         };
         session.track.update(session.car.position);
         const onTrack = session.track.isOnTrack(session.car.position);
+        const replayPreviousPose = captureCarPose(session.car);
         updateCar(session.car, replayInput, session.tuning, REPLAY_FIXED_STEP_SECONDS, onTrack, handlingProfile);
-        updateTrackCollision(session.car, session.track.getColliders(), REPLAY_FIXED_STEP_SECONDS, session.tuning);
+        // Replay uses the same collision solver as live play
+        session.track.resolveGuardrail(session.car, replayPreviousPose, session.tuning);
         session.elapsed = Math.min(session.data.duration, session.elapsed + REPLAY_FIXED_STEP_SECONDS);
         session.accumulator -= REPLAY_FIXED_STEP_SECONDS;
 
@@ -1446,7 +1519,7 @@ async function boot() {
     tireSmoke.update(session.car, onTrack, dt);
     replayCarView.sync(session.car);
     engineSound.update(session.car, session.tuning);
-    updateChaseCamera(gameCamera, session.car, dt, 0, getCameraOrbit(), session.track.state.barriers);
+    updateChaseCamera(gameCamera, session.car, dt, 0, getCameraOrbit(), []);
     updateSceneLighting(gameScene, session.car.position);
     replayOverlay.update(session.elapsed, session.data.duration);
     lastFixedSteps = Math.round(Math.min(0.1, dt) / REPLAY_FIXED_STEP_SECONDS);
@@ -1520,7 +1593,7 @@ async function boot() {
       if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt;
       engineSound.update(car, activeTuning);
       cameraShake = Math.max(0, cameraShake - dt * 1.7);
-      updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), colliders.barriers);
+      updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), collisionWorld.cameraObstructions);
       applyFocusLighting();
       hud.update(car, drift);
       hud.updateTimer(Infinity);
@@ -1587,6 +1660,7 @@ async function boot() {
       const surfaceBeforeStep = runningEndless && endlessTrack
         ? endlessTrack.isOnTrack(car.position)
         : isOnTrack(car.position, activeTrack);
+      const previousPose = captureCarPose(car);
       updateCar(car, input, activeTuning, stepDt, surfaceBeforeStep, handlingProfile);
 
       if (playerRouteProbeEnabled && activeMode === "drift-attack" && car.gear !== gearBeforeStep) {
@@ -1611,17 +1685,23 @@ async function boot() {
       else runoffTime = 999;
       scoringSurface = stepOnTrack || (stepInRunoff && runoffTime <= 1.15);
 
-      const boundaryImpact = runningEndless ? 0 : keepCarNearTrack(car, activeTrack);
-      const guardrailImpact = runningEndless && endlessTrack
-        ? endlessTrack.resolveGuardrail(car)
-        : 0;
-      const trackImpact = runningEndless
-        ? 0
-        : updateTrackCollision(car, colliders, stepDt, activeTuning);
-      const obstacleImpact = runningEndless && endlessObstacles
-        ? endlessObstacles.checkCollision(car)
-        : 0;
-      const stepImpact = Math.max(boundaryImpact, guardrailImpact, trackImpact, obstacleImpact);
+      let stepImpact = 0;
+      const collisionStart = collisionStatsEnabled ? performance.now() : 0;
+
+      if (runningEndless && endlessTrack) {
+        const guardrailResult = endlessTrack.resolveGuardrail(car, previousPose, activeTuning);
+        const obstacleResult = endlessObstacles
+          ? endlessObstacles.resolveCollisions(car, previousPose, activeTuning)
+          : emptyCollisionResult;
+        stepImpact = Math.max(guardrailResult.severity, obstacleResult.severity);
+      } else {
+        const trackResult = resolveTrackCollisions(car, previousPose, collisionWorld, cones, stepDt, activeTuning);
+        const boundaryResult = resolveTrackSafetyBoundary(car, previousPose, activeTrack, activeTuning);
+        stepImpact = Math.max(trackResult.severity, boundaryResult.severity);
+      }
+      if (collisionStatsEnabled) {
+        updateCollisionStats((performance.now() - collisionStart) * 1000, stepImpact);
+      }
       frameImpact = Math.max(frameImpact, stepImpact);
 
       if (activeMode === "drift-attack" || runningEndless) {
@@ -1701,7 +1781,7 @@ async function boot() {
       }
     }
 
-    syncConeMeshes(coneMeshes, colliders.cones);
+    syncConeMeshes(coneMeshes, cones);
     if (runningEndless && endlessTrack) {
       endlessTrackView?.update(endlessTrack.state, car.position);
       if (endlessObstacles && endlessObstacleView) {
@@ -1732,7 +1812,7 @@ async function boot() {
       dt,
       cameraShake,
       getCameraOrbit(),
-      runningEndless && endlessTrack ? endlessTrack.state.barriers : colliders.barriers,
+      runningEndless && endlessTrack ? [] : collisionWorld.cameraObstructions,
     );
     applyFocusLighting();
     hud.update(car, drift);
@@ -1835,6 +1915,7 @@ async function boot() {
     }
 
     performanceMonitor.update(dt, lastFixedSteps, lastDroppedSeconds);
+    renderCollisionStats();
 
     // Schedule the next frame only if we're still running
     if (!disposed && !documentHidden && !contextLost) {

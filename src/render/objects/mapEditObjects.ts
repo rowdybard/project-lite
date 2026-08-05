@@ -21,6 +21,11 @@ import {
   createRoadPaintMaterial,
   createRubberMaterial,
 } from "../materials/surfaceMaterials";
+import {
+  markBoxCollider,
+  markCircleCollider,
+  markDynamicCone,
+} from "../resources/colliderAuthoring";
 
 const groundY = 0.13;
 
@@ -122,6 +127,7 @@ function createAsset(stamp: MapEditStamp) {
       const cone = new Mesh(new CylinderGeometry(0.15, 0.38, 0.8, 12), orange);
       cone.position.y = 0.4;
       cone.castShadow = true;
+      markDynamicCone(cone, `mapedit-cone-${stamp.x.toFixed(2)}-${stamp.z.toFixed(2)}`, 0.38);
       group.add(cone);
       break;
     }
@@ -133,30 +139,36 @@ function createAsset(stamp: MapEditStamp) {
       pole.position.y = 1.34;
       cap.position.y = 2.68;
       base.castShadow = pole.castShadow = cap.castShadow = true;
+      markCircleCollider(group, { profile: "post", padding: 0.05 });
       group.add(base, pole, cap);
       break;
     }
     case "tire-stack": {
+      const stackGroup = new Group();
       for (let x = -2; x <= 2; x++) {
         for (let y = 0; y < 2; y++) {
           const tire = new Mesh(new TorusGeometry(0.42, 0.13, 8, 18), createRubberMaterial({ x: 1, y: 1 }, 1));
           tire.position.set(x * 0.52, 0.44 + y * 0.52, 0);
           tire.rotation.y = Math.PI / 2;
           tire.castShadow = true;
-          group.add(tire);
+          stackGroup.add(tire);
         }
       }
+      markCircleCollider(stackGroup, { profile: "soft-barrier", padding: 0.2 });
+      group.add(stackGroup);
       break;
     }
     case "guardrail": {
       const rail = new Mesh(new BoxGeometry(7.8, 0.22, 0.18), metal);
       rail.position.y = 0.82;
       rail.castShadow = true;
+      markBoxCollider(rail, { profile: "guardrail" });
       group.add(rail);
       for (const x of [-3.1, 0, 3.1]) {
         const post = new Mesh(new BoxGeometry(0.16, 1.18, 0.22), dark);
         post.position.set(x, 0.58, 0);
         post.castShadow = true;
+        markBoxCollider(post, { profile: "guardrail" });
         group.add(post);
       }
       break;
@@ -168,6 +180,7 @@ function createAsset(stamp: MapEditStamp) {
       upper.position.y = 0.62;
       base.castShadow = true;
       upper.castShadow = true;
+      markBoxCollider(base, { profile: "concrete" });
       group.add(base, upper);
       break;
     }
@@ -178,6 +191,7 @@ function createAsset(stamp: MapEditStamp) {
       lamp.position.set(0.58, 7.35, 0);
       pole.castShadow = true;
       lamp.castShadow = true;
+      markCircleCollider(pole, { profile: "post" });
       group.add(pole, lamp);
       break;
     }
@@ -190,6 +204,7 @@ function createAsset(stamp: MapEditStamp) {
         const post = new Mesh(new BoxGeometry(0.14, 2.5, 0.14), dark);
         post.position.set(x, 1.28, 0);
         post.castShadow = true;
+        markBoxCollider(post, { profile: "post" });
         group.add(post);
       }
       break;
@@ -209,6 +224,7 @@ function createAsset(stamp: MapEditStamp) {
         const post = new Mesh(new BoxGeometry(0.14, 2.1, 0.14), dark);
         post.position.set(x, 1.04, 0.05);
         post.castShadow = true;
+        markBoxCollider(post, { profile: "post" });
         group.add(post);
       }
       break;
@@ -223,6 +239,7 @@ function createAsset(stamp: MapEditStamp) {
       leavesB.position.set(0.78, 4.68, 0.2);
       leavesB.scale.set(1.18, 0.72, 1.08);
       trunk.castShadow = leavesA.castShadow = leavesB.castShadow = true;
+      markCircleCollider(trunk, { profile: "post", padding: 0.1 });
       group.add(trunk, leavesA, leavesB);
       break;
     }
@@ -253,6 +270,7 @@ function createAsset(stamp: MapEditStamp) {
       const door = new Mesh(new BoxGeometry(6.8, 2.3, 0.24), new MeshStandardMaterial({ color: 0x5e7e92, roughness: 0.24, metalness: 0.2 }));
       door.position.set(0, 1.25, 4.62);
       building.castShadow = true;
+      markBoxCollider(building, { profile: "wall" });
       group.add(building, door);
       break;
     }
@@ -264,6 +282,7 @@ function createAsset(stamp: MapEditStamp) {
       door.position.set(0, 1.45, 4.12);
       fascia.position.y = 4.58;
       bay.castShadow = door.castShadow = fascia.castShadow = true;
+      markBoxCollider(bay, { profile: "wall" });
       group.add(bay, door, fascia);
       break;
     }
@@ -273,6 +292,7 @@ function createAsset(stamp: MapEditStamp) {
       const base = new Mesh(new BoxGeometry(13, 1.7, 6.8), standMaterial);
       base.position.y = 0.85;
       base.castShadow = true;
+      markBoxCollider(base, { profile: "concrete" });
       group.add(base);
       for (let row = 0; row < 4; row++) {
         const seats = new Mesh(new BoxGeometry(11.8, 0.24, 0.76), seatMaterial);
@@ -287,6 +307,7 @@ function createAsset(stamp: MapEditStamp) {
         const post = new Mesh(new BoxGeometry(0.26, 6.4, 0.26), dark);
         post.position.set(x, 3.2, 0);
         post.castShadow = true;
+        markBoxCollider(post, { profile: "post" });
         group.add(post);
       }
       const beam = new Mesh(new BoxGeometry(10.4, 0.24, 0.32), dark);
@@ -315,6 +336,7 @@ function createAsset(stamp: MapEditStamp) {
         const post = new Mesh(new BoxGeometry(0.34, 4.7, 0.38), dark);
         post.position.set(x, 2.35, 0);
         post.castShadow = true;
+        markBoxCollider(post, { profile: "post" });
         group.add(post);
       }
       const top = new Mesh(new BoxGeometry(7.2, 0.34, 0.42), dark);

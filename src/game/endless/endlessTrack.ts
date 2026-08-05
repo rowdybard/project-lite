@@ -1,6 +1,8 @@
 import type { Barrier, TrackColliders } from "../simulation/trackCollision";
-import type { CarState } from "../types";
+import type { CarState, CarTuning } from "../types";
 import type { Vec2 } from "../types";
+import type { CarPose2D, CollisionResult } from "../simulation/collisionTypes";
+import { collisionResponses, emptyCollisionResult } from "../simulation/collisionTypes";
 import {
   createTrackGenerator,
   type TrackGeneratorOptions,
@@ -105,7 +107,7 @@ export type EndlessTrack = {
   consumePassedGates(): Gate[];
   getColliders(): TrackColliders;
   /** Centerline-distance guardrail pushback. Returns impact severity 0..1. */
-  resolveGuardrail(car: CarState): number;
+  resolveGuardrail(car: CarState, previousPose: CarPose2D, tuning?: CarTuning): CollisionResult;
 };
 
 function projectToSegment(point: Vec2, segment: TrackSegment) {
@@ -386,48 +388,110 @@ export function createEndlessTrack(seed: number, options: EndlessTrackOptions = 
     return gate ? Math.max(0, gate.distance - progress) : Infinity;
   };
 
-  const resolveGuardrail = (car: CarState): number => {
+  const resolveGuardrail = (
+    car: CarState,
+    previousPose: CarPose2D,
+    tuning?: CarTuning,
+  ): CollisionResult => {
+    const response = collisionResponses.guardrail;
+    const carHalfWidth = Math.max(1.08, (tuning?.collisionWidth ?? 2.76) * 0.5);
+
+    const prevProjection = project(previousPose);
+    const prevLateral = prevProjection.signedLateralDistance;
+    const prevAbsLateral = Math.abs(prevLateral);
+
     const projection = project(car.position);
     const halfWidth = projection.roadWidth * 0.5;
     const edge = halfWidth + config.guardrailEdgeOffset;
     const lateral = projection.signedLateralDistance;
     const absLateral = Math.abs(lateral);
 
-    // Guard against NaN — if the car position is non-finite, don't push it further.
-    if (!Number.isFinite(absLateral)) return 0;
+    if (!Number.isFinite(absLateral)) return emptyCollisionResult;
 
-    // Car half-width approximated from collision circle radius used in trackCollision.ts
-    const carHalfWidth = 1.38;
     const limit = edge - carHalfWidth;
-    if (absLateral <= limit) return 0;
 
-    // Push the car back inside the guardrail.
+    // Sweep check: if previous was inside and current crossed the limit
+    if (prevAbsLateral <= limit && absLateral > limit) {
+      const crossingT = (limit - prevAbsLateral) / Math.max(absLateral - prevAbsLateral, 0.001);
+      const safeT = Math.max(0, crossingT - 0.01 / Math.max(absLateral - prevAbsLateral, 0.001));
+      const side = lateral >= 0 ? 1 : -1;
+      const tangentX = Math.sin(projection.heading);
+      const tangentZ = Math.cos(projection.heading);
+      const normalX = -tangentZ;
+      const normalZ = tangentX;
+      const dx = car.position.x - previousPose.x;
+      const dz = car.position.z - previousPose.z;
+      car.position.x = previousPose.x + dx * safeT;
+      car.position.z = previousPose.z + dz * safeT;
+      const inwardX = -normalX * side;
+      const inwardZ = -normalZ * side;
+      const normalSpeed = car.velocity.x * inwardX + car.velocity.z * inwardZ;
+      if (normalSpeed < -response.bounceThreshold) {
+        const closingSpeed = -normalSpeed;
+        const bounceSpeed = Math.min(response.maxBounceSpeed, closingSpeed * response.restitution);
+        const tangentVX = car.velocity.x - normalSpeed * inwardX;
+        const tangentVZ = car.velocity.z - normalSpeed * inwardZ;
+        car.velocity.x = tangentVX * response.tangentRetention + inwardX * bounceSpeed;
+        car.velocity.z = tangentVZ * response.tangentRetention + inwardZ * bounceSpeed;
+        const severity = clamp(
+          (closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
+          0,
+          1,
+        );
+        car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+        return { severity, contactCount: 1, colliderIds: ["guardrail"] };
+      }
+      car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+      return emptyCollisionResult;
+    }
+
+    if (absLateral <= limit) return emptyCollisionResult;
+
+    // Car is outside — push inward
     const side = lateral >= 0 ? 1 : -1;
     const overshoot = absLateral - limit;
     const tangentX = Math.sin(projection.heading);
     const tangentZ = Math.cos(projection.heading);
     const normalX = -tangentZ;
     const normalZ = tangentX;
-    const pushX = normalX * side * overshoot * 0.82;
-    const pushZ = normalZ * side * overshoot * 0.82;
-    car.position.x += pushX;
-    car.position.z += pushZ;
+    const inwardX = -normalX * side;
+    const inwardZ = -normalZ * side;
 
-    // Kill inward velocity component and compute impact severity.
-    const normalSpeed = car.velocity.x * normalX * side + car.velocity.z * normalZ * side;
-    if (normalSpeed > 0) {
-      car.velocity.x -= normalSpeed * 1.18 * normalX * side;
-      car.velocity.z -= normalSpeed * 1.18 * normalZ * side;
-      car.velocity.x *= 0.88;
-      car.velocity.z *= 0.88;
+    const correction = Math.min(
+      response.maxCorrection,
+      Math.max(0, overshoot - response.correctionSlop) * response.correctionPercent,
+    );
+    car.position.x += inwardX * correction;
+    car.position.z += inwardZ * correction;
 
-      const leverX = (car.position.x - projection.point.x);
-      const leverZ = (car.position.z - projection.point.z);
-      const hitOffset = leverX * (normalZ * side) - leverZ * (normalX * side);
-      car.yawVelocity += hitOffset * Math.abs(normalSpeed) * 0.012;
-      return Math.min(1, Math.abs(normalSpeed) / 18);
+    const normalSpeed = car.velocity.x * inwardX + car.velocity.z * inwardZ;
+    if (normalSpeed < -response.bounceThreshold) {
+      const closingSpeed = -normalSpeed;
+      const bounceSpeed = Math.min(response.maxBounceSpeed, closingSpeed * response.restitution);
+      const tangentVX = car.velocity.x - normalSpeed * inwardX;
+      const tangentVZ = car.velocity.z - normalSpeed * inwardZ;
+      car.velocity.x = tangentVX * response.tangentRetention + inwardX * bounceSpeed;
+      car.velocity.z = tangentVZ * response.tangentRetention + inwardZ * bounceSpeed;
+
+      const lever = (projection.point.x - car.position.x) * inwardZ - (projection.point.z - car.position.z) * inwardX;
+      const yawDelta = clamp(
+        lever * bounceSpeed * response.yawImpulseScale,
+        -response.maxYawImpulse,
+        response.maxYawImpulse,
+      );
+      car.yawVelocity += yawDelta;
+
+      const severity = clamp(
+        (closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
+        0,
+        1,
+      );
+      car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+      return { severity, contactCount: 1, colliderIds: ["guardrail"] };
     }
-    return 0;
+
+    car.speed = Math.hypot(car.velocity.x, car.velocity.z);
+    return emptyCollisionResult;
   };
 
   return {
