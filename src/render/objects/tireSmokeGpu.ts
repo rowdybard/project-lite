@@ -1,7 +1,7 @@
-import { Group } from "three";
+import { Group, type Texture } from "three";
 import type { CarState } from "../../game/types";
 import { createGpuParticleSystem, createRadialSpriteTexture, type GpuParticleSystem, type ParticleSystemOptions } from "../../vfx/gpuParticles";
-import { buildColorLut, buildScalarLut } from "../../vfx/particleCurves";
+import { buildColorLut, buildScalarLut, disposeLuts } from "../../vfx/particleCurves";
 import { buildSystemOptions, loadPresetTexture, loadSavedPresets, type VfxPreset } from "../../vfx/presets";
 
 // Tire smoke on the GPU particle runtime: one emitter per rear wheel contact patch, intensity
@@ -10,42 +10,41 @@ import { buildSystemOptions, loadPresetTexture, loadSavedPresets, type VfxPreset
 const rearOffsets = [-1.08, 1.08];
 const rearAxleZ = -1.48;
 
-const defaultSmokeOptions: ParticleSystemOptions = {
-  texture: createRadialSpriteTexture(),
-  maxInstances: 640,
-  blending: "normal",
-  billboard: "camera",
-  space: "world",
-  emitter: { type: "point" },
-  rate: 0,
-  life: [1.05, 1.8],
-  speed: [0.28, 0.78],
-  gravity: 0.62,
-  drag: 0.28,
-  curlNoise: 0.32,
-  startSize: [0.62, 1.02],
-  rotationSpeed: [-0.9, 0.9],
-  groundFade: 0.38,
-  sizeOverLife: buildScalarLut([
-    { t: 0, value: 1.12 },
-    { t: 0.58, value: 2.25 },
-    { t: 1, value: 3.3 },
-  ]),
-  opacityOverLife: buildScalarLut([
-    { t: 0, value: 0.56 },
-    { t: 0.42, value: 0.27 },
-    { t: 1, value: 0 },
-  ]),
-  colorOverLife: buildColorLut([
-    { t: 0, r: 0.94, g: 0.94, b: 0.91 },
-    { t: 0.58, r: 0.76, g: 0.76, b: 0.73 },
-    { t: 1, r: 0.58, g: 0.58, b: 0.55 },
-  ]),
-  renderOrder: 12,
-};
-
-function createSmokeEmitter(options?: ParticleSystemOptions): GpuParticleSystem {
-  return createGpuParticleSystem(options ?? defaultSmokeOptions);
+// Default smoke resources — owned by the tire smoke system and disposed on teardown
+function createDefaultOptions(): ParticleSystemOptions {
+  return {
+    texture: createRadialSpriteTexture(),
+    maxInstances: 640,
+    blending: "normal",
+    billboard: "camera",
+    space: "world",
+    emitter: { type: "point" },
+    rate: 0,
+    life: [1.05, 1.8],
+    speed: [0.28, 0.78],
+    gravity: 0.62,
+    drag: 0.28,
+    curlNoise: 0.32,
+    startSize: [0.62, 1.02],
+    rotationSpeed: [-0.9, 0.9],
+    groundFade: 0.38,
+    sizeOverLife: buildScalarLut([
+      { t: 0, value: 1.12 },
+      { t: 0.58, value: 2.25 },
+      { t: 1, value: 3.3 },
+    ]),
+    opacityOverLife: buildScalarLut([
+      { t: 0, value: 0.56 },
+      { t: 0.42, value: 0.27 },
+      { t: 1, value: 0 },
+    ]),
+    colorOverLife: buildColorLut([
+      { t: 0, r: 0.94, g: 0.94, b: 0.91 },
+      { t: 0.58, r: 0.76, g: 0.76, b: 0.73 },
+      { t: 1, r: 0.58, g: 0.58, b: 0.55 },
+    ]),
+    renderOrder: 12,
+  };
 }
 
 const TIRE_SMOKE_PRESET_KEY = "driftAttack.tireSmokePreset.v1";
@@ -66,33 +65,79 @@ export async function resolveTireSmokePreset(): Promise<VfxPreset | null> {
   const name = loadTireSmokePresetName();
   if (!name) return null;
   const saved = loadSavedPresets();
-  return saved.find((p) => p.name === name) ?? null;
+  const preset = saved.find((p) => p.name === name) ?? null;
+  if (!preset) {
+    // Preset was deleted — clear the stale key
+    clearTireSmokePresetName();
+  }
+  return preset;
 }
 
 export function createTireSmoke() {
   const root = new Group();
-  let emitters = rearOffsets.map(() => createSmokeEmitter());
+  let generation = 0;  // Async race protection
+  let disposed = false;
+
+  // Shared resource ownership: the current texture and LUTs are owned here,
+  // not by individual emitters. Emitters are disposed first, then shared resources.
+  let currentTexture: Texture = createRadialSpriteTexture();
+  let currentLuts: (import("three").DataTexture | null)[] = [];
+  let usingDefault = true;
+
+  let emitters: GpuParticleSystem[] = rearOffsets.map(() => {
+    const opts = createDefaultOptions();
+    currentTexture = opts.texture!;
+    return createGpuParticleSystem(opts);
+  });
   for (const emitter of emitters) root.add(emitter.root);
 
-  function rebuildFromPreset(preset: VfxPreset, texture: import("three").Texture) {
-    // Dispose old emitters
+  function disposeEmitters() {
     for (const emitter of emitters) {
       root.remove(emitter.root);
       emitter.dispose();
     }
+    emitters = [];
+  }
+
+  function disposeSharedResources() {
+    // Dispose LUTs exactly once
+    if (currentLuts.length > 0) {
+      disposeLuts(...currentLuts);
+      currentLuts = [];
+    }
+    // Dispose the preset texture (but not the default radial sprite — it's recreated each time)
+    if (!usingDefault && currentTexture) {
+      currentTexture.dispose();
+    }
+    usingDefault = true;
+  }
+
+  function rebuildFromPreset(preset: VfxPreset, texture: Texture) {
+    // 1. Dispose old emitters first (they reference shared resources)
+    disposeEmitters();
+    // 2. Dispose old shared resources
+    disposeSharedResources();
+
+    // 3. Build new shared resources
     const built = buildSystemOptions(preset, texture);
-    // Force rate to 0 — the update loop drives it from slip telemetry
-    built.options.rate = 0;
-    emitters = rearOffsets.map(() => createSmokeEmitter(built.options));
+    currentTexture = texture;
+    currentLuts = built.luts;
+    usingDefault = false;
+
+    // 4. Create new emitters sharing the new resources
+    built.options.rate = 0;  // Update loop drives rate from slip telemetry
+    emitters = rearOffsets.map(() => createGpuParticleSystem(built.options));
     for (const emitter of emitters) root.add(emitter.root);
   }
 
   function resetToDefault() {
-    for (const emitter of emitters) {
-      root.remove(emitter.root);
-      emitter.dispose();
-    }
-    emitters = rearOffsets.map(() => createSmokeEmitter());
+    disposeEmitters();
+    disposeSharedResources();
+
+    const opts = createDefaultOptions();
+    currentTexture = opts.texture!;
+    usingDefault = true;
+    emitters = rearOffsets.map(() => createGpuParticleSystem(opts));
     for (const emitter of emitters) root.add(emitter.root);
   }
 
@@ -105,10 +150,24 @@ export function createTireSmoke() {
       }
     },
     async applyPreset(preset: VfxPreset) {
-      const texture = await loadPresetTexture(preset);
-      rebuildFromPreset(preset, texture);
+      const gen = ++generation;
+      try {
+        const texture = await loadPresetTexture(preset);
+        if (disposed || gen !== generation) {
+          // Superseded — dispose the texture we just loaded
+          texture.dispose();
+          return;
+        }
+        rebuildFromPreset(preset, texture);
+      } catch {
+        // Texture load failed — keep current smoke, don't save preset name
+        if (gen === generation) {
+          // Stay on whatever was active before
+        }
+      }
     },
     clearPreset() {
+      generation++;  // Invalidate any pending preset application
       resetToDefault();
     },
     update(car: CarState, onTrack: boolean, dt: number) {
@@ -136,6 +195,17 @@ export function createTireSmoke() {
         emitter.setRate(rate);
         emitter.setTint(tintR, tintG, tintB);
         emitter.update(dt);
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      generation++;  // Invalidate any pending async load
+      disposeEmitters();
+      disposeSharedResources();
+      // Dispose the default texture if it's still active
+      if (usingDefault && currentTexture) {
+        currentTexture.dispose();
       }
     },
   };

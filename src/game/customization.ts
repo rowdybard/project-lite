@@ -80,7 +80,8 @@ export const carTuningPaths: Record<string, string> = {
 };
 
 // The editor remains compiled and data-compatible, but is deliberately hidden until its interaction model is repaired.
-export const mapEditorEnabled = new URLSearchParams(window.location.search).get("devMapEditor") === "1";
+// Also excluded from production builds via __DEV_SYSTEMS__.
+export const mapEditorEnabled = __DEV_SYSTEMS__ && new URLSearchParams(window.location.search).get("devMapEditor") === "1";
 
 export const modeOptions: CustomizationOption[] = [
   ...(mapEditorEnabled ? [{ id: "map-editor", label: "Map Editor (Dev)" }] : []),

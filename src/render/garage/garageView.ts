@@ -134,12 +134,16 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   let targetDistance = 7.2;
   let distance = targetDistance;
   let pauseAutoSpinUntil = 0;
+  let isActive = false;
+  let disposed = false;
+  const scratchPos = new Vector3();
 
   const pauseAutoSpin = () => {
     pauseAutoSpinUntil = performance.now() + 22000;
   };
 
   const onPointerDown = (event: PointerEvent) => {
+    if (!isActive) return;
     pauseAutoSpin();
     dragging = true;
     lastX = event.clientX;
@@ -147,7 +151,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
     canvas.setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event: PointerEvent) => {
-    if (!dragging) return;
+    if (!isActive || !dragging) return;
     event.preventDefault();
     pauseAutoSpin();
     targetYaw += (event.clientX - lastX) * 0.008;
@@ -157,9 +161,15 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   };
   const onPointerUp = (event: PointerEvent) => {
     dragging = false;
-    canvas.releasePointerCapture(event.pointerId);
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  };
+  const onLostPointerCapture = () => {
+    dragging = false;
   };
   const onWheel = (event: WheelEvent) => {
+    if (!isActive) return;
     event.preventDefault();
     pauseAutoSpin();
     targetDistance = clamp(targetDistance + event.deltaY * 0.006, 4.8, 9.5);
@@ -169,12 +179,17 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("lostpointercapture", onLostPointerCapture);
   canvas.addEventListener("wheel", onWheel, { passive: false });
 
   return {
     root: scene,
     camera,
     carView,
+    setActive(active: boolean) {
+      isActive = active;
+      if (!active) dragging = false;
+    },
     applyCustomization(next: CarCustomization) {
       carView.applyCustomization(next);
     },
@@ -198,12 +213,45 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
       carView.sync(car);
 
       const height = 1.8 + pitch * 3.2;
-      const position = new Vector3(Math.sin(yaw) * distance, height, Math.cos(yaw) * distance);
-      camera.position.copy(position);
+      scratchPos.set(Math.sin(yaw) * distance, height, Math.cos(yaw) * distance);
+      camera.position.copy(scratchPos);
       camera.lookAt(0, 0.8, 0);
     },
     render() {
       renderer.render(scene, camera);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
+      canvas.removeEventListener("wheel", onWheel);
+      carView.dispose();
+      // Dispose garage geometries and materials
+      const disposedMats = new Set<unknown>();
+      const disposedGeos = new Set<unknown>();
+      garage.traverse((child) => {
+        if (child instanceof Mesh) {
+          if (!disposedGeos.has(child.geometry)) {
+            disposedGeos.add(child.geometry);
+            child.geometry.dispose();
+          }
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (const mat of materials) {
+            if (mat && !disposedMats.has(mat)) {
+              disposedMats.add(mat);
+              (mat as MeshStandardMaterial).dispose();
+            }
+          }
+        }
+      });
+      // Dispose arena environment
+      if (scene.environment) {
+        (scene.environment as unknown as { dispose?: () => void }).dispose?.();
+      }
     },
   };
 }

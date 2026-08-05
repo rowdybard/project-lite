@@ -77,5 +77,9 @@ function mapEditWriterPlugin(): Plugin {
 export default defineConfig({
   base: "./",
   plugins: [mapEditWriterPlugin()],
+  define: {
+    // Strip dev-only systems from production builds
+    __DEV_SYSTEMS__: JSON.stringify(process.env.NODE_ENV !== "production"),
+  },
 });
 

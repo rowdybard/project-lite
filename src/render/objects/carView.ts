@@ -154,8 +154,12 @@ export function createCarView(scale = 1) {
 
   let stanceDrop = 0;
   let activeImportedCarId = "";
+  let loadedImportedCarId = "";  // Track what's actually loaded, separate from what's requested
   let importedWheels: ImportedWheel[] = [];
   let importedReady: Promise<void> = Promise.resolve();
+  let loadGeneration = 0;  // Monotonic token to reject stale async loads
+  let activeImportedModel: ImportedCarModel | null = null;
+  let disposed = false;
   importedRoot.scale.setScalar(1.15);
   const paintMaterial = new MeshPhysicalMaterial({
     color: 0xbfc3be,
@@ -489,6 +493,31 @@ export function createCarView(scale = 1) {
     underglowRight.intensity = customization.underglow === "off" ? 0 : 2.4;
   }
 
+  function disposeImportedModel() {
+    if (!activeImportedModel) return;
+    // Dispose owned geometries (cloned via mergeVertices/clone)
+    activeImportedModel.root.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.geometry?.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of materials) {
+          if (mat && (mat as MeshStandardMaterial).color) {
+            // Only dispose materials we created (paint/rim overrides).
+            // Source GLTF textures are shared through the cache — don't dispose them.
+            const m = mat as MeshStandardMaterial;
+            // Paint materials have clearcoat (MeshPhysicalMaterial with clearcoat > 0)
+            // Rim materials have map === null and normalMap === null (we stripped them)
+            if ((m instanceof MeshPhysicalMaterial && m.clearcoat > 0) ||
+                (m.map === null && m.normalMap === null && m.roughnessMap === null)) {
+              m.dispose();
+            }
+          }
+        }
+      }
+    });
+    activeImportedModel = null;
+  }
+
   function applyCustomization(customization: CarCustomization) {
     if (isImportedCar(customization.selectedCar)) {
       const importId = customization.selectedCar;
@@ -496,28 +525,79 @@ export function createCarView(scale = 1) {
       bodyGroup.visible = false;
       for (const wheel of suspensionPivots) wheel.pivot.visible = false;
       importedRoot.visible = true;
-      importedRoot.clear();
-      importedRoot.add(customParts);
-      importedWheels = [];
-      importedReady = createImportedCarModel(importId).then((model) => {
-        if (!model || activeImportedCarId !== importId) return;
-        importedRoot.add(model.root);
-        model.root.traverse((child) => {
-          if (child instanceof Mesh) {
-            child.castShadow = true;
-            child.receiveShadow = false;
+
+      // Only reload the model when the car ID actually changes
+      if (loadedImportedCarId !== importId) {
+        loadedImportedCarId = importId;
+        const gen = ++loadGeneration;
+
+        // Dispose the previous model before loading a new one
+        disposeImportedModel();
+        importedRoot.clear();
+        importedRoot.add(customParts);
+        importedWheels = [];
+
+        importedReady = createImportedCarModel(importId).then((model) => {
+          // Reject stale loads — even same-car loads are rejected by generation
+          if (disposed || gen !== loadGeneration || !model) {
+            // Dispose the rejected model immediately
+            if (model) {
+              model.root.traverse((child) => {
+                if (child instanceof Mesh) {
+                  child.geometry?.dispose();
+                  const materials = Array.isArray(child.material) ? child.material : [child.material];
+                  for (const mat of materials) {
+                    if (mat && (mat as MeshStandardMaterial).dispose) (mat as MeshStandardMaterial).dispose();
+                  }
+                }
+              });
+            }
+            return;
+          }
+
+          activeImportedModel = model;
+          importedRoot.add(model.root);
+          model.root.traverse((child) => {
+            if (child instanceof Mesh) {
+              child.castShadow = true;
+              child.receiveShadow = false;
+            }
+          });
+          importedWheels = model.wheels;
+          applyImportedCustomization(customization, model);
+        }).catch(() => {
+          // Model load failed — fall back to procedural car
+          if (gen === loadGeneration) {
+            activeImportedCarId = "";
+            loadedImportedCarId = "";
+            importedRoot.visible = false;
+            bodyGroup.visible = true;
+            for (const wheel of suspensionPivots) wheel.pivot.visible = true;
+            if (customParts.parent !== bodyGroup) {
+              customParts.removeFromParent();
+              bodyGroup.add(customParts);
+            }
           }
         });
-        importedWheels = model.wheels;
-        applyImportedCustomization(customization, model);
-      });
+      } else {
+        // Same car — just update customization in place on the existing model
+        if (activeImportedModel) {
+          applyImportedCustomization(customization, activeImportedModel);
+        }
+      }
       return;
     }
 
+    // Switching from imported to procedural — dispose imported model
+    if (activeImportedModel) {
+      disposeImportedModel();
+      importedRoot.clear();
+      importedRoot.add(customParts);
+    }
     activeImportedCarId = "";
+    loadedImportedCarId = "";
     importedWheels = [];
     importedReady = Promise.resolve();
-    importedRoot.clear();
     importedRoot.visible = false;
     bodyGroup.visible = true;
     for (const wheel of suspensionPivots) wheel.pivot.visible = true;
@@ -615,18 +695,8 @@ export function createCarView(scale = 1) {
     underglowRight.intensity = customization.underglow === "off" ? 0 : 2.4;
   }
 
-  applyCustomization({
-    paint: "silver",
-    selectedCar: "pack-suv",
-    wheelColor: "dark-alloy",
-    stance: "stock",
-    spoiler: "none",
-    frontLip: "none",
-    sideSkirts: "none",
-    underglow: "off",
-    tuningPreset: "balanced",
-    selectedMode: "drift-attack",
-  });
+  // No automatic car load at construction — callers apply customization explicitly.
+  // This prevents a stale default async load racing with the real customization.
 
   return {
     root,
@@ -704,6 +774,35 @@ export function createCarView(scale = 1) {
     },
     whenReady() {
       return importedReady;
+    },
+    dispose() {
+      disposed = true;
+      loadGeneration++;  // Invalidate any pending async load
+      disposeImportedModel();
+      importedRoot.clear();
+      // Dispose procedural car geometries and materials
+      const allMeshes: Mesh[] = [];
+      root.traverse((child) => {
+        if (child instanceof Mesh) allMeshes.push(child);
+      });
+      for (const mesh of allMeshes) {
+        mesh.geometry?.dispose();
+      }
+      // Dispose unique materials (dedupe by reference)
+      const disposedMats = new Set<unknown>();
+      for (const mesh of allMeshes) {
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const mat of materials) {
+          if (mat && !disposedMats.has(mat)) {
+            disposedMats.add(mat);
+            (mat as MeshStandardMaterial).dispose();
+          }
+        }
+      }
+      // Dispose the contact shadow canvas texture
+      const shadowMat = contactShadow.material as MeshBasicMaterial;
+      shadowMat.map?.dispose();
+      shadowMat.dispose();
     },
   };
 }

@@ -1,7 +1,7 @@
 import { ACESFilmicToneMapping, PCFSoftShadowMap, PCFShadowMap, SRGBColorSpace, WebGLRenderer } from "three";
 import { arenaPalette } from "../arena/palette";
 
-function isMobileDevice() {
+export function isMobileDevice() {
   return (
     typeof navigator !== "undefined" &&
     (navigator.maxTouchPoints > 0 ||

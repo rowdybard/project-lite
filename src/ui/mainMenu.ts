@@ -44,9 +44,16 @@ export function createMainMenu(callbacks: MainMenuCallbacks) {
       <div class="main-menu__actions">
         <button class="main-menu__options" type="button" data-options>Garage &amp; Tuning</button>
       </div>
+      <p class="main-menu__touch-notice" data-touch-notice hidden>Keyboard or gamepad recommended. Touch controls are limited.</p>
     </section>
   `;
   document.body.append(root);
+
+  // Show touch notice only on mobile devices
+  const touchNotice = root.querySelector<HTMLElement>("[data-touch-notice]")!;
+  const isMobile = typeof navigator !== "undefined" &&
+    (navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
+  if (isMobile) touchNotice.hidden = false;
 
   const modesContainer = root.querySelector<HTMLElement>("[data-modes]")!;
   for (const card of modeCards) {
@@ -60,11 +67,6 @@ export function createMainMenu(callbacks: MainMenuCallbacks) {
       <span class="mode-card__label">${card.label}</span>
       <span class="mode-card__blurb">${card.blurb}</span>
     `;
-    button.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      callbacks.onLaunchMode(card.id);
-    });
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();

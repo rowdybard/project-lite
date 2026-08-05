@@ -72,6 +72,9 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   let orbitDistance = 9;
   let dragging = false;
   let lastPointer = { x: 0, y: 0 };
+  let resizeObserver: ResizeObserver | null = null;
+  let disposed = false;
+  let isOpen = false;
 
   function ensurePreview() {
     if (renderer) return;
@@ -127,7 +130,8 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
       previewCamera.aspect = width / height;
       previewCamera.updateProjectionMatrix();
     };
-    new ResizeObserver(fitPreview).observe(canvas.parentElement!);
+    resizeObserver = new ResizeObserver(fitPreview);
+    resizeObserver.observe(canvas.parentElement!);
     fitPreview();
   }
 
@@ -625,9 +629,14 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     const presetSection = document.createElement("section");
     presetSection.innerHTML = `<h3>Presets</h3>`;
     const presetSelect = document.createElement("select");
-    presetSelect.innerHTML = presetList()
-      .map((item) => `<option value="${item.source}:${item.name}" ${item.name === state.name ? "selected" : ""}>${item.name}${item.source === "builtin" ? " (built-in)" : ""}</option>`)
-      .join("");
+    presetSelect.innerHTML = "";
+    for (const item of presetList()) {
+      const option = document.createElement("option");
+      option.value = `${item.source}:${item.name}`;
+      option.textContent = `${item.name}${item.source === "builtin" ? " (built-in)" : ""}`;
+      if (item.name === state.name) option.selected = true;
+      presetSelect.append(option);
+    }
     presetSelect.addEventListener("change", () => {
       const [source, ...rest] = presetSelect.value.split(":");
       const name = rest.join(":");
@@ -799,6 +808,8 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   window.addEventListener("keydown", onKeyDown);
 
   function show() {
+    if (disposed) return;
+    isOpen = true;
     root.hidden = false;
     ensurePreview();
     renderControls();
@@ -808,13 +819,56 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   }
 
   function hide() {
+    isOpen = false;
     root.hidden = true;
     applyToken += 1;
     window.clearTimeout(rebuildTimer);
     rebuildTimer = 0;
     cancelAnimationFrame(rafId);
+    rafId = 0;
     disposeSystem();
   }
 
-  return { root, show, hide };
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    isOpen = false;
+    root.hidden = true;
+    applyToken += 1;
+    window.clearTimeout(rebuildTimer);
+    rebuildTimer = 0;
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+    window.removeEventListener("keydown", onKeyDown);
+    disposeSystem();
+    // Dispose the preview renderer and scene
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+    if (previewScene) {
+      previewScene.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.geometry?.dispose();
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (const mat of materials) mat?.dispose();
+        }
+      });
+      if (previewScene.background instanceof Color) {
+        // Color doesn't need disposal
+      }
+      previewScene = null;
+    }
+    if (renderer) {
+      renderer.dispose();
+      renderer.forceContextLoss?.();
+      renderer = null;
+    }
+    previewCamera = null;
+    // Dispose the current texture
+    texture.dispose();
+    root.remove();
+  }
+
+  return { root, show, hide, dispose, get isOpen() { return isOpen; } };
 }

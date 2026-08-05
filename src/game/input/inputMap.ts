@@ -28,6 +28,10 @@ function getGamepad(): Gamepad | null {
 
 export function bindInput(): () => void {
   const onKeyDown = (event: KeyboardEvent) => {
+    // Ignore key events when the target is inside an overlay/UI element
+    const target = event.target as HTMLElement | null;
+    if (target && target.matches("input, textarea, select, [contenteditable]")) return;
+
     keys.add(event.code);
 
     if (event.code === "KeyT") debugPressed = true;

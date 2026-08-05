@@ -39,17 +39,24 @@ export function createHud() {
       <span class="hud__car"><strong data-car-name>Drift Attack Coupe</strong></span>
       <span class="hud__time"><em data-time-label>Time</em> <strong data-time>90.0s</strong></span>
     </div>
-    <div class="drift-score">
-      <div class="drift-score__label">Banked</div>
-      <div class="drift-score__total" data-total-score>0</div>
-      <div class="drift-score__combo">
-        <span>Live</span>
-        <b data-combo-score>+0</b>
+    <div class="drift-score" data-drift-score>
+      <div class="drift-score__main">
+        <span class="drift-score__label">Banked</span>
+        <span class="drift-score__total" data-total-score>0</span>
       </div>
-      <div class="drift-score__status">
-        <strong data-multiplier>x1.0</strong>
-        <span data-tier>Tier 1 Initiate</span>
-        <span data-chain>Ready</span>
+      <div class="drift-score__live">
+        <div class="drift-score__combo-row">
+          <span class="drift-score__combo-label">Live</span>
+          <span class="drift-score__combo-value" data-combo-score>+0</span>
+        </div>
+        <div class="drift-score__meta">
+          <span class="drift-score__mult" data-multiplier>x1.0</span>
+          <span class="drift-score__tier" data-tier>Tier 1 Initiate</span>
+        </div>
+        <div class="drift-score__chain-row" data-chain-row>
+          <span class="drift-score__chain-dot" data-chain-dot></span>
+          <span class="drift-score__chain-time" data-chain>Ready</span>
+        </div>
       </div>
       <div class="drift-score__callout" data-callout hidden>Drift</div>
     </div>
@@ -95,7 +102,8 @@ export function createHud() {
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
       root.querySelector("[data-multiplier]")!.textContent = `x${drift.multiplier.toFixed(1)}`;
       root.querySelector("[data-tier]")!.textContent = `Tier ${drift.tier + 1} ${drift.tierName}`;
-      root.querySelector("[data-chain]")!.textContent = drift.active ? `${formatTime(drift.driftTime)} chain` : "Ready";
+      root.querySelector("[data-chain]")!.textContent = drift.active ? `${formatTime(drift.driftTime)}` : "Ready";
+      (root.querySelector("[data-drift-score]") as HTMLElement).classList.toggle("is-active", drift.active);
 
       const callout = root.querySelector("[data-callout]") as HTMLElement;
       callout.textContent = drift.callout;

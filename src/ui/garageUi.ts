@@ -100,6 +100,15 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
 
     const cars = root.querySelector("[data-cars]")!;
     cars.innerHTML = "";
+    for (const car of importedCarOptions) {
+      const active = customization.selectedCar === car.id;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `garage-car-card${active ? " is-active" : ""}`;
+      button.textContent = car.label;
+      button.addEventListener("click", () => callbacks.onCustomizationChange("selectedCar", car.id));
+      cars.append(button);
+    }
 
     const tabs = root.querySelector("[data-tabs]")!;
     for (const category of customizationCategories.filter((item) => tabCategoryIds.has(item.id))) {
@@ -159,7 +168,6 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
     }
 
     const startButton = root.querySelector(".garage-start")!;
-    startButton.addEventListener("pointerdown", requestStart);
     startButton.addEventListener("click", requestStart);
 
     root.querySelector(".garage-vfx")!.addEventListener("click", () => callbacks.onOpenVfxLab());

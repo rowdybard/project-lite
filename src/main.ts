@@ -26,7 +26,7 @@ import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurf
 import { applyVehicleGeometryTuning } from "./game/simulation/vehicleGeometry";
 import type { CarState, CarTuning, InputState, TrackConfig } from "./game/types";
 import { createCamera, resetChaseCamera, updateChaseCamera } from "./render/app/camera";
-import { createRenderer } from "./render/app/createRenderer";
+import { createRenderer, isMobileDevice } from "./render/app/createRenderer";
 import { createPerformanceMonitor } from "./render/app/performanceMonitor";
 import { createScene, updateSceneLighting } from "./render/app/createScene";
 import { createArenaLightRig, type ArenaLightRig } from "./render/arena/lightRig";
@@ -248,7 +248,7 @@ async function boot() {
   let lastFixedSteps = 0;
   let lastDroppedSeconds = 0;
   let sessionEndsAt = performance.now() + runLength * 1000;
-  const attachmentTunerEnabled = new URLSearchParams(window.location.search).has("kitTuner");
+  const attachmentTunerEnabled = __DEV_SYSTEMS__ && new URLSearchParams(window.location.search).has("kitTuner");
   if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
   let appState: AppState = "garage";
   let activeMode: ModeId = customization.selectedMode;
@@ -446,41 +446,53 @@ async function boot() {
     });
   };
 
+  let trackTransition: Promise<void> = Promise.resolve();
   const switchTrack = async (nextTrack: TrackConfig) => {
-    if (activeTrack.id === nextTrack.id) return;
-    endlessTrackView?.dispose();
-    endlessTrackView = null;
-    gameScene.remove(trackView.root);
-    disposeSceneRoot(trackView.root);
-    activeTrack = nextTrack;
-    if (activeTrack.id === "endless") {
-      const root = new Group();
-      gameScene.add(root);
-      trackView = { root, coneMeshes: [], cornerMarkers: [] };
-    } else {
-      trackView = await createTrackView(gameScene, activeTrack);
-    }
-    setupArenaLighting();
-    colliders = createTrackColliders(activeTrack);
-    if (new URLSearchParams(window.location.search).has("debugColliders")) {
-      visualizeBarriers(gameScene, colliders.barriers);
-    }
-    coneMeshes = trackView.coneMeshes;
-    cornerMarkers = trackView.cornerMarkers;
-    onlineGhosts.setTrack(activeTrack);
-    practiceZoneIndex = 0;
+    // Serialize track transitions — only one at a time, in order
+    trackTransition = trackTransition.then(async () => {
+      if (activeTrack.id === nextTrack.id) return;
+      endlessTrackView?.dispose();
+      endlessTrackView = null;
+      gameScene.remove(trackView.root);
+      disposeSceneRoot(trackView.root);
+      activeTrack = nextTrack;
+      if (activeTrack.id === "endless") {
+        const root = new Group();
+        gameScene.add(root);
+        trackView = { root, coneMeshes: [], cornerMarkers: [] };
+      } else {
+        trackView = await createTrackView(gameScene, activeTrack);
+      }
+      setupArenaLighting();
+      colliders = createTrackColliders(activeTrack);
+      if (new URLSearchParams(window.location.search).has("debugColliders")) {
+        visualizeBarriers(gameScene, colliders.barriers);
+      }
+      coneMeshes = trackView.coneMeshes;
+      cornerMarkers = trackView.cornerMarkers;
+      onlineGhosts.setTrack(activeTrack);
+      practiceZoneIndex = 0;
+    }).catch((error) => {
+      console.error("switchTrack failed:", error);
+    });
+    await trackTransition;
   };
 
   const reloadActiveTrack = async () => {
-    if (activeTrack.id === "endless") return;
-    gameScene.remove(trackView.root);
-    disposeSceneRoot(trackView.root);
-    trackView = await createTrackView(gameScene, activeTrack);
-    setupArenaLighting();
-    colliders = createTrackColliders(activeTrack);
-    coneMeshes = trackView.coneMeshes;
-    cornerMarkers = trackView.cornerMarkers;
-    onlineGhosts.setTrack(activeTrack);
+    trackTransition = trackTransition.then(async () => {
+      if (activeTrack.id === "endless") return;
+      gameScene.remove(trackView.root);
+      disposeSceneRoot(trackView.root);
+      trackView = await createTrackView(gameScene, activeTrack);
+      setupArenaLighting();
+      colliders = createTrackColliders(activeTrack);
+      coneMeshes = trackView.coneMeshes;
+      cornerMarkers = trackView.cornerMarkers;
+      onlineGhosts.setTrack(activeTrack);
+    }).catch((error) => {
+      console.error("reloadActiveTrack failed:", error);
+    });
+    await trackTransition;
   };
 
   const mapEditor = createMapEditor(canvas, gameCamera, gameScene, { onReloadTrack: reloadActiveTrack });
@@ -544,6 +556,7 @@ async function boot() {
     startEventPending = false;
     resetInputState();
     appState = "garage";
+    garageView.setActive(true);
     results.hide();
     endlessResults.hide();
     leaderboardUi.hide();
@@ -632,6 +645,7 @@ async function boot() {
       baseTuning = await loadCarTuning(customization.selectedCar);
       activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
       appState = "event";
+      garageView.setActive(false);
       results.hide();
       endlessResults.hide();
       leaderboardUi.hide();
@@ -896,9 +910,16 @@ async function boot() {
   });
 
   const vfxEditor = createVfxEditor({
+    onClose: () => {
+      // Re-enable garage input when VFX Lab closes
+      if (appState === "garage") garageView.setActive(true);
+    },
     onApplyTireSmoke: (preset) => {
-      saveTireSmokePresetName(preset.name);
-      void tireSmoke.applyPreset(preset);
+      // Don't save the name until apply succeeds — the applyPreset method
+      // handles async races internally via generation tokens
+      void tireSmoke.applyPreset(preset).then(() => {
+        saveTireSmokePresetName(preset.name);
+      });
     },
     onClearTireSmoke: () => {
       clearTireSmokePresetName();
@@ -934,7 +955,10 @@ async function boot() {
       garageUi.update(customization, playerProfile);
     },
     onStart: startEvent,
-    onOpenVfxLab: () => vfxEditor.show(),
+    onOpenVfxLab: () => {
+      garageView.setActive(false);
+      vfxEditor.show();
+    },
     onBack: () => showMainMenu(),
   });
 
@@ -947,7 +971,8 @@ async function boot() {
   hud.root.hidden = true;
 
   const onResize = () => {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.15));
+    const mobileCap = isMobileDevice() ? 1.0 : 1.15;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobileCap));
     renderer.setSize(window.innerWidth, window.innerHeight);
     postPipeline?.setSize(window.innerWidth, window.innerHeight);
     const aspect = window.innerWidth / window.innerHeight;
@@ -958,9 +983,34 @@ async function boot() {
   window.addEventListener("resize", onResize);
   onResize();
 
+  let rafEnabled = true;
+
   renderer.domElement.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
     document.body.classList.add("context-lost");
+    // Stop the RAF loop — rendering with a lost context throws
+    rafEnabled = false;
+  });
+
+  renderer.domElement.addEventListener("webglcontextrestored", () => {
+    // The simplest reliable recovery is a full reload — Three.js internal state
+    // (programs, geometries, textures) is too complex to rebuild piecemeal.
+    document.body.classList.remove("context-lost");
+    window.location.reload();
+  });
+
+  // Pause expensive work (RAF + audio) when the tab is hidden
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      rafEnabled = false;
+      engineSound.suspend();
+    } else {
+      rafEnabled = true;
+      timer.update(performance.now());
+      timer.getDelta();  // Reset delta to avoid a huge jump
+      if (appState === "event" || appState === "replay") engineSound.resume();
+      requestAnimationFrame(frame);
+    }
   });
 
   const engineSound = createEngineSound();
@@ -1046,6 +1096,7 @@ async function boot() {
     endlessRun = null;
     activeMode = "endless";
     appState = "replay";
+    garageView.setActive(false);
     resetInputState();
     fixedStepRunner.reset();
     tireTracks.reset();
@@ -1495,6 +1546,7 @@ async function boot() {
 
   let prevAppState: AppState = appState;
   function frame(timestamp?: number) {
+    if (!rafEnabled) return;
     timer.update(timestamp);
     const dt = Math.min(timer.getDelta(), 0.25);
 
@@ -1523,14 +1575,39 @@ async function boot() {
   }
 
   requestAnimationFrame(frame);
+
+  // Real teardown path — disposes GPU resources and stops the RAF loop
+  function teardown() {
+    rafEnabled = false;
+    engineSound.suspend();
+    vfxEditor.dispose();
+    garageView.dispose();
+    carView.dispose();
+    tireSmoke.dispose();
+    endlessTrackView?.dispose();
+    endlessObstacleView?.root.parent?.remove(endlessObstacleView.root);
+    disposeSceneRoot(trackView.root);
+    disposeSceneRoot(gameScene);
+    arenaRig?.dispose();
+    arenaEnv?.dispose();
+    renderer.dispose();
+  }
+
+  window.addEventListener("pagehide", teardown, { once: true });
 }
 
 boot().catch((error) => {
   console.error(error);
-  document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
-    <main class="boot-error">
-      <h1>Prototype failed to boot</h1>
-      <pre>${error instanceof Error ? error.message : String(error)}</pre>
-    </main>
-  `;
+  const app = document.querySelector<HTMLDivElement>("#app")!;
+  app.innerHTML = "";
+  const main = document.createElement("main");
+  main.className = "boot-error";
+  const h1 = document.createElement("h1");
+  h1.textContent = "Drift Attack failed to start";
+  const pre = document.createElement("pre");
+  pre.textContent = error instanceof Error ? error.message : String(error);
+  const support = document.createElement("p");
+  support.textContent = "If this persists, try a hard refresh (Ctrl+Shift+R) or clear site data.";
+  main.append(h1, pre, support);
+  app.append(main);
 });
