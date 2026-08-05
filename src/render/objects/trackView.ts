@@ -15,6 +15,7 @@ import {
   Light,
   Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   PlaneGeometry,
@@ -1699,12 +1700,53 @@ function createMetalGuardrails(
   const group = new Group();
   const postGeometry = new BoxGeometry(0.18, 1.18, 0.24);
   const boltGeometry = new BoxGeometry(0.38, 0.08, 0.075);
+  // Invisible collider boxes for each rail segment — the visual rail mesh is
+  // a single continuous geometry with no per-segment collider, so without
+  // these the car passes straight through the guardrail between posts.
+  const railColliderGeometry = new BoxGeometry(1, 0.5, 0.18);
+  const railColliderMaterial = new MeshBasicMaterial({ visible: false });
 
   for (const side of [-1, 1] as const) {
     const rail = new Mesh(createGuardrailPanelGeometry(track, samples, roadWidth, side, dressing), railMaterial);
     rail.castShadow = true;
     rail.receiveShadow = true;
     group.add(rail);
+
+    // Add per-segment colliders that follow the same path as the visual rail
+    const railDistance = roadWidth / 2 + 3.15;
+    for (let i = 0; i < samples.length; i += 2) {
+      const nextIndex = (i + 2) % samples.length;
+      if (
+        isTracksideClearZone({ x: samples[i].x, z: samples[i].z }, track) ||
+        isTracksideClearZone({ x: samples[nextIndex].x, z: samples[nextIndex].z }, track)
+      ) {
+        continue;
+      }
+
+      const startPrevious = samples[(i - 1 + samples.length) % samples.length];
+      const startNext = samples[(i + 1) % samples.length];
+      const startNormal = new Vector3(-(startNext.z - startPrevious.z), 0, startNext.x - startPrevious.x).normalize();
+      const endPrevious = samples[(nextIndex - 1 + samples.length) % samples.length];
+      const endNext = samples[(nextIndex + 1) % samples.length];
+      const endNormal = new Vector3(-(endNext.z - endPrevious.z), 0, endNext.x - endPrevious.x).normalize();
+      const startBase = samples[i].clone().addScaledVector(startNormal, side * railDistance);
+      const endBase = samples[nextIndex].clone().addScaledVector(endNormal, side * railDistance);
+      if (!dressing.allows(startBase, 0.9) || !dressing.allows(endBase, 0.9)) continue;
+
+      const mid = startBase.clone().add(endBase).multiplyScalar(0.5);
+      const segmentDir = endBase.clone().sub(startBase);
+      const segmentLength = segmentDir.length();
+      if (segmentLength < 0.01) continue;
+      const angle = Math.atan2(segmentDir.x, segmentDir.z);
+
+      const collider = new Mesh(railColliderGeometry, railColliderMaterial);
+      collider.scale.x = segmentLength;
+      collider.position.copy(mid);
+      collider.position.y = 0.7;
+      collider.rotation.y = angle;
+      markBoxCollider(collider, { profile: "guardrail" });
+      group.add(collider);
+    }
   }
 
   for (let i = 0; i < samples.length; i += 8) {
