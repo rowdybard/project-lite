@@ -62,12 +62,8 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
           <div class="garage-cars__header">
             <div>
             <p class="garage-kicker">Car Select</p>
-            <h2>Garage Bays</h2>
+            <h2>Vehicles</h2>
             </div>
-            <label class="garage-import">
-              <span>Import</span>
-              <select data-import-cars></select>
-            </label>
           </div>
           <div class="garage-car-grid" data-cars></div>
         </section>
@@ -84,19 +80,6 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
         <div class="garage-options" data-options></div>
       </section>
     `;
-
-    const importedSelect = root.querySelector<HTMLSelectElement>("[data-import-cars]")!;
-    importedSelect.innerHTML = `<option value="">Choose car</option>`;
-    for (const car of importedCarOptions) {
-      const option = document.createElement("option");
-      option.value = car.id;
-      option.textContent = car.label;
-      option.selected = customization.selectedCar === car.id;
-      importedSelect.append(option);
-    }
-    importedSelect.addEventListener("change", () => {
-      if (importedSelect.value) callbacks.onCustomizationChange("selectedCar", importedSelect.value);
-    });
 
     const cars = root.querySelector("[data-cars]")!;
     cars.innerHTML = "";
@@ -183,6 +166,22 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
 
   let loadingIndicator: HTMLElement | null = null;
 
+  let vehicleState = {
+    loading: false,
+    error: null as string | null,
+  };
+
+  function updateStartButton() {
+    const startButton = root.querySelector<HTMLButtonElement>(".garage-start");
+    if (!startButton) return;
+    startButton.disabled = vehicleState.loading || vehicleState.error !== null;
+    startButton.textContent = vehicleState.loading
+      ? "Loading Vehicle…"
+      : vehicleState.error
+        ? "Vehicle Unavailable"
+        : "Drive Practice";
+  }
+
   function ensureLoadingIndicator() {
     if (loadingIndicator && root.contains(loadingIndicator)) return loadingIndicator;
     loadingIndicator = document.createElement("div");
@@ -209,6 +208,13 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
     setLoading(active: boolean) {
       const indicator = ensureLoadingIndicator();
       indicator.hidden = !active;
+      updateStartButton();
+    },
+    setVehicleState(state: { loading: boolean; error: string | null }) {
+      vehicleState = state;
+      const indicator = ensureLoadingIndicator();
+      indicator.hidden = !state.loading;
+      updateStartButton();
     },
     dispose() {
       root.remove();

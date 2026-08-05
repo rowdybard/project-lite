@@ -1,7 +1,6 @@
 import type { InputState } from "../types";
 
 const keys = new Set<string>();
-let debugPressed = false;
 let resetPressed = false;
 let confirmPressed = false;
 let menuPressed = false;
@@ -27,14 +26,19 @@ function getGamepad(): Gamepad | null {
 }
 
 export function bindInput(): () => void {
+  const isEditableTarget = (target: EventTarget | null) => {
+    return (
+      target instanceof HTMLElement &&
+      target.closest('input, textarea, select, [contenteditable="true"]') !== null
+    );
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
-    // Ignore key events when the target is inside an overlay/UI element
-    const target = event.target as HTMLElement | null;
-    if (target && target.matches("input, textarea, select, [contenteditable]")) return;
+    // Ignore key events when the target or an ancestor is an editable element
+    if (isEditableTarget(event.target)) return;
 
     keys.add(event.code);
 
-    if (event.code === "KeyT") debugPressed = true;
     if (event.code === "KeyR") resetPressed = true;
     if (event.code === "Enter" || event.code === "KeyE") confirmPressed = true;
     if (event.code === "KeyC") zoneNextPressed = true;
@@ -64,7 +68,6 @@ export function bindInput(): () => void {
 
 export function resetInputState() {
   keys.clear();
-  debugPressed = false;
   resetPressed = false;
   confirmPressed = false;
   menuPressed = false;
@@ -131,11 +134,10 @@ export function readInput(): InputState {
     reset: resetPressed,
     confirm,
     zoneNext: zoneNextPressed,
-    debug: debugPressed,
+    debug: false,
     menu: menuPressed,
   };
 
-  debugPressed = false;
   resetPressed = false;
   confirmPressed = false;
   zoneNextPressed = false;

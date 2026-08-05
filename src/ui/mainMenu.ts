@@ -44,7 +44,7 @@ export function createMainMenu(callbacks: MainMenuCallbacks) {
       <div class="main-menu__actions">
         <button class="main-menu__options" type="button" data-options>Garage &amp; Tuning</button>
       </div>
-      <p class="main-menu__touch-notice" data-touch-notice hidden>Keyboard or gamepad recommended. Touch controls are limited.</p>
+      <p class="main-menu__touch-notice" data-touch-notice hidden>Touch driving controls are not available yet. Use a keyboard or compatible gamepad.</p>
     </section>
   `;
   document.body.append(root);

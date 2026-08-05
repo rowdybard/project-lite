@@ -12,6 +12,7 @@ import {
   SRGBColorSpace,
 } from "three";
 import { createAsphaltMaterial, createConcreteMaterial, createRoadPaintMaterial } from "../materials/surfaceMaterials";
+import { markOwnerTexture } from "../resources/disposeObject3D";
 
 type QueueSlabCenter = {
   x: number;
@@ -20,11 +21,33 @@ type QueueSlabCenter = {
 };
 
 const disposeGroup = (group: Group) => {
+  const geometries = new Set<unknown>();
+  const materials = new Set<unknown>();
+  const textures = new Set<unknown>();
+  const TEXTURE_KEYS = ["map", "alphaMap", "aoMap", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap", "bumpMap"];
   group.traverse((child) => {
     if (!(child instanceof Mesh)) return;
-    child.geometry.dispose();
-    const materials = Array.isArray(child.material) ? child.material : [child.material];
-    for (const material of materials) material.dispose();
+    if (!geometries.has(child.geometry)) {
+      geometries.add(child.geometry);
+      child.geometry.dispose();
+    }
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of mats) {
+      if (!material || materials.has(material)) continue;
+      materials.add(material);
+      // Dispose owner-marked textures
+      const rec = material as Record<string, unknown>;
+      for (const key of TEXTURE_KEYS) {
+        const tex = rec[key];
+        if (tex && typeof tex === "object" && "dispose" in tex && "userData" in tex &&
+          (tex as { userData: Record<string, unknown> }).userData.disposeWithOwner === true &&
+          !textures.has(tex)) {
+          textures.add(tex);
+          (tex as { dispose: () => void }).dispose();
+        }
+      }
+      material.dispose();
+    }
   });
 };
 
@@ -54,7 +77,7 @@ function makeLabel(text: string, width: number, depth: number, accent: number) {
   context.textBaseline = "middle";
   context.fillText(text, canvas.width / 2, canvas.height / 2 + 2);
 
-  const texture = new CanvasTexture(canvas);
+  const texture = markOwnerTexture(new CanvasTexture(canvas));
   texture.colorSpace = SRGBColorSpace;
   const material = new MeshBasicMaterial({ map: texture, transparent: true });
   const mesh = new Mesh(new PlaneGeometry(width, depth), material);
@@ -148,6 +171,11 @@ export function createQueueSlab() {
     hide() {
       root.visible = false;
       disposeGroup(root);
+      root.clear();
+    },
+    dispose() {
+      disposeGroup(root);
+      root.removeFromParent();
       root.clear();
     },
   };

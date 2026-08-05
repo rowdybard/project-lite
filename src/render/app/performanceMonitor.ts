@@ -14,7 +14,7 @@ export function createPerformanceMonitor(renderer: WebGLRenderer) {
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.code !== "KeyT" || event.repeat) return;
     const target = event.target as HTMLElement | null;
-    if (target?.matches("input, textarea, select")) return;
+    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
     root.hidden = !root.hidden;
   };
   window.addEventListener("keydown", onKeyDown);

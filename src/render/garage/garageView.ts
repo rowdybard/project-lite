@@ -193,6 +193,12 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
     applyCustomization(next: CarCustomization) {
       carView.applyCustomization(next);
     },
+    whenReady() {
+      return carView.whenReady();
+    },
+    getLoadState() {
+      return carView.getLoadState();
+    },
     setAspect(aspect: number) {
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
@@ -231,6 +237,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
       canvas.removeEventListener("wheel", onWheel);
+      rig.dispose();
       carView.dispose();
       // Dispose garage geometries and materials
       const disposedMats = new Set<unknown>();

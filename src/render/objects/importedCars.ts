@@ -1,4 +1,4 @@
-import { Box3, CylinderGeometry, Group, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Vector3, type Euler } from "three";
+import { Box3, CylinderGeometry, Group, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, Object3D, Vector3, type BufferGeometry, type Euler, type Material } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
@@ -57,6 +57,8 @@ export type ImportedCarModel = {
   bodyMeshes: Mesh[];
   rimMeshes: Mesh[];
   bodyMaterialIndices: Map<Mesh, number[]>;
+  ownedGeometries: Set<BufferGeometry>;
+  ownedMaterials: Set<Material>;
 };
 
 const packPath = `${new URL("assets/cars/imports/free_low_poly_vehicles_pack.glb", document.baseURI).pathname}`;
@@ -157,7 +159,7 @@ function createWheelPivot(sourceWheel: Object3D) {
   return pivot;
 }
 
-function addGeneratedWheelRig(content: Group, bounds: Box3) {
+function addGeneratedWheelRig(content: Group, bounds: Box3, ownedGeometries: Set<BufferGeometry>, ownedMaterials: Set<Material>) {
   const size = bounds.getSize(new Vector3());
   const center = bounds.getCenter(new Vector3());
   const radius = Math.max(0.28, Math.min(size.y * 0.28, size.z * 0.1));
@@ -170,6 +172,10 @@ function addGeneratedWheelRig(content: Group, bounds: Box3) {
   const rimMaterial = new MeshPhysicalMaterial({ color: 0x54606b, roughness: 0.35, metalness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.5 });
   const wheelGeometry = new CylinderGeometry(radius, radius, width, 20);
   const rimGeometry = new CylinderGeometry(radius * 0.5, radius * 0.5, width * 1.08, 16);
+  ownedMaterials.add(tireMaterial);
+  ownedMaterials.add(rimMaterial);
+  ownedGeometries.add(wheelGeometry);
+  ownedGeometries.add(rimGeometry);
   const wheels: ImportedWheel[] = [];
 
   for (const wheel of [
@@ -197,13 +203,17 @@ function addGeneratedWheelRig(content: Group, bounds: Box3) {
   return wheels;
 }
 
-function addExplicitWheelRig(content: Group, radius: number, track: number, wheelbaseFront: number, wheelbaseRear: number) {
+function addExplicitWheelRig(content: Group, radius: number, track: number, wheelbaseFront: number, wheelbaseRear: number, ownedGeometries: Set<BufferGeometry>, ownedMaterials: Set<Material>) {
   const width = radius * 0.78;
   const wheelY = radius * 0.92;
   const tireMaterial = new MeshStandardMaterial({ color: 0x111111, roughness: 0.86 });
   const rimMaterial = new MeshPhysicalMaterial({ color: 0x54606b, roughness: 0.35, metalness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.5 });
   const wheelGeometry = new CylinderGeometry(radius, radius, width, 20);
   const rimGeometry = new CylinderGeometry(radius * 0.5, radius * 0.5, width * 1.08, 16);
+  ownedMaterials.add(tireMaterial);
+  ownedMaterials.add(rimMaterial);
+  ownedGeometries.add(wheelGeometry);
+  ownedGeometries.add(rimGeometry);
   const wheels: ImportedWheel[] = [];
 
   for (const wheel of [
@@ -240,6 +250,8 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   const content = new Group();
   const wheelRecords: ImportedWheel[] = [];
+  const ownedGeometries = new Set<BufferGeometry>();
+  const ownedMaterials = new Set<Material>();
 
   if (definition.standalone) {
     const clone = sourceScene.clone(true);
@@ -254,11 +266,11 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
     content.add(clone);
     content.updateMatrixWorld(true);
     if (definition.wheelRadius && definition.wheelTrack && definition.wheelbaseFront !== undefined && definition.wheelbaseRear !== undefined) {
-      const generated = addExplicitWheelRig(content, definition.wheelRadius, definition.wheelTrack, definition.wheelbaseFront, definition.wheelbaseRear);
+      const generated = addExplicitWheelRig(content, definition.wheelRadius, definition.wheelTrack, definition.wheelbaseFront, definition.wheelbaseRear, ownedGeometries, ownedMaterials);
       wheelRecords.push(...generated);
     } else {
       const bodyBounds = new Box3().setFromObject(content);
-      const generated = addGeneratedWheelRig(content, bodyBounds);
+      const generated = addGeneratedWheelRig(content, bodyBounds, ownedGeometries, ownedMaterials);
       wheelRecords.push(...generated);
     }
     content.updateMatrixWorld(true);
@@ -289,7 +301,7 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
     if (wheelRecords.length < 4) {
       const bodyBounds = new Box3().setFromObject(clone);
-      const generated = addGeneratedWheelRig(content, bodyBounds);
+      const generated = addGeneratedWheelRig(content, bodyBounds, ownedGeometries, ownedMaterials);
       wheelRecords.push(...generated);
       content.updateMatrixWorld(true);
     }
@@ -317,7 +329,9 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
 
   content.traverse((node) => {
     if (!(node instanceof Mesh)) return;
-    node.geometry = mergeVertices(node.geometry, 0.002);
+    const merged = mergeVertices(node.geometry, 0.002);
+    node.geometry = merged;
+    ownedGeometries.add(merged);
     node.geometry.deleteAttribute("color");
     node.geometry.computeVertexNormals();
     node.receiveShadow = false;
@@ -372,5 +386,5 @@ export async function createImportedCarModel(id: string): Promise<ImportedCarMod
     }
   });
 
-  return { root, wheels: wheelRecords, bodyMeshes, rimMeshes, bodyMaterialIndices };
+  return { root, wheels: wheelRecords, bodyMeshes, rimMeshes, bodyMaterialIndices, ownedGeometries, ownedMaterials };
 }

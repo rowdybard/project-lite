@@ -27,6 +27,7 @@ import {
   type VfxPreset,
 } from "../vfx/presets";
 import { pickPngFile, uploadPng } from "../vfx/textureUpload";
+import type { ApplyPresetResult } from "../render/objects/tireSmokeGpu";
 
 // Player-facing effect editor: PNG upload, live orbitable preview, gradient-stop curve
 // editors, JSON preset save/share. Spawn rate and instance counts pass through the global
@@ -48,7 +49,7 @@ function defaultPreset(): VfxPreset {
   return JSON.parse(JSON.stringify(builtinPresets[0])) as VfxPreset;
 }
 
-export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSmoke?: (preset: VfxPreset) => void; onClearTireSmoke?: () => void } = {}) {
+export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSmoke?: (preset: VfxPreset) => Promise<ApplyPresetResult>; onClearTireSmoke?: () => void } = {}) {
   const root = document.createElement("div");
   root.className = "vfx-editor";
   root.hidden = true;
@@ -166,12 +167,13 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   }
 
   // Resume VFX RAF when document becomes visible again (only if editor is still open)
-  document.addEventListener("visibilitychange", () => {
+  const onVisibilityChange = () => {
     if (!document.hidden && isOpen && !disposed && rafId === 0) {
       lastFrame = performance.now();
       rafId = requestAnimationFrame(frame);
     }
-  });
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   function disposeSystem() {
     if (system) {
@@ -683,11 +685,11 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
 
     const actions = document.createElement("div");
     actions.className = "vfx-editor__actions";
-    const button = (label: string, onClick: () => void) => {
+    const button = (label: string, onClick: (button: HTMLButtonElement) => void | Promise<void>) => {
       const element = document.createElement("button");
       element.type = "button";
       element.textContent = label;
-      element.addEventListener("click", onClick);
+      element.addEventListener("click", () => onClick(element));
       return element;
     };
     actions.append(
@@ -761,10 +763,19 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
         applyPreset(preset);
         setStatus(`Loaded "${preset.name}" from share string.`);
       }),
-      button("Apply as Tire Smoke", () => {
-        if (callbacks.onApplyTireSmoke) {
-          callbacks.onApplyTireSmoke(JSON.parse(JSON.stringify(state)) as VfxPreset);
-          setStatus(`"${state.name}" is now your tire smoke. Save the preset first to keep it across reloads.`);
+      button("Apply as Tire Smoke", async (buttonElement) => {
+        if (!callbacks.onApplyTireSmoke) return;
+        buttonElement.disabled = true;
+        setStatus(`Applying "${state.name}"…`);
+        try {
+          const result = await callbacks.onApplyTireSmoke(JSON.parse(JSON.stringify(state)) as VfxPreset);
+          if (result.applied) {
+            setStatus(`"${state.name}" is now your tire smoke. Save the preset first to keep it across reloads.`);
+          } else if (result.reason !== "superseded") {
+            setStatus(`Could not apply "${state.name}": ${result.reason}`);
+          }
+        } finally {
+          buttonElement.disabled = false;
         }
       }),
       button("Reset Tire Smoke", () => {
@@ -873,6 +884,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     cancelAnimationFrame(rafId);
     rafId = 0;
     window.removeEventListener("keydown", onKeyDown);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     disposeSystem();
     // Dispose the preview renderer and scene
     if (resizeObserver) {

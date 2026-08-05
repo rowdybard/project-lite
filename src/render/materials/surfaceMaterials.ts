@@ -8,6 +8,7 @@ import {
   Vector2,
 } from "three";
 import { applyAsphaltDetail, type AsphaltDetailOptions } from "./asphaltDetail";
+import { markOwnerTexture } from "../resources/disposeObject3D";
 
 type SurfaceRepeat = {
   x: number;
@@ -114,7 +115,7 @@ function createNoiseTexture(base: string, seed: number, repeat: SurfaceRepeat, c
     ctx.fillRect(random() * canvas.width, random() * canvas.height, size, size);
   }
 
-  const texture = new CanvasTexture(canvas);
+  const texture = markOwnerTexture(new CanvasTexture(canvas));
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.repeat.set(repeat.x, repeat.y);

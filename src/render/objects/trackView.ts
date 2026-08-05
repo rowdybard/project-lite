@@ -43,6 +43,7 @@ import {
   createShoulderMaterial,
 } from "../materials/surfaceMaterials";
 import { createMapEditStampObject } from "./mapEditObjects";
+import { disposeObject3D } from "../resources/disposeObject3D";
 
 export type TrackViewResult = {
   root: Object3D;
@@ -50,7 +51,13 @@ export type TrackViewResult = {
   cornerMarkers: CornerMarker[];
   arena?: ArenaShellResult;
   windUniforms?: { value: number }[];
+  dispose(): void;
 };
+
+// Public helper for applying track mood to a scene during commit/rollback
+export function applyTrackMood(scene: Scene, track: TrackConfig) {
+  configureTrackMood(scene, isIndoorDriftVenue(track));
+}
 
 type CornerMarker = {
   anchor: Group;
@@ -152,7 +159,7 @@ export async function createTrackView(scene: Scene | null, track: TrackConfig): 
   if (imported) {
     root.add(imported);
     if (scene) scene.add(root);
-    return { root, coneMeshes: [], cornerMarkers: [] };
+    return { root, coneMeshes: [], cornerMarkers: [], dispose: () => disposeObject3D(root) };
   }
 
   const bounds = getTrackBounds(track);
@@ -181,15 +188,15 @@ export async function createTrackView(scene: Scene | null, track: TrackConfig): 
   }
 
   if (track.roadPath && track.roadPath.length >= 4) {
-    const { group, coneMeshes, cornerMarkers } = await createRoadFromPath(track, indoor);
+    const { group, coneMeshes, cornerMarkers, windUniforms } = await createRoadFromPath(track, indoor);
     optimizeTrackShadows(group);
     root.add(group);
     if (scene) scene.add(root);
-    return { root, coneMeshes, cornerMarkers, arena };
+    return { root, coneMeshes, cornerMarkers, arena, windUniforms, dispose: () => disposeObject3D(root) };
   } else {
     root.add(createRingRoad(track));
     if (scene) scene.add(root);
-    return { root, coneMeshes: [], cornerMarkers: [], arena };
+    return { root, coneMeshes: [], cornerMarkers: [], arena, dispose: () => disposeObject3D(root) };
   }
 
 }

@@ -81,11 +81,12 @@ export function loadTireSmokePresetName(): string | null {
   }
 }
 
-export function saveTireSmokePresetName(name: string) {
+export function saveTireSmokePresetName(name: string): { saved: true } | { saved: false; reason: string } {
   try {
     localStorage.setItem(TIRE_SMOKE_PRESET_KEY, name);
-  } catch {
-    // Quota exceeded or storage disabled — silently ignore
+    return { saved: true };
+  } catch (error) {
+    return { saved: false, reason: error instanceof Error ? error.message : "storage unavailable" };
   }
 }
 
@@ -123,11 +124,31 @@ export function createTireSmoke() {
 
   // One explicit resource bundle — shared between both emitters
   let resources: SmokeResources = createDefaultResources();
-  // Track whether paint tint should override the color curve.
-  // Paint tint only applies to default smoke — preset smoke uses the user's color curve.
+  // Paint tint override — only applies to default smoke, not presets
   let paintTint: { r: number; g: number; b: number } | null = null;
-  // Store the default color curve so we can restore it after paint tint
-  let defaultColorOverLife: DataTexture | null = resources.luts[2] ?? null;
+  // Dedicated override LUT for paint tint (separate from the bundle's colorOverLife)
+  let paintOverrideLut: DataTexture | null = null;
+
+  function disposePaintOverride() {
+    paintOverrideLut?.dispose();
+    paintOverrideLut = null;
+  }
+
+  function restoreBundleColorLut() {
+    resources.options.colorOverLife = resources.luts[2];
+  }
+
+  function sameTint(
+    a: { r: number; g: number; b: number } | null,
+    b: { r: number; g: number; b: number } | null,
+  ) {
+    if (a === null || b === null) return a === b;
+    return (
+      Math.abs(a.r - b.r) < 1e-6 &&
+      Math.abs(a.g - b.g) < 1e-6 &&
+      Math.abs(a.b - b.b) < 1e-6
+    );
+  }
 
   let emitters: GpuParticleSystem[] = rearOffsets.map(() => {
     return createGpuParticleSystem(resources.options);
@@ -149,28 +170,43 @@ export function createTireSmoke() {
     for (const emitter of emitters) root.add(emitter.root);
   }
 
-  function applyPaintTintToDefault() {
-    if (!defaultColorOverLife) return;
-    if (resources.kind !== "default") return;  // Don't override preset color curves
+  // Install paint tint curve on default smoke — disposes prior override, rebuilds emitters once
+  function installDefaultPaintCurve() {
+    disposePaintOverride();
     if (!paintTint) {
-      // Restore original default color curve
-      resources.options.colorOverLife = defaultColorOverLife;
+      restoreBundleColorLut();
     } else {
-      // Build a pink-to-white color curve based on normalized particle age
-      // (t=0 = fresh smoke = pink, t=1 = old smoke = white)
-      const pinkColorLut = buildColorLut([
+      // Create a pink-to-white color curve based on normalized particle age
+      paintOverrideLut = buildColorLut([
         { t: 0, r: paintTint.r, g: paintTint.g, b: paintTint.b },
         { t: 0.5, r: paintTint.r * 0.6 + 0.95 * 0.4, g: paintTint.g * 0.6 + 0.95 * 0.4, b: paintTint.b * 0.6 + 0.95 * 0.4 },
         { t: 1, r: 0.95, g: 0.95, b: 0.95 },
       ]);
-      // Dispose the previous pink LUT if we made one (it's not in the resources bundle)
-      if (resources.options.colorOverLife && resources.options.colorOverLife !== defaultColorOverLife) {
-        resources.options.colorOverLife.dispose();
-      }
-      resources.options.colorOverLife = pinkColorLut;
+      resources.options.colorOverLife = paintOverrideLut;
     }
-    // Rebuild emitters so the new color curve takes effect
     rebuildEmittersFromResources();
+  }
+
+  // Build preset resources fully before destroying active smoke
+  async function buildPresetResources(preset: VfxPreset): Promise<SmokeResources> {
+    const texture = await loadPresetTexture(preset);
+    let built: ReturnType<typeof buildSystemOptions> | null = null;
+    try {
+      built = buildSystemOptions(preset, texture);
+      return {
+        texture,
+        luts: built.luts,
+        options: {
+          ...built.options,
+          rate: 0,
+        },
+        kind: "preset",
+      };
+    } catch (error) {
+      if (built) disposeLuts(...built.luts);
+      texture.dispose();
+      throw error;
+    }
   }
 
   return {
@@ -182,65 +218,48 @@ export function createTireSmoke() {
       }
     },
     async applyPreset(preset: VfxPreset): Promise<ApplyPresetResult> {
-      const gen = ++generation;
+      const requestGeneration = ++generation;
+      let candidate: SmokeResources;
+
       try {
-        const texture = await loadPresetTexture(preset);
-        if (disposed || gen !== generation) {
-          // Superseded — dispose the texture we just loaded
-          texture.dispose();
-          return { applied: false, reason: "superseded" };
-        }
-
-        // Dispose old emitters first (they reference shared resources)
-        disposeEmitters();
-        // Dispose old shared resources
-        disposeResources(resources);
-
-        // Build new shared resources
-        const built = buildSystemOptions(preset, texture);
-        // If we had a paint-tint-modified color LUT, dispose it
-        if (resources.options.colorOverLife && resources.options.colorOverLife !== defaultColorOverLife) {
-          resources.options.colorOverLife.dispose();
-        }
-        resources = {
-          texture,
-          luts: built.luts,
-          options: built.options,
-          kind: "preset",
-        };
-        built.options.rate = 0;
-        emitters = rearOffsets.map(() => createGpuParticleSystem(built.options));
-        for (const emitter of emitters) root.add(emitter.root);
-        return { applied: true };
+        candidate = await buildPresetResources(preset);
       } catch (error) {
-        // Texture load failed — keep current smoke
-        return { applied: false, reason: error instanceof Error ? error.message : "texture load failed" };
+        return {
+          applied: false,
+          reason: error instanceof Error ? error.message : "Could not build preset resources",
+        };
       }
+
+      if (disposed || requestGeneration !== generation) {
+        disposeResources(candidate);
+        return { applied: false, reason: "superseded" };
+      }
+
+      // Candidate is fully valid before active smoke is touched
+      disposeEmitters();
+      disposePaintOverride();
+      disposeResources(resources);
+
+      resources = candidate;
+      rebuildEmittersFromResources();
+
+      return { applied: true };
     },
     clearPreset() {
-      generation++;  // Invalidate any pending preset application
-      // Dispose old emitters and resources
+      generation += 1;  // Invalidate any pending preset application
       disposeEmitters();
-      // Dispose paint-tint-modified color LUT if any
-      if (resources.options.colorOverLife && resources.options.colorOverLife !== defaultColorOverLife) {
-        resources.options.colorOverLife.dispose();
-      }
+      disposePaintOverride();
       disposeResources(resources);
-      // Create fresh default resources
+
       resources = createDefaultResources();
-      defaultColorOverLife = resources.luts[2] ?? null;
-      // Reapply paint tint if active (only affects default smoke)
-      if (paintTint) {
-        applyPaintTintToDefault();
-      } else {
-        rebuildEmittersFromResources();
-      }
+      installDefaultPaintCurve();
     },
-    setPaintTint(tint: { r: number; g: number; b: number } | null) {
-      paintTint = tint;
+    setPaintTint(next: { r: number; g: number; b: number } | null) {
+      if (sameTint(paintTint, next)) return;
+      paintTint = next ? { ...next } : null;
       // Paint tint only applies to default smoke, not presets
       if (resources.kind === "default") {
-        applyPaintTintToDefault();
+        installDefaultPaintCurve();
       }
     },
     update(car: CarState, onTrack: boolean, dt: number) {
@@ -277,14 +296,10 @@ export function createTireSmoke() {
     dispose() {
       if (disposed) return;
       disposed = true;
-      generation++;  // Invalidate any pending async load
+      generation += 1;
       disposeEmitters();
-      // Dispose paint-tint-modified color LUT if any
-      if (resources.options.colorOverLife && resources.options.colorOverLife !== defaultColorOverLife) {
-        resources.options.colorOverLife.dispose();
-      }
+      disposePaintOverride();
       disposeResources(resources);
-      defaultColorOverLife = null;
     },
   };
 }

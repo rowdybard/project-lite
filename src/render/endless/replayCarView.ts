@@ -32,5 +32,12 @@ export function createReplayCarView(scale = 1) {
     whenReady() {
       return carView.whenReady();
     },
+    dispose() {
+      replayMarker.geometry.dispose();
+      (replayMarker.material as MeshBasicMaterial).dispose();
+      carView.dispose();
+      root.removeFromParent();
+      root.clear();
+    },
   };
 }

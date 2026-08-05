@@ -209,26 +209,47 @@ export function createEngineSound() {
     }
   }
 
+  let suspendTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function cancelPendingSuspend() {
+    if (suspendTimer !== null) {
+      clearTimeout(suspendTimer);
+      suspendTimer = null;
+    }
+  }
+
   function resume() {
+    cancelPendingSuspend();
     if (!ctx) {
       init();
     }
-    if (ctx) {
-      if (ctx.state === "suspended") ctx.resume();
-      if (!muted) masterGain.gain.setTargetAtTime(0.28, ctx.currentTime + 0.01, 0.05);
-    }
+    if (!ctx) return;
+    void ctx.resume().then(() => {
+      if (!ctx || muted) return;
+      masterGain.gain.setTargetAtTime(0.28, ctx.currentTime + 0.01, 0.05);
+    });
   }
 
   function suspend() {
-    if (ctx && masterGain) {
-      masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
-      // Actually suspend the context after fading
-      setTimeout(() => { if (ctx?.state === "running") void ctx.suspend(); }, 100);
-    }
+    cancelPendingSuspend();
+    if (!ctx || !masterGain) return;
+    const targetContext = ctx;
+    masterGain.gain.setTargetAtTime(0, targetContext.currentTime, 0.05);
+    suspendTimer = setTimeout(() => {
+      suspendTimer = null;
+      if (ctx === targetContext && targetContext.state === "running") {
+        void targetContext.suspend();
+      }
+    }, 100);
   }
 
+  let audioDisposed = false;
   function dispose() {
+    if (audioDisposed) return;
+    audioDisposed = true;
+    cancelPendingSuspend();
     if (!ctx) return;
+    const targetContext = ctx;
     // Stop all oscillator and buffer-source nodes
     try { fundamental?.stop(); } catch { /* already stopped */ }
     try { harmonic2?.stop(); } catch { /* already stopped */ }
@@ -243,8 +264,8 @@ export function createEngineSound() {
     exhaustGain?.disconnect();
     intakeGain?.disconnect();
     tireGain?.disconnect();
-    // Close the AudioContext
-    void ctx.close();
+    // Close the exact context we captured
+    void targetContext.close();
     ctx = null;
     started = false;
   }

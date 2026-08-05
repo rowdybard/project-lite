@@ -1,5 +1,5 @@
 import "./style.css";
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D, Timer, Vector3, type Texture } from "three";
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Material, Object3D, Timer, Vector3, type Texture } from "three";
 import {
   applyTuningPreset,
   carTuningPaths,
@@ -35,9 +35,9 @@ import { createArenaLightRig, type ArenaLightRig } from "./render/arena/lightRig
 import { bakeArenaEnvironment } from "./render/arena/environmentBake";
 import { createPostPipeline, type PostPipeline } from "./render/post/postPipeline";
 import { createCarView } from "./render/objects/carView";
-import { createTireSmoke, saveTireSmokePresetName, clearTireSmokePresetName, resolveTireSmokePreset, type ApplyPresetResult } from "./render/objects/tireSmokeGpu";
+import { createTireSmoke, saveTireSmokePresetName, clearTireSmokePresetName, resolveTireSmokePreset } from "./render/objects/tireSmokeGpu";
 import { createTireTracks } from "./render/objects/tireTracks";
-import { createTrackView, updateCornerMarkerFlex, type TrackViewResult } from "./render/objects/trackView";
+import { createTrackView, applyTrackMood, updateCornerMarkerFlex, type TrackViewResult } from "./render/objects/trackView";
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
 import { createQueueSlab } from "./render/objects/queueSlab";
 import { createGarageUi } from "./ui/garageUi";
@@ -52,6 +52,7 @@ import { isImportedCar } from "./render/objects/importedCars";
 import { createGarageView } from "./render/garage/garageView";
 import { createEngineSound } from "./audio/engineSound";
 import { createTrackColliders, updateTrackCollision, type Barrier } from "./game/simulation/trackCollision";
+import { disposeObject3D } from "./render/resources/disposeObject3D";
 import type { Cone } from "./game/simulation/trackCollision";
 import { createOnlineClient, type OnlineClient } from "./net/onlineClient";
 import { loadPlayerProfile, savePlayerProfile, type PlayerProfile } from "./net/profile";
@@ -83,7 +84,8 @@ import { createReplayOverlay } from "./ui/replayOverlay";
 type AppState = "garage" | "event" | "results" | "replay";
 const eventCarScale = 1.55;
 
-function visualizeBarriers(scene: { add: (obj: Object3D) => void }, barriers: Barrier[]) {
+function visualizeBarriers(scene: { add: (obj: Object3D) => void }, barriers: Barrier[]): Group {
+  const group = new Group();
   const geo = new BoxGeometry(1, 2, 1);
   const mat = new MeshBasicMaterial({ color: 0xff2222, wireframe: true, transparent: true, opacity: 0.7 });
   for (const b of barriers) {
@@ -91,8 +93,10 @@ function visualizeBarriers(scene: { add: (obj: Object3D) => void }, barriers: Ba
     mesh.position.set(b.x, 1, b.z);
     mesh.rotation.y = b.angle;
     mesh.scale.set(b.halfLength * 2, 1, b.halfWidth * 2);
-    scene.add(mesh);
+    group.add(mesh);
   }
+  scene.add(group);
+  return group;
 }
 
 if (import.meta.hot) {
@@ -205,7 +209,13 @@ async function boot() {
   const tireSmoke = createTireSmoke();
   // Load saved tire smoke preset if one was set in the VFX lab
   void resolveTireSmokePreset().then((preset) => {
-    if (preset) void tireSmoke.applyPreset(preset);
+    if (!preset) return;
+    void tireSmoke.applyPreset(preset).then((result) => {
+      if (!result.applied) {
+        // Preset failed to apply on boot — clear the stale key
+        clearTireSmokePresetName();
+      }
+    });
   });
 
   // Sync tire smoke tint to the current paint color.
@@ -461,125 +471,155 @@ async function boot() {
   let startEventPending = false;
   let startEventRequestedAt = 0;
 
-  const disposeSceneRoot = (root: object & { traverse: (callback: (child: object) => void) => void }) => {
-    root.traverse((child) => {
-      if (!(child instanceof Mesh)) return;
-      child.geometry.dispose();
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const material of materials) material.dispose();
-    });
-  };
-
   // --- Atomic track transition controller ---
-  // Only one transition may commit at a time. Each request gets a monotonic
-  // generation ID. The candidate is built without mutating activeTrack, trackView,
-  // colliders, lighting, cone references, or corner-marker references. The current
-  // valid track is retained until the candidate loads completely. A failed candidate
-  // leaves the existing track intact. A superseded candidate is disposed without commit.
+  // Uses a permanently settled queue tail so one failed job cannot poison
+  // every future transition. Each caller gets its own real result promise.
   let trackGeneration = 0;
-  let trackTransition: Promise<void> = Promise.resolve();
+  let trackQueueTail: Promise<void> = Promise.resolve();
 
-  const disposeTrackView = (view: TrackViewResult) => {
-    gameScene.remove(view.root);
-    view.root.traverse((child) => {
-      if (!(child instanceof Mesh)) return;
-      child.geometry?.dispose();
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      for (const material of materials) material.dispose();
-    });
-  };
+  function enqueueTrackTransition<T>(work: () => Promise<T>): Promise<T> {
+    const run = trackQueueTail.then(work, work);
+    // The queue tail must always settle successfully so one failed job
+    // cannot poison every future transition.
+    trackQueueTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
 
-  const buildCandidate = async (track: TrackConfig): Promise<{
+  type TrackCandidate = {
+    track: TrackConfig;
     view: TrackViewResult;
-    endlessView: ReturnType<typeof createEndlessTrackView> | null;
-  }> => {
-    // Build without attaching to the active scene — createTrackView(null, ...) skips scene mutation
-    if (track.id === "endless") {
-      const root = new Group();
-      return { view: { root, coneMeshes: [], cornerMarkers: [] }, endlessView: null };
-    }
-    const view = await createTrackView(null, track);
-    return { view, endlessView: null };
+    colliders: ReturnType<typeof createTrackColliders>;
   };
 
-  const commitTrack = (track: TrackConfig, candidate: { view: TrackViewResult; endlessView: ReturnType<typeof createEndlessTrackView> | null }) => {
-    // Dispose the old track view and endless view
-    endlessTrackView?.dispose();
-    endlessTrackView = null;
-    disposeTrackView(trackView);
+  function createEmptyEndlessTrackViewResult(): TrackViewResult {
+    const root = new Group();
+    return { root, coneMeshes: [], cornerMarkers: [], dispose: () => disposeObject3D(root) };
+  }
 
-    // Commit the new track as one operation
-    activeTrack = track;
-    trackView = candidate.view;
-    gameScene.add(trackView.root);
+  async function buildTrackCandidate(track: TrackConfig): Promise<TrackCandidate> {
+    const view =
+      track.id === "endless"
+        ? createEmptyEndlessTrackViewResult()
+        : await createTrackView(null, track);
 
-    // Rebuild lighting, colliders, and references
-    if (track.id === "endless") {
-      // Endless track view is created later in resetEvent
+    try {
+      const nextColliders = createTrackColliders(track);
+      return { track, view, colliders: nextColliders };
+    } catch (error) {
+      view.dispose();
+      throw error;
     }
-    setupArenaLighting();
-    colliders = createTrackColliders(activeTrack);
+  }
+
+  // Debug collider visualization — disposes previous on each transition
+  let debugColliderGroup: Group | null = null;
+  function updateDebugColliders() {
+    if (debugColliderGroup) {
+      gameScene.remove(debugColliderGroup);
+      debugColliderGroup.traverse((child) => {
+        if (child instanceof Mesh) {
+          child.geometry?.dispose();
+          (child.material as Material).dispose();
+        }
+      });
+      debugColliderGroup = null;
+    }
     if (new URLSearchParams(window.location.search).has("debugColliders")) {
-      visualizeBarriers(gameScene, colliders.barriers);
+      debugColliderGroup = visualizeBarriers(gameScene, colliders.barriers);
     }
-    coneMeshes = trackView.coneMeshes;
-    cornerMarkers = trackView.cornerMarkers;
-    onlineGhosts.setTrack(activeTrack);
-    practiceZoneIndex = 0;
-  };
+  }
 
-  const switchTrack = async (nextTrack: TrackConfig): Promise<void> => {
-    const gen = ++trackGeneration;
-    // Serialize transitions — chain so only one builds at a time
-    trackTransition = trackTransition.then(async () => {
-      // A failed reload must not make a later same-track request return early.
-      // We compare against the *actual* active track, not a stale ID.
-      if (activeTrack.id === nextTrack.id && trackView.root.parent === gameScene) return;
+  function commitTrackCandidate(candidate: TrackCandidate) {
+    // Preserve references to the old state until the candidate is ready
+    const oldTrack = activeTrack;
+    const oldView = trackView;
+    const oldColliders = colliders;
+    const oldEndlessView = endlessTrackView;
 
-      let candidate: { view: TrackViewResult; endlessView: ReturnType<typeof createEndlessTrackView> | null };
-      try {
-        candidate = await buildCandidate(nextTrack);
-      } catch (error) {
-        // Candidate failed — retain existing track and all associated state.
-        // Propagate the error so callers can show retry/back UI.
-        throw error;
-      }
+    // Add the candidate root
+    gameScene.add(candidate.view.root);
 
-      // If superseded by a newer request, dispose the candidate without committing
-      if (gen !== trackGeneration) {
-        disposeTrackView(candidate.view);
-        candidate.endlessView?.dispose();
+    try {
+      // Apply the candidate track's scene mood
+      applyTrackMood(gameScene, candidate.track);
+
+      // Install the candidate colliders and references
+      activeTrack = candidate.track;
+      trackView = candidate.view;
+      colliders = candidate.colliders;
+      coneMeshes = trackView.coneMeshes;
+      cornerMarkers = trackView.cornerMarkers;
+      onlineGhosts.setTrack(activeTrack);
+      practiceZoneIndex = 0;
+
+      // Rebuild lighting/environment
+      setupArenaLighting();
+
+      // Update debug colliders
+      updateDebugColliders();
+    } catch (error) {
+      // Rollback: remove/dispose the candidate, restore old state
+      gameScene.remove(candidate.view.root);
+      applyTrackMood(gameScene, oldTrack);
+      activeTrack = oldTrack;
+      trackView = oldView;
+      colliders = oldColliders;
+      coneMeshes = oldView.coneMeshes;
+      cornerMarkers = oldView.cornerMarkers;
+      throw error;
+    }
+
+    // Only now remove/dispose the old view and old endless view
+    endlessTrackView = null;
+    oldEndlessView?.dispose();
+    gameScene.remove(oldView.root);
+    oldView.dispose();
+  }
+
+  function switchTrack(nextTrack: TrackConfig): Promise<void> {
+    const generation = ++trackGeneration;
+
+    return enqueueTrackTransition(async () => {
+      // This check intentionally runs inside the queue. Incrementing the
+      // generation before enqueueing invalidates any older in-flight request.
+      if (
+        activeTrack.id === nextTrack.id &&
+        trackView.root.parent === gameScene
+      ) {
         return;
       }
 
-      commitTrack(nextTrack, candidate);
-    });
-    await trackTransition;
-  };
+      const candidate = await buildTrackCandidate(nextTrack);
 
-  const reloadActiveTrack = async (): Promise<void> => {
-    const gen = ++trackGeneration;
-    const targetTrack = activeTrack;
-    trackTransition = trackTransition.then(async () => {
-      if (targetTrack.id === "endless") return;
-
-      let candidate: { view: TrackViewResult; endlessView: ReturnType<typeof createEndlessTrackView> | null };
-      try {
-        candidate = await buildCandidate(targetTrack);
-      } catch (error) {
-        throw error;
-      }
-
-      if (gen !== trackGeneration) {
-        disposeTrackView(candidate.view);
-        candidate.endlessView?.dispose();
+      if (generation !== trackGeneration) {
+        candidate.view.dispose();
         return;
       }
 
-      commitTrack(targetTrack, candidate);
+      commitTrackCandidate(candidate);
     });
-    await trackTransition;
-  };
+  }
+
+  function reloadActiveTrack(): Promise<void> {
+    const generation = ++trackGeneration;
+    const target = activeTrack;
+
+    return enqueueTrackTransition(async () => {
+      if (target.id === "endless") return;
+
+      const candidate = await buildTrackCandidate(target);
+
+      if (generation !== trackGeneration) {
+        candidate.view.dispose();
+        return;
+      }
+
+      commitTrackCandidate(candidate);
+    });
+  }
 
   // Map editor: only instantiated when enabled via dev flag
   type MapEditor = Awaited<ReturnType<typeof import("./game/editor/mapEditor").createMapEditor>>;
@@ -724,6 +764,8 @@ async function boot() {
       car.throttleAxis = 0;
       car.brakeAxis = 0;
     }
+    vfxLabOpen = false;
+    garageView.setActive(true);
     mainMenu.hide();
     garageUi.show();
   };
@@ -753,6 +795,17 @@ async function boot() {
       await switchTrack(getTrackForMode(activeMode));
       baseTuning = await loadCarTuning(customization.selectedCar);
       activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
+
+      // Wait for the selected car to be ready before entering gameplay
+      const carResult = await carView.whenReady();
+      if (!carResult.ok && carResult.carId === customization.selectedCar) {
+        // Imported model failed and no fallback was installed yet
+        throw new Error(
+          `Could not load ${getCarLabel(customization.selectedCar)}: ` +
+          carResult.error.message,
+        );
+      }
+
       appState = "event";
       garageView.setActive(false);
       results.hide();
@@ -801,11 +854,7 @@ async function boot() {
         () => {
           startEventPending = false;
           loadingOverlay.hide();
-          appState = "garage";
-          hud.root.hidden = true;
-          garageUi.hide();
-          mainMenu.show();
-          mainMenu.setPlayEnabled(true);
+          showMainMenu();
         },
       );
     } finally {
@@ -1033,16 +1082,20 @@ async function boot() {
         vfxLabOpen = false;
       }
     },
-    onApplyTireSmoke: (preset) => {
+    onApplyTireSmoke: async (preset) => {
       // Save the preset name only when apply actually succeeds
-      void tireSmoke.applyPreset(preset).then((result: ApplyPresetResult) => {
-        if (result.applied) {
-          saveTireSmokePresetName(preset.name);
+      const result = await tireSmoke.applyPreset(preset);
+      if (result.applied) {
+        const saveResult = saveTireSmokePresetName(preset.name);
+        if (saveResult.saved) {
           vfxEditor.setTireSmokeStatus(`"${preset.name}" applied as tire smoke.`);
         } else {
-          vfxEditor.setTireSmokeStatus(`Could not apply "${preset.name}": ${result.reason}`);
+          vfxEditor.setTireSmokeStatus(`"${preset.name}" applied, but browser storage was unavailable: ${saveResult.reason}`);
         }
-      });
+      } else if (result.reason !== "superseded") {
+        vfxEditor.setTireSmokeStatus(`Could not apply "${preset.name}": ${result.reason}`);
+      }
+      return result;
     },
     onClearTireSmoke: () => {
       clearTireSmokePresetName();
@@ -1055,6 +1108,7 @@ async function boot() {
     onWatch: (entry, replay) => startReplay(entry, replay),
     onClose: () => canvas.focus(),
   });
+  let garageVehicleRequest = 0;
   const garageUi = createGarageUi(customization, playerProfile, {
     onCustomizationChange(slot, value) {
       startEventPending = false;
@@ -1070,13 +1124,25 @@ async function boot() {
       garageUi.update(customization);
       carView.applyCustomization(customization);
       garageView.applyCustomization(customization);
-      syncPaintTint(customization.paint);
+      // Only sync paint tint when paint or selectedCar can change it
+      if (slot === "paint" || slot === "selectedCar") {
+        syncPaintTint(customization.paint);
+      }
       if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
       else attachmentTuner?.hide();
       // Show loading indicator while imported car loads
-      garageUi.setLoading(carView.isLoading());
-      void carView.whenReady().then(() => {
-        garageUi.setLoading(false);
+      const requestId = ++garageVehicleRequest;
+      const requestedCar = customization.selectedCar;
+      const loadState = carView.getLoadState();
+      garageUi.setVehicleState({ loading: loadState.loading, error: null });
+      void carView.whenReady().then((result) => {
+        if (requestId !== garageVehicleRequest) return;
+        if (customization.selectedCar !== requestedCar) return;
+        if (!result.ok && result.carId === requestedCar) {
+          garageUi.setVehicleState({ loading: false, error: result.error.message });
+        } else {
+          garageUi.setVehicleState({ loading: false, error: null });
+        }
       });
     },
     onProfileChange(profile) {
@@ -1101,6 +1167,7 @@ async function boot() {
   });
   hud.root.hidden = true;
 
+  // --- Named event handlers (removable during teardown) ---
   const onResize = () => {
     const mobileCap = isMobileDevice() ? 1.0 : 1.15;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobileCap));
@@ -1122,6 +1189,7 @@ async function boot() {
   let documentHidden = false;
   let contextLost = false;
   let hiddenStartTime = 0;
+  let contextLostOverlay: HTMLElement | null = null;
 
   function startMainLoop() {
     if (rafId !== null) return;  // Already scheduled
@@ -1136,35 +1204,43 @@ async function boot() {
     }
   }
 
-  renderer.domElement.addEventListener("webglcontextlost", (event) => {
+  const onContextLost = (event: Event) => {
     event.preventDefault();
     contextLost = true;
     stopMainLoop();
     resetInputState();
     engineSound.suspend();
-    // Show a real DOM overlay (not just a CSS pseudo-element)
-    const overlay = document.createElement("div");
-    overlay.className = "context-lost-overlay";
-    overlay.innerHTML = `
-      <div class="context-lost-overlay__card">
-        <h1>Drift Attack lost its graphics context</h1>
-        <p>The browser reclaimed the GPU. This can happen when the device runs low on memory or after sleep/wake.</p>
-        <button type="button" data-reload>Reload</button>
-      </div>
-    `;
-    document.body.append(overlay);
-    overlay.querySelector<HTMLButtonElement>("[data-reload]")!.addEventListener("click", () => window.location.reload());
-  });
+    // Only one overlay — don't append another if one already exists
+    if (contextLostOverlay) return;
+    contextLostOverlay = document.createElement("div");
+    contextLostOverlay.className = "context-lost-overlay";
+    const card = document.createElement("div");
+    card.className = "context-lost-overlay__card";
+    const h1 = document.createElement("h1");
+    h1.textContent = "Drift Attack lost its graphics context";
+    const p = document.createElement("p");
+    p.textContent = "The browser reclaimed the GPU. This can happen when the device runs low on memory or after sleep/wake.";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Reload";
+    button.addEventListener("click", () => window.location.reload());
+    card.append(h1, p, button);
+    contextLostOverlay.append(card);
+    document.body.append(contextLostOverlay);
+  };
 
-  renderer.domElement.addEventListener("webglcontextrestored", () => {
+  const onContextRestored = () => {
     // The simplest reliable recovery is a full reload — Three.js internal state
     // (programs, geometries, textures) is too complex to rebuild piecemeal.
     window.location.reload();
-  });
+  };
+
+  renderer.domElement.addEventListener("webglcontextlost", onContextLost);
+  renderer.domElement.addEventListener("webglcontextrestored", onContextRestored);
 
   // Pause expensive work (RAF + audio) when the tab is hidden.
   // Also pause Drift Attack timing so the player's 90-second run is not consumed.
-  document.addEventListener("visibilitychange", () => {
+  const onVisibilityChange = () => {
     if (document.hidden) {
       documentHidden = true;
       hiddenStartTime = performance.now();
@@ -1187,17 +1263,19 @@ async function boot() {
       if (appState === "event" || appState === "replay") engineSound.resume();
       startMainLoop();
     }
-  });
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   // Clear keyboard state on window blur (alt-tab, focus loss)
-  window.addEventListener("blur", () => {
+  const onWindowBlur = () => {
     resetInputState();
-  });
+  };
+  window.addEventListener("blur", onWindowBlur);
 
   const engineSound = createEngineSound();
 
-  bindInput();
-  createFullscreenToggle();
+  const unbindInput = bindInput();
+  const fullscreenToggle = createFullscreenToggle();
   showMainMenu();
 
   function syncConeMeshes(meshes: Mesh[], cones: Cone[]) {
@@ -1773,19 +1851,32 @@ async function boot() {
   }
 
   // Real teardown path — disposes GPU resources and stops the RAF loop.
-  // Idempotent: safe to call multiple times.
+  // Idempotent: safe to call multiple times. Uses explicit owner disposal only.
   function teardown() {
     if (disposed) return;
     disposed = true;
     stopMainLoop();
     resetInputState();
+    // Remove all global listeners
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("blur", onWindowBlur);
+    window.removeEventListener("pagehide", onPageHide);
+    window.removeEventListener("pageshow", onPageShow);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
+    renderer.domElement.removeEventListener("webglcontextrestored", onContextRestored);
+    unbindInput();
+    fullscreenToggle.dispose();
+    // Remove context-lost overlay if present
+    contextLostOverlay?.remove();
+    contextLostOverlay = null;
     // Audio
-    engineSound.dispose?.();
-    // UI overlays — remove from DOM (dispose if available, otherwise just remove root)
-    disposeSafe(vfxEditor);
-    disposeSafe(garageView);
-    disposeSafe(garageUi);
-    disposeSafe(loadingOverlay);
+    engineSound.dispose();
+    // UI overlays
+    vfxEditor.dispose();
+    garageView.dispose();
+    garageUi.dispose();
+    loadingOverlay.dispose();
     disposeSafe(mainMenu);
     disposeSafe(results);
     disposeSafe(endlessResults);
@@ -1795,7 +1886,7 @@ async function boot() {
     disposeSafe(onlineHud);
     disposeSafe(onlineMatchUi);
     disposeSafe(hud);
-    // 3D systems
+    // 3D systems — explicit owner disposal, exactly once
     carView.dispose();
     disposeSafe(replayCarView);
     tireTracks.dispose();
@@ -1806,9 +1897,11 @@ async function boot() {
     postPipeline?.dispose();
     disposeSafe(mapEditor ?? {});
     performanceMonitor.dispose();
-    // Scene resources
-    disposeTrackView(trackView);
-    disposeSceneRoot(gameScene);
+    queueSlab.dispose();
+    onlineClient.disconnect();
+    // Scene resources — explicit owner disposal only, no broad traversal
+    trackView.dispose();
+    gameScene.clear();
     arenaRig?.dispose();
     arenaEnv?.dispose();
     defaultSceneEnvironment?.dispose();
@@ -1818,16 +1911,18 @@ async function boot() {
 
   // bfcache-safe: don't run destructive teardown for a page hide that will be persisted.
   // Instead reload cleanly on a persisted pageshow.
-  window.addEventListener("pagehide", (event) => {
+  const onPageHide = (event: PageTransitionEvent) => {
     if (event.persisted) return;  // bfcache — preserve the page
     teardown();
-  });
-  window.addEventListener("pageshow", (event) => {
+  };
+  const onPageShow = (event: PageTransitionEvent) => {
     if (event.persisted) {
       // Returning from bfcache — reload cleanly since GPU state may be invalid
       window.location.reload();
     }
-  });
+  };
+  window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("pageshow", onPageShow);
 }
 
 boot().catch((error) => {
@@ -1842,6 +1937,30 @@ boot().catch((error) => {
   pre.textContent = error instanceof Error ? error.message : String(error);
   const support = document.createElement("p");
   support.textContent = "If this persists, try a hard refresh (Ctrl+Shift+R) or clear site data.";
-  main.append(h1, pre, support);
+
+  const reloadButton = document.createElement("button");
+  reloadButton.type = "button";
+  reloadButton.textContent = "Reload";
+  reloadButton.addEventListener("click", () => window.location.reload());
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.textContent = "Copy Diagnostics";
+  copyButton.addEventListener("click", () => {
+    const diagnostics = [
+      `URL: ${window.location.href}`,
+      `UA: ${navigator.userAgent}`,
+      `Time: ${new Date().toISOString()}`,
+      `Error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+    ].join("\n");
+    try {
+      void navigator.clipboard.writeText(diagnostics);
+      copyButton.textContent = "Copied!";
+    } catch {
+      copyButton.textContent = "Copy failed — check console";
+    }
+  });
+
+  main.append(h1, pre, support, reloadButton, copyButton);
   app.append(main);
 });

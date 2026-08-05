@@ -14,6 +14,7 @@ import {
   Vector3,
 } from "three";
 import { arenaPalette } from "./palette";
+import { markOwnerTexture } from "../resources/disposeObject3D";
 
 export type SodiumAnchor = { position: Vector3; target: Vector3 };
 
@@ -43,7 +44,7 @@ export function createIndoorVenueSign(label: string, accent: number) {
   ctx.textBaseline = "middle";
   ctx.fillText(label, canvas.width / 2, canvas.height / 2 + 3);
 
-  const texture = new CanvasTexture(canvas);
+  const texture = markOwnerTexture(new CanvasTexture(canvas));
   texture.colorSpace = SRGBColorSpace;
   return new Mesh(
     new PlaneGeometry(20, 5),
