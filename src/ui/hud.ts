@@ -35,15 +35,9 @@ export function createHud() {
   const root = document.createElement("div");
   root.className = "hud";
   root.innerHTML = `
-    <div class="hud__strip">
-      <span>Car <strong data-car-name>Lite Coupe</strong></span>
-      <span><em data-time-label>Time</em> <strong data-time>90.0s</strong></span>
-      <span>Surface <strong data-surface>Track</strong></span>
-      <span>Grip <strong data-grip>100%</strong></span>
-      <span>Heat <strong data-heat>0%</strong></span>
-      <span>Load <strong data-load>50F/50R</strong></span>
-      <span>Angle <strong data-angle>0 deg</strong></span>
-      <span>Rear Slip <strong data-rear-slip>0 deg</strong></span>
+    <div class="hud__header">
+      <span class="hud__car"><strong data-car-name>Drift Attack Coupe</strong></span>
+      <span class="hud__time"><em data-time-label>Time</em> <strong data-time>90.0s</strong></span>
     </div>
     <div class="drift-score">
       <div class="drift-score__label">Banked</div>
@@ -97,13 +91,6 @@ export function createHud() {
         car.reverseEngageTimer > 0.48 || forwardSpeed(car) < -0.5 ? "R" : car.gear.toString();
       root.querySelector("[data-rpm]")!.textContent = Math.round(car.rpm).toString();
       (root.querySelector("[data-rpm-bar]") as HTMLElement).style.transform = `scaleX(${Math.min(1, car.rpm / 6900)})`;
-      root.querySelector("[data-surface]")!.textContent = drift.onTrack ? "Track" : "Off";
-      root.querySelector("[data-grip]")!.textContent = `${Math.round(car.gripAmount * 100)}%`;
-      root.querySelector("[data-heat]")!.textContent = `${Math.round(car.tireHeat * 100)}%`;
-      root.querySelector("[data-load]")!.textContent =
-        `${Math.round(car.weightForward * 100)}F/${Math.round((1 - car.weightForward) * 100)}R`;
-      root.querySelector("[data-angle]")!.textContent = `${Math.round(car.slipAngle)} deg`;
-      root.querySelector("[data-rear-slip]")!.textContent = `${Math.round(Math.abs(car.rearSlipAngle))} deg`;
       root.querySelector("[data-total-score]")!.textContent = formatScore(drift.totalScore);
       root.querySelector("[data-combo-score]")!.textContent = `+${formatScore(drift.comboScore)}`;
       root.querySelector("[data-multiplier]")!.textContent = `x${drift.multiplier.toFixed(1)}`;
@@ -281,7 +268,7 @@ export function createSessionOverlay(onPlay: () => void, onRestart: () => void, 
   root.className = "session-overlay";
   root.innerHTML = `
     <section class="session-card" data-menu>
-      <p class="session-card__eyebrow">Project Lite</p>
+      <p class="session-card__eyebrow">Drift Attack</p>
       <h1>Training Circuit</h1>
       <p>90 seconds. Stay on asphalt, link clean angle, bank the biggest combo.</p>
       <div class="session-card__actions">

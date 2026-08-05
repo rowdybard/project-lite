@@ -8,7 +8,7 @@ export function createLoadingOverlay() {
   root.hidden = true;
   root.innerHTML = `
     <div class="loading-overlay__card">
-      <div class="loading-overlay__mark">Project Lite</div>
+      <div class="loading-overlay__mark">Drift Attack</div>
       <p data-status>Loading</p>
       <span></span>
     </div>

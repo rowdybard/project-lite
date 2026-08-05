@@ -4,7 +4,7 @@ export type PlayerProfile = {
   name: string;
 };
 
-const profileKey = "projectLite.profile.v1";
+const profileKey = "driftAttack.profile.v1";
 
 export function loadPlayerProfile(): PlayerProfile {
   const raw = window.localStorage.getItem(profileKey);

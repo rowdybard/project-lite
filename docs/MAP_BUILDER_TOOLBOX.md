@@ -1,6 +1,6 @@
-# Project Lite Map Builder Toolbox
+# Drift Attack Map Builder Toolbox
 
-Use the in-game Map Editor when you want to adjust road overlap, patch areas back to grass, or dress a map with the existing Project Lite asset kit.
+Use the in-game Map Editor when you want to adjust road overlap, patch areas back to grass, or dress a map with the existing Drift Attack asset kit.
 
 ## Open the editor
 

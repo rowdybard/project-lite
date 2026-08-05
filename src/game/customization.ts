@@ -39,8 +39,8 @@ export type CustomizationCategory = {
   options: CustomizationOption[];
 };
 
-const storageKeyPrefix = "projectLite.car.";
-const globalStorageKey = "projectLite.global.v2";
+const storageKeyPrefix = "driftAttack.car.";
+const globalStorageKey = "driftAttack.global.v2";
 
 export const defaultCustomization: CarCustomization = {
   selectedCar: "pack-suv",

@@ -37,7 +37,7 @@ export function createMainMenu(callbacks: MainMenuCallbacks) {
   root.className = "main-menu";
   root.innerHTML = `
     <section class="main-menu__card">
-      <p class="main-menu__eyebrow">Project Lite</p>
+      <p class="main-menu__eyebrow">Drift Attack</p>
       <h1 class="main-menu__title">Drift Attack</h1>
       <p class="main-menu__blurb">Pick a mode to drive. Tune your car in the garage first.</p>
       <div class="main-menu__modes" data-modes></div>

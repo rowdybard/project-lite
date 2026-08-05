@@ -3,7 +3,7 @@
   "activeTrack": "indoor-drift-lab",
   "cars": {
     "starter-coupe": {
-      "name": "Project Lite Coupe",
+      "name": "Drift Attack Coupe",
       "tuning": "/assets/cars/starter/tuning.json",
       "scale": 1
     }
@@ -82,7 +82,7 @@
     },
     "indoor-drift-lab": {
       "id": "indoor-drift-lab",
-      "name": "Project Lite Drift Lab",
+      "name": "Drift Attack Lab",
       "start": {
         "x": -78,
         "z": 88,

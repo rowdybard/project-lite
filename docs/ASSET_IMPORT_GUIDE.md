@@ -97,7 +97,7 @@ Press `T` in game to open the live tuning panel. Once the car feels good, copy t
 
 ## Drift Mode Scoring
 
-The prototype now follows the Project Torque style goal: drift for points, not first place. Score comes from speed, angle, combo duration, and transitions between left and right drifts. A combo banks when you stop sliding cleanly.
+The prototype follows a drift-for-points design: drift for points, not first place. Score comes from speed, angle, combo duration, and transitions between left and right drifts. A combo banks when you stop sliding cleanly.
 
 ## Default 240SX-Style Tune
 

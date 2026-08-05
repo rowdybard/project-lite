@@ -172,7 +172,7 @@ canvas {
   display: none;
 }
 
-.hud__strip,
+.hud__header,
 .hud__hint,
 .hud__warning,
 .speedometer,
@@ -184,28 +184,41 @@ canvas {
   backdrop-filter: blur(8px);
 }
 
-.hud__strip {
+.hud__header {
   grid-column: 1;
   align-self: start;
-  display: grid;
-  grid-template-columns: repeat(8, minmax(70px, 1fr));
-  gap: 8px;
-  width: min(100%, 980px);
-  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: max-content;
+  max-width: 100%;
+  padding: 8px 14px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 13px;
   color: #bac6d3;
 }
 
-.hud__strip span {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 6px 8px;
-  border-left: 2px solid rgb(104 216 255 / 36%);
-  border-radius: 0;
-  background: rgb(255 255 255 / 4%);
+.hud__car strong {
+  color: #fff6d8;
+  font-weight: 700;
+}
+
+.hud__time {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hud__time strong {
+  color: #fff6d8;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud__time em {
+  font-style: normal;
   text-transform: uppercase;
+  font-size: 11px;
+  color: rgb(190 210 230 / 60%);
 }
 
 .session-overlay {
@@ -330,15 +343,6 @@ canvas {
   text-transform: none;
 }
 
-.hud__strip strong {
-  color: #fff6d8;
-  font-variant-numeric: tabular-nums;
-}
-
-.hud__strip em {
-  font-style: normal;
-}
-
 .hud__hint {
   position: fixed;
   left: 50%;
@@ -354,7 +358,7 @@ canvas {
 
 .hud__warning {
   position: fixed;
-  top: 86px;
+  top: 140px;
   left: 50%;
   transform: translateX(-50%);
   padding: 10px 16px;
@@ -367,10 +371,10 @@ canvas {
 
 .drift-score {
   position: fixed;
-  top: 112px;
+  top: 56px;
   left: 50%;
   z-index: 6;
-  width: min(310px, calc(100vw - 380px));
+  width: min(310px, calc(100vw - 36px));
   padding: 0;
   transform: translateX(-50%);
   border: 0;
@@ -539,7 +543,7 @@ canvas {
 
 .endless-hud {
   position: fixed;
-  top: 88px;
+  top: 56px;
   left: 18px;
   z-index: 6;
   width: min(350px, calc(100vw - 36px));
@@ -1687,8 +1691,10 @@ canvas {
     grid-template-columns: 1fr;
   }
 
-  .hud__strip {
-    max-width: calc(100vw - 20px);
+  .hud__header {
+    font-size: 12px;
+    padding: 6px 10px;
+    gap: 10px;
   }
 
   .hud__hint {
@@ -1697,7 +1703,7 @@ canvas {
   }
 
   .drift-score {
-    top: 150px;
+    top: 48px;
     width: calc(100vw - 24px);
   }
 
@@ -1732,23 +1738,14 @@ canvas {
 }
 
 @media (max-width: 420px) {
-  .hud__strip {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    padding: 6px;
-  }
-
-  .hud__strip span {
-    padding: 4px 5px;
-    font-size: 9px;
-  }
-
-  .hud__strip span:nth-child(n + 5) {
-    display: none;
+  .hud__header {
+    font-size: 11px;
+    padding: 5px 8px;
+    gap: 8px;
   }
 
   .drift-score {
-    top: 84px;
+    top: 42px;
   }
 
   .drift-score__total {

@@ -25,7 +25,7 @@ export type EndlessRecords = {
   recentRuns: EndlessRunSummary[];
 };
 
-const storageKey = "projectLite.endless.records.v1";
+const storageKey = "driftAttack.endless.records.v1";
 
 const emptyRecords = (): EndlessRecords => ({
   bestScore: 0,

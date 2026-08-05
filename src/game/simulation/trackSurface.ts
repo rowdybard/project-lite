@@ -37,12 +37,12 @@ function isInPracticeArea(point: Vec2, track: TrackConfig) {
 
 export function isOnTrack(point: Vec2, track: TrackConfig) {
   if (isInPracticeArea(point, track)) return true;
-  return getTrackDistance(point, track) <= getRoadHalfWidth(track) + 2.5;
+  return getTrackDistance(point, track) <= getRoadHalfWidth(track) + 5;
 }
 
 export function isInRunoff(point: Vec2, track: TrackConfig) {
   const distance = getTrackDistance(point, track);
-  const roadEdge = getRoadHalfWidth(track) + 2.5;
+  const roadEdge = getRoadHalfWidth(track) + 5;
   return distance > roadEdge && distance <= roadEdge + 3.5;
 }
 

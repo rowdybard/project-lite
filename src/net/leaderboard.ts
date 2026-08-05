@@ -83,7 +83,7 @@ function defaultBaseUrl() {
   if (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
     return `http://${window.location.hostname}:8787`;
   }
-  return "https://project-lite-online.maxpug17.workers.dev";
+  return "https://drift-attack-online.maxpug17.workers.dev";
 }
 
 async function requestJson(url: string, init?: RequestInit, timeoutMilliseconds = requestTimeoutMilliseconds) {

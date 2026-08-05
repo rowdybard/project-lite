@@ -103,7 +103,7 @@ async function boot() {
   document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <canvas id="game"></canvas>
     <div class="boot-overlay" data-boot-overlay>
-      <div class="boot-overlay__mark">Project Lite</div>
+      <div class="boot-overlay__mark">Drift Attack</div>
       <p>Loading</p>
       <span></span>
     </div>
@@ -170,7 +170,7 @@ async function boot() {
       ...runHandlingHarness(activeTuning, driftTrack),
       fleetTransmission: runFleetTransmissionHarness(fleet, driftTrack),
     };
-    (window as Window & { __projectLiteHandlingReport?: typeof report }).__projectLiteHandlingReport = report;
+    (window as Window & { __driftAttackHandlingReport?: typeof report }).__driftAttackHandlingReport = report;
     mountHandlingHarnessReport(report);
   }
 
@@ -215,7 +215,7 @@ async function boot() {
     shiftEvents: [] as Array<{ from: number; to: number; mph: number; rpm: number; rpmFraction: number }>,
     score: 0,
   };
-  (window as Window & { __projectLiteRouteProbe?: typeof playerRouteProbe }).__projectLiteRouteProbe = playerRouteProbe;
+  (window as Window & { __driftAttackRouteProbe?: typeof playerRouteProbe }).__driftAttackRouteProbe = playerRouteProbe;
   const drift = createDriftState();
   const hud = createHud();
   const onlineHud = createOnlineHud();

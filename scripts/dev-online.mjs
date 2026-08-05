@@ -34,6 +34,6 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-console.log("Project Lite dev: Vite http://127.0.0.1:5180 + Worker http://127.0.0.1:8787");
+console.log("Drift Attack dev: Vite http://127.0.0.1:5180 + Worker http://127.0.0.1:8787");
 run("worker", ["online:dev"]);
 run("vite", ["dev:client"]);

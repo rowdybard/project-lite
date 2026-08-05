@@ -47,7 +47,7 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
   function render() {
     root.innerHTML = `
       <header class="garage-header">
-        <p>Project Lite</p>
+        <p>Drift Attack</p>
         <h1>Garage</h1>
         <span>Build, tune, drive out</span>
         <label class="garage-profile">

@@ -407,7 +407,7 @@ export default {
     }
 
     try {
-      if (url.pathname === "/api/health") return json({ ok: true, service: "project-lite-online" });
+      if (url.pathname === "/api/health") return json({ ok: true, service: "drift-attack-online" });
       if (url.pathname.startsWith("/api/leaderboard/") || url.pathname.startsWith("/api/replay/")) {
         return await handleLeaderboardRequest(request, env, url);
       }

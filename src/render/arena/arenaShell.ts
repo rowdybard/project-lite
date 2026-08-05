@@ -363,7 +363,7 @@ export function buildArenaShell(bounds: ArenaBounds): ArenaShellResult {
   sconces.instanceMatrix.needsUpdate = true;
   group.add(sconces);
 
-  const mainSign = createIndoorVenueSign("PROJECT LITE  //  DRIFT LAB", arenaPalette.accentColor);
+  const mainSign = createIndoorVenueSign("DRIFT ATTACK  //  DRIFT LAB", arenaPalette.accentColor);
   mainSign.position.set(bounds.centerX, 10.5, bounds.centerZ - innerDepth / 2 + 0.46);
   mainSign.rotation.y = Math.PI;
   const farSign = createIndoorVenueSign("DRIFT ATTACK  //  ARENA", 0xb74a36);

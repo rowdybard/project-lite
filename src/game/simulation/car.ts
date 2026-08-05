@@ -214,7 +214,7 @@ export function updateCar(
   car.throttleAxis = lerp(car.throttleAxis, input.throttle, smooth(tuning.throttleResponse, dt));
   car.brakeAxis = lerp(car.brakeAxis, input.brake, smooth(tuning.throttleResponse * 0.82, dt));
   car.handbrakeAmount = moveTowards(car.handbrakeAmount, input.handbrake ? 1 : 0, (input.handbrake ? 7.8 : 9.5) * dt);
-  car.offTrackAmount = moveTowards(car.offTrackAmount, onTrack ? 0 : 1, (onTrack ? 5.8 : 2.2) * dt);
+  car.offTrackAmount = moveTowards(car.offTrackAmount, onTrack ? 0 : 1, (onTrack ? 6.5 : 1.2) * dt);
 
   const forward = { x: Math.sin(car.heading), z: Math.cos(car.heading) };
   const right = { x: Math.cos(car.heading), z: -Math.sin(car.heading) };
@@ -576,7 +576,7 @@ export function updateCar(
   sideSpeed *= Math.max(0, 1 - stability.lateralScrubRate * dt);
   sideSpeed *= Math.max(0, 1 - stability.lateralRecoveryRate * (1 - poweredReleaseMemory * 0.82) * dt);
   if (!onTrack) {
-    const progressiveOffTrackDrag = tuning.offTrackDrag * (0.18 + car.offTrackAmount * 0.34);
+    const progressiveOffTrackDrag = tuning.offTrackDrag * (0.1 + car.offTrackAmount * 0.28);
     forwardSpeed *= Math.max(0, 1 - progressiveOffTrackDrag * dt);
     sideSpeed *= Math.max(0, 1 - progressiveOffTrackDrag * 1.28 * dt);
   }

@@ -13,7 +13,7 @@ const lerp = (from: number, to: number, amount: number) => from + (to - from) * 
 export const endlessTrackDefaults = {
   aheadDistance: 900,
   behindDistance: 320,
-  scoringShoulder: 2.5,
+  scoringShoulder: 5,
   runoffWidth: 3.5,
   guardrailHalfWidth: 0.28,
   guardrailEdgeOffset: 0.42,

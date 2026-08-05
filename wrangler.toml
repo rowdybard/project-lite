@@ -1,4 +1,4 @@
-name = "project-lite-online"
+name = "drift-attack-online"
 main = "worker/index.ts"
 compatibility_date = "2026-05-15"
 

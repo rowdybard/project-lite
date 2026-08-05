@@ -12,4 +12,4 @@ Source pages:
 - RoadLines001: https://ambientcg.com/a/RoadLines001
 - Rubber003: https://ambientcg.com/a/Rubber003
 
-Downloaded via the official ambientCG API for Project Lite local development.
+Downloaded via the official ambientCG API for Drift Attack local development.
