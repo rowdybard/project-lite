@@ -91,7 +91,8 @@ export function createAttachmentTuner(onChange: (attachments: ImportedCarAttachm
     });
 
     root.querySelector("[data-toggle]")!.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-copy], [data-copy-all]")) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-copy], [data-copy-all]")) return;
       collapsed = !collapsed;
       render();
     });

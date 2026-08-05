@@ -198,6 +198,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
       camera.updateProjectionMatrix();
     },
     update(dt: number) {
+      if (disposed || !isActive) return;
       yaw = lerp(yaw, targetYaw, 1 - Math.pow(0.0005, dt));
       pitch = lerp(pitch, targetPitch, 1 - Math.pow(0.0005, dt));
       distance = lerp(distance, targetDistance, 1 - Math.pow(0.0005, dt));
@@ -218,6 +219,7 @@ export function createGarageView(canvas: HTMLCanvasElement, renderer: WebGLRende
       camera.lookAt(0, 0.8, 0);
     },
     render() {
+      if (disposed) return;
       renderer.render(scene, camera);
     },
     dispose() {

@@ -18,6 +18,7 @@ export type PostPipeline = {
   render(dt: number): void;
   setSize(width: number, height: number): void;
   setBloomEnabled(enabled: boolean): void;
+  dispose(): void;
 };
 
 export function createPostPipeline(renderer: WebGLRenderer, scene: Scene, camera: Camera): PostPipeline {
@@ -45,6 +46,9 @@ export function createPostPipeline(renderer: WebGLRenderer, scene: Scene, camera
     },
     setBloomEnabled(enabled: boolean) {
       bloomPass.enabled = enabled;
+    },
+    dispose() {
+      composer.dispose();
     },
   };
 }

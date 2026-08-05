@@ -318,13 +318,23 @@ export function loadSavedPresets(): VfxPreset[] {
 export function savePreset(preset: VfxPreset): VfxPreset[] {
   const presets = loadSavedPresets().filter((item) => item.name !== preset.name);
   presets.push(preset);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+  } catch (error) {
+    throw new Error(error instanceof Error && error.name === "QuotaExceededError"
+      ? "Storage quota exceeded — delete a preset or use a smaller texture."
+      : "Could not save preset (storage unavailable).");
+  }
   return presets;
 }
 
 export function deletePreset(name: string): VfxPreset[] {
   const presets = loadSavedPresets().filter((item) => item.name !== name);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+  } catch {
+    // Deletion failed — return current list
+  }
   return presets;
 }
 

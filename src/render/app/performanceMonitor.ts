@@ -39,5 +39,9 @@ export function createPerformanceMonitor(renderer: WebGLRenderer) {
         droppedSeconds > 0 ? `-${Math.round(droppedSeconds * 1000)}ms` : "",
       ].filter(Boolean).join("  ");
     },
+    dispose() {
+      window.removeEventListener("keydown", onKeyDown);
+      root.remove();
+    },
   };
 }

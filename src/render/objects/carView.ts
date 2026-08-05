@@ -153,12 +153,18 @@ export function createCarView(scale = 1) {
   root.add(importedRoot);
 
   let stanceDrop = 0;
-  let activeImportedCarId = "";
-  let loadedImportedCarId = "";  // Track what's actually loaded, separate from what's requested
+  let requestedImportedCarId = "";   // What the user asked for
+  let loadingImportedCarId = "";     // What's currently being loaded
+  let loadedImportedCarId = "";      // What has successfully loaded
   let importedWheels: ImportedWheel[] = [];
   let importedReady: Promise<void> = Promise.resolve();
   let loadGeneration = 0;  // Monotonic token to reject stale async loads
   let activeImportedModel: ImportedCarModel | null = null;
+  // Latest customization snapshot — cloned on every applyCustomization call
+  // so async loads always apply the newest customization, not a stale reference
+  let latestCustomization: CarCustomization | null = null;
+  // Owned materials created for the current imported model (for safe disposal)
+  let ownedImportedMaterials: MeshStandardMaterial[] = [];
   let disposed = false;
   importedRoot.scale.setScalar(1.15);
   const paintMaterial = new MeshPhysicalMaterial({
@@ -407,57 +413,127 @@ export function createCarView(scale = 1) {
     brakeGlowMaterial.opacity = 0.32 + braking * 0.68;
   }
 
+  // Ownership-aware disposal: disposes only materials we created, never GLTF source materials.
+  function disposeImportedModel() {
+    if (!activeImportedModel) return;
+    // Dispose owned geometries (cloned via mergeVertices/clone)
+    activeImportedModel.root.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.geometry?.dispose();
+      }
+    });
+    // Dispose only owned materials — tracked explicitly, not guessed from material properties
+    for (const mat of ownedImportedMaterials) {
+      mat.dispose();
+    }
+    ownedImportedMaterials = [];
+    activeImportedModel = null;
+  }
+
+  // Dispose a rejected/superseded model using the same ownership-aware logic.
+  // For rejected models from createImportedCarModel, the geometries are owned (mergeVertices
+  // creates new ones) but materials are shared from the GLTF cache — so we only dispose
+  // geometries, not materials. Generated wheel materials ARE owned by the model.
+  function disposeRejectedModel(model: ImportedCarModel) {
+    model.root.traverse((child) => {
+      if (child instanceof Mesh) {
+        child.geometry?.dispose();
+      }
+    });
+    // Generated wheel materials are owned (tireMaterial, rimMaterial in importedCars.ts).
+    // We can identify them because they are MeshStandardMaterial/MeshPhysicalMaterial with
+    // no map and no normalMap — but this is fragile. Instead, we check if the material is
+    // referenced by the sceneCache's source scene. Since we can't easily check that, we
+    // only dispose materials that have no map, no normalMap, and no roughnessMap — these
+    // are the generated wheel materials. GLTF body materials always have at least a map.
+    // This is a best-effort approach for rejected models only.
+    const disposedMats = new Set<unknown>();
+    model.root.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const mat of materials) {
+        if (!mat || disposedMats.has(mat)) continue;
+        disposedMats.add(mat);
+        const m = mat as MeshStandardMaterial;
+        // Only dispose generated wheel materials (no textures at all)
+        if (!m.map && !m.normalMap && !m.roughnessMap && !m.metalnessMap && !m.aoMap) {
+          m.dispose();
+        }
+      }
+    });
+  }
+
   function applyImportedCustomization(customization: CarCustomization, model: ImportedCarModel) {
     const paintHex = paintColors[customization.paint] ?? paintColors.silver;
     const wheelHex = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
 
-    for (const mesh of model.bodyMeshes) {
-      const indices = model.bodyMaterialIndices.get(mesh) ?? [];
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const newMaterials = materials.map((m, i) => {
-        if (!indices.includes(i)) return m;
-        const source = m as MeshStandardMaterial;
-        const paint = new MeshPhysicalMaterial({
-          color: paintHex,
-          roughness: 0.34,
-          metalness: 0.08,
-          clearcoat: 0.72,
-          clearcoatRoughness: 0.2,
-          envMapIntensity: 0.82,
-          side: source.side,
+    // Create owned body-paint override materials once, then mutate in place.
+    // On subsequent calls, we update the existing owned materials instead of creating new ones.
+    const needsRebuild = ownedImportedMaterials.length === 0;
+
+    if (needsRebuild) {
+      // First time applying customization to this model — create owned override materials
+      for (const mesh of model.bodyMeshes) {
+        const indices = model.bodyMaterialIndices.get(mesh) ?? [];
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const newMaterials = materials.map((m, i) => {
+          if (!indices.includes(i)) return m;
+          const source = m as MeshStandardMaterial;
+          const paint = new MeshPhysicalMaterial({
+            color: paintHex,
+            roughness: 0.34,
+            metalness: 0.08,
+            clearcoat: 0.72,
+            clearcoatRoughness: 0.2,
+            envMapIntensity: 0.82,
+            side: source.side,
+          });
+          prepPaintMaterial(paint, paintHex);
+          paint.roughnessMap = source.roughnessMap;
+          paint.metalnessMap = source.metalnessMap;
+          paint.aoMap = source.aoMap;
+          paint.aoMapIntensity = source.aoMapIntensity;
+          paint.needsUpdate = true;
+          ownedImportedMaterials.push(paint);
+          return paint;
         });
-        prepPaintMaterial(paint, paintHex);
-        paint.roughnessMap = source.roughnessMap;
-        paint.metalnessMap = source.metalnessMap;
-        paint.aoMap = source.aoMap;
-        paint.aoMapIntensity = source.aoMapIntensity;
-        paint.needsUpdate = true;
-        return paint;
-      });
-      mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
-    }
-    for (const mesh of model.rimMeshes) {
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const newMaterials = materials.map((m) => {
-        const mat = m as MeshStandardMaterial;
-        if (!mat || !mat.color) return m;
-        const cloned = mat.clone() as MeshStandardMaterial;
-        cloned.map = null;
-        cloned.normalMap = null;
-        cloned.roughnessMap = null;
-        cloned.metalnessMap = null;
-        cloned.aoMap = null;
-        cloned.displacementMap = null;
-        cloned.bumpMap = null;
-        cloned.vertexColors = false;
-        cloned.flatShading = false;
-        cloned.color.setHex(wheelHex);
-        cloned.roughness = 0.5;
-        cloned.metalness = 0.08;
-        cloned.needsUpdate = true;
-        return cloned;
-      });
-      mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
+        mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
+      }
+      for (const mesh of model.rimMeshes) {
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const newMaterials = materials.map((m) => {
+          const mat = m as MeshStandardMaterial;
+          if (!mat || !mat.color) return m;
+          const cloned = mat.clone() as MeshStandardMaterial;
+          cloned.map = null;
+          cloned.normalMap = null;
+          cloned.roughnessMap = null;
+          cloned.metalnessMap = null;
+          cloned.aoMap = null;
+          cloned.displacementMap = null;
+          cloned.bumpMap = null;
+          cloned.vertexColors = false;
+          cloned.flatShading = false;
+          cloned.color.setHex(wheelHex);
+          cloned.roughness = 0.5;
+          cloned.metalness = 0.08;
+          cloned.needsUpdate = true;
+          ownedImportedMaterials.push(cloned);
+          return cloned;
+        });
+        mesh.material = Array.isArray(mesh.material) ? newMaterials : newMaterials[0];
+      }
+    } else {
+      // Subsequent customization changes — mutate owned materials in place, don't recreate
+      for (const mat of ownedImportedMaterials) {
+        if (mat instanceof MeshPhysicalMaterial && mat.clearcoat > 0) {
+          // Paint material — update color
+          prepPaintMaterial(mat, paintHex);
+        } else {
+          // Rim material — update color
+          mat.color.setHex(wheelHex);
+        }
+      }
     }
 
     stanceDrop = customization.stance === "low" ? 0.11 : customization.stance === "drift" ? 0.08 : 0;
@@ -493,45 +569,23 @@ export function createCarView(scale = 1) {
     underglowRight.intensity = customization.underglow === "off" ? 0 : 2.4;
   }
 
-  function disposeImportedModel() {
-    if (!activeImportedModel) return;
-    // Dispose owned geometries (cloned via mergeVertices/clone)
-    activeImportedModel.root.traverse((child) => {
-      if (child instanceof Mesh) {
-        child.geometry?.dispose();
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        for (const mat of materials) {
-          if (mat && (mat as MeshStandardMaterial).color) {
-            // Only dispose materials we created (paint/rim overrides).
-            // Source GLTF textures are shared through the cache — don't dispose them.
-            const m = mat as MeshStandardMaterial;
-            // Paint materials have clearcoat (MeshPhysicalMaterial with clearcoat > 0)
-            // Rim materials have map === null and normalMap === null (we stripped them)
-            if ((m instanceof MeshPhysicalMaterial && m.clearcoat > 0) ||
-                (m.map === null && m.normalMap === null && m.roughnessMap === null)) {
-              m.dispose();
-            }
-          }
-        }
-      }
-    });
-    activeImportedModel = null;
-  }
-
   function applyCustomization(customization: CarCustomization) {
+    // Clone the customization snapshot so async loads always apply the newest state
+    latestCustomization = { ...customization };
+
     if (isImportedCar(customization.selectedCar)) {
       const importId = customization.selectedCar;
-      activeImportedCarId = importId;
+      requestedImportedCarId = importId;
       bodyGroup.visible = false;
       for (const wheel of suspensionPivots) wheel.pivot.visible = false;
       importedRoot.visible = true;
 
       // Only reload the model when the car ID actually changes
       if (loadedImportedCarId !== importId) {
-        loadedImportedCarId = importId;
+        loadingImportedCarId = importId;
         const gen = ++loadGeneration;
 
-        // Dispose the previous model before loading a new one
+        // Dispose the previous model and its owned materials before loading a new one
         disposeImportedModel();
         importedRoot.clear();
         importedRoot.add(customParts);
@@ -540,18 +594,8 @@ export function createCarView(scale = 1) {
         importedReady = createImportedCarModel(importId).then((model) => {
           // Reject stale loads — even same-car loads are rejected by generation
           if (disposed || gen !== loadGeneration || !model) {
-            // Dispose the rejected model immediately
-            if (model) {
-              model.root.traverse((child) => {
-                if (child instanceof Mesh) {
-                  child.geometry?.dispose();
-                  const materials = Array.isArray(child.material) ? child.material : [child.material];
-                  for (const mat of materials) {
-                    if (mat && (mat as MeshStandardMaterial).dispose) (mat as MeshStandardMaterial).dispose();
-                  }
-                }
-              });
-            }
+            // Dispose the rejected model using ownership-aware disposal
+            if (model) disposeRejectedModel(model);
             return;
           }
 
@@ -564,12 +608,17 @@ export function createCarView(scale = 1) {
             }
           });
           importedWheels = model.wheels;
-          applyImportedCustomization(customization, model);
+          loadedImportedCarId = importId;
+          // Apply the latest customization snapshot (not the stale one from when load started)
+          if (latestCustomization) applyImportedCustomization(latestCustomization, model);
         }).catch(() => {
-          // Model load failed — fall back to procedural car
+          // Model load failed — install a properly initialized procedural fallback car
           if (gen === loadGeneration) {
-            activeImportedCarId = "";
+            requestedImportedCarId = "";
+            loadingImportedCarId = "";
             loadedImportedCarId = "";
+            activeImportedModel = null;
+            ownedImportedMaterials = [];
             importedRoot.visible = false;
             bodyGroup.visible = true;
             for (const wheel of suspensionPivots) wheel.pivot.visible = true;
@@ -577,24 +626,30 @@ export function createCarView(scale = 1) {
               customParts.removeFromParent();
               bodyGroup.add(customParts);
             }
+            // Apply customization to the procedural fallback so it's not untouched
+            if (latestCustomization) {
+              const fallbackCustomization = { ...latestCustomization, selectedCar: "lite-coupe" };
+              applyProceduralCustomization(fallbackCustomization);
+            }
           }
         });
       } else {
         // Same car — just update customization in place on the existing model
         if (activeImportedModel) {
-          applyImportedCustomization(customization, activeImportedModel);
+          applyImportedCustomization(latestCustomization!, activeImportedModel);
         }
       }
       return;
     }
 
-    // Switching from imported to procedural — dispose imported model
+    // Switching from imported to procedural — dispose imported model and owned materials
     if (activeImportedModel) {
       disposeImportedModel();
       importedRoot.clear();
       importedRoot.add(customParts);
     }
-    activeImportedCarId = "";
+    requestedImportedCarId = "";
+    loadingImportedCarId = "";
     loadedImportedCarId = "";
     importedWheels = [];
     importedReady = Promise.resolve();
@@ -607,6 +662,11 @@ export function createCarView(scale = 1) {
       bodyGroup.add(customParts);
     }
 
+    applyProceduralCustomization(customization);
+  }
+
+  // Extracted procedural customization logic so it can be called from the fallback path
+  function applyProceduralCustomization(customization: CarCustomization) {
     const profile = carProfiles[(customization.selectedCar as CarProfileId) in carProfiles ? (customization.selectedCar as CarProfileId) : "lite-coupe"];
     const paint = paintColors[customization.paint] ?? paintColors.silver;
     const wheel = wheelColors[customization.wheelColor] ?? wheelColors["dark-alloy"];
@@ -704,7 +764,7 @@ export function createCarView(scale = 1) {
       root.position.set(car.position.x, 0, car.position.z);
       root.rotation.y = car.heading;
       updateBrakeLights(car.brakeAxis);
-      if (activeImportedCarId) {
+      if (requestedImportedCarId) {
         importedRoot.position.y = 0.036 - stanceDrop;
         importedRoot.rotation.x = car.bodyPitch * 0.055;
         importedRoot.rotation.z = -car.bodyRoll * 0.055;
@@ -766,23 +826,36 @@ export function createCarView(scale = 1) {
     },
     applyCustomization,
     applyAttachments(att: ImportedCarAttachments) {
-      if (!activeImportedCarId) return;
+      if (!requestedImportedCarId) return;
       repositionKit(att);
     },
     getActiveImportedCarId() {
-      return activeImportedCarId;
+      return requestedImportedCarId;
     },
     whenReady() {
       return importedReady;
     },
+    // Expose loading state for the garage UI
+    isLoading() {
+      return loadingImportedCarId !== "" && loadedImportedCarId !== loadingImportedCarId;
+    },
+    hasLoadFailed() {
+      return requestedImportedCarId !== "" && loadedImportedCarId !== requestedImportedCarId && loadingImportedCarId === "";
+    },
     dispose() {
       disposed = true;
       loadGeneration++;  // Invalidate any pending async load
+      // Dispose imported model first (owned materials + geometries)
       disposeImportedModel();
       importedRoot.clear();
-      // Dispose procedural car geometries and materials
+      // Dispose procedural car geometries and materials — only traverse bodyGroup,
+      // not importedRoot, to avoid disposing shared GLTF source materials
       const allMeshes: Mesh[] = [];
-      root.traverse((child) => {
+      bodyGroup.traverse((child) => {
+        if (child instanceof Mesh) allMeshes.push(child);
+      });
+      // Also include contact shadow and light rig meshes (not in bodyGroup)
+      root.children.forEach((child) => {
         if (child instanceof Mesh) allMeshes.push(child);
       });
       for (const mesh of allMeshes) {

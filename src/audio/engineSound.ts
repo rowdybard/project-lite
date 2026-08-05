@@ -222,7 +222,31 @@ export function createEngineSound() {
   function suspend() {
     if (ctx && masterGain) {
       masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+      // Actually suspend the context after fading
+      setTimeout(() => { if (ctx?.state === "running") void ctx.suspend(); }, 100);
     }
+  }
+
+  function dispose() {
+    if (!ctx) return;
+    // Stop all oscillator and buffer-source nodes
+    try { fundamental?.stop(); } catch { /* already stopped */ }
+    try { harmonic2?.stop(); } catch { /* already stopped */ }
+    try { harmonic3?.stop(); } catch { /* already stopped */ }
+    try { harmonic4?.stop(); } catch { /* already stopped */ }
+    try { exhaustNoise?.stop(); } catch { /* already stopped */ }
+    try { intakeNoise?.stop(); } catch { /* already stopped */ }
+    try { tireNoise?.stop(); } catch { /* already stopped */ }
+    // Disconnect nodes
+    masterGain?.disconnect();
+    engineGain?.disconnect();
+    exhaustGain?.disconnect();
+    intakeGain?.disconnect();
+    tireGain?.disconnect();
+    // Close the AudioContext
+    void ctx.close();
+    ctx = null;
+    started = false;
   }
 
   return {
@@ -230,6 +254,7 @@ export function createEngineSound() {
     update,
     resume,
     suspend,
+    dispose,
     setMuted,
     get started() { return started; },
     get muted() { return muted; },

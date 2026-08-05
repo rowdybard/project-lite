@@ -52,7 +52,7 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
         <span>Build, tune, drive out</span>
         <label class="garage-profile">
           <small>Driver</small>
-          <input data-profile-name maxlength="18" value="${profile.name}" />
+          <input data-profile-name maxlength="18" />
         </label>
       </header>
       <aside class="garage-mode">
@@ -174,11 +174,24 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
     root.querySelector(".garage-back")!.addEventListener("click", () => callbacks.onBack());
 
     const profileName = root.querySelector<HTMLInputElement>("[data-profile-name]")!;
+    profileName.value = profile.name;  // Set via property, not innerHTML — XSS-safe
     profileName.addEventListener("change", () => callbacks.onProfileChange({ name: profileName.value }));
     profileName.addEventListener("blur", () => callbacks.onProfileChange({ name: profileName.value }));
   }
 
   render();
+
+  let loadingIndicator: HTMLElement | null = null;
+
+  function ensureLoadingIndicator() {
+    if (loadingIndicator && root.contains(loadingIndicator)) return loadingIndicator;
+    loadingIndicator = document.createElement("div");
+    loadingIndicator.className = "garage-loading";
+    loadingIndicator.hidden = true;
+    loadingIndicator.textContent = "Loading car…";
+    root.append(loadingIndicator);
+    return loadingIndicator;
+  }
 
   return {
     root,
@@ -192,6 +205,13 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
     },
     hide() {
       root.hidden = true;
+    },
+    setLoading(active: boolean) {
+      const indicator = ensureLoadingIndicator();
+      indicator.hidden = !active;
+    },
+    dispose() {
+      root.remove();
     },
   };
 }

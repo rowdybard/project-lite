@@ -1684,6 +1684,30 @@ canvas {
   font-size: 15px;
 }
 
+.garage-loading {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 20px;
+  background: #1c2a35;
+  border: 1px solid #d0a63e;
+  border-radius: 6px;
+  color: #d0a63e;
+  font-size: 14px;
+  z-index: 500;
+  animation: garage-loading-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.garage-loading[hidden] {
+  display: none;
+}
+
+@keyframes garage-loading-pulse {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
 .garage-panel {
   grid-column: 3;
   grid-row: 1 / span 3;
@@ -1745,6 +1769,50 @@ canvas {
   color: #fff;
   font-size: 20px;
   font-weight: 700;
+}
+
+.context-lost-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-items: center;
+  background: rgb(7 10 14 / 92%);
+  color: #eaf2f7;
+}
+
+.context-lost-overlay__card {
+  text-align: center;
+  padding: 36px 48px;
+  max-width: 440px;
+}
+
+.context-lost-overlay__card h1 {
+  font-size: 22px;
+  margin: 0 0 14px;
+  color: #d0a63e;
+}
+
+.context-lost-overlay__card p {
+  font-size: 15px;
+  line-height: 1.5;
+  color: #a8b8c4;
+  margin: 0 0 24px;
+}
+
+.context-lost-overlay__card button {
+  padding: 10px 32px;
+  border: 1px solid #d0a63e;
+  border-radius: 6px;
+  background: #1c2a35;
+  color: #d0a63e;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.context-lost-overlay__card button:hover {
+  background: #243340;
 }
 
 @media (max-width: 720px) {
@@ -2502,6 +2570,32 @@ canvas {
   content: "";
   background: #d0a63e;
   animation: boot-load 1.1s ease-in-out infinite alternate;
+}
+
+.loading-overlay span[hidden] {
+  display: none;
+}
+
+.loading-overlay__error-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.loading-overlay__error-actions button {
+  padding: 8px 22px;
+  border: 1px solid #3a4a5a;
+  border-radius: 6px;
+  background: #1c2a35;
+  color: #eaf2f7;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.loading-overlay__error-actions button:hover {
+  background: #243340;
+  border-color: #d0a63e;
 }
 
 .session-card--endless {

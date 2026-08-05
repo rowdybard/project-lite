@@ -100,7 +100,9 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     canvas.addEventListener("pointerdown", (event) => {
       dragging = true;
       lastPointer = { x: event.clientX, y: event.clientY };
-      canvas.setPointerCapture(event.pointerId);
+      if (!canvas.hasPointerCapture(event.pointerId)) {
+        canvas.setPointerCapture(event.pointerId);
+      }
     });
     canvas.addEventListener("pointermove", (event) => {
       if (!dragging) return;
@@ -108,10 +110,15 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
       orbitPitch = clamp(orbitPitch + (event.clientY - lastPointer.y) * 0.005, -0.1, 1.35);
       lastPointer = { x: event.clientX, y: event.clientY };
     });
-    canvas.addEventListener("pointerup", (event) => {
+    const releaseDrag = (event: PointerEvent) => {
       dragging = false;
-      canvas.releasePointerCapture(event.pointerId);
-    });
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+    };
+    canvas.addEventListener("pointerup", releaseDrag);
+    canvas.addEventListener("pointercancel", releaseDrag);
+    canvas.addEventListener("lostpointercapture", () => { dragging = false; });
     canvas.addEventListener(
       "wheel",
       (event) => {
@@ -136,7 +143,15 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   }
 
   function frame(now: number) {
-    if (root.hidden) return;
+    if (!isOpen || root.hidden || disposed) {
+      rafId = 0;
+      return;
+    }
+    // Pause RAF while document is hidden — resume only when editor is still open
+    if (document.hidden) {
+      rafId = 0;
+      return;
+    }
     rafId = requestAnimationFrame(frame);
     const dt = clamp((now - lastFrame) / 1000, 0.001, 0.05);
     lastFrame = now;
@@ -149,6 +164,14 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     }
     if (renderer && previewScene && previewCamera) renderer.render(previewScene, previewCamera);
   }
+
+  // Resume VFX RAF when document becomes visible again (only if editor is still open)
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && isOpen && !disposed && rafId === 0) {
+      lastFrame = performance.now();
+      rafId = requestAnimationFrame(frame);
+    }
+  });
 
   function disposeSystem() {
     if (system) {
@@ -669,13 +692,21 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     };
     actions.append(
       button("Save", () => {
-        savedPresets = savePreset(JSON.parse(JSON.stringify(state)) as VfxPreset);
-        setStatus(`Saved "${state.name}" — persists across reloads.`);
+        try {
+          savedPresets = savePreset(JSON.parse(JSON.stringify(state)) as VfxPreset);
+          setStatus(`Saved "${state.name}" — persists across reloads.`);
+        } catch (error) {
+          setStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed (storage quota?).");
+        }
         renderControls();
       }),
       button("Delete", () => {
-        savedPresets = deletePreset(state.name);
-        setStatus(`Deleted "${state.name}" (if it was saved).`);
+        try {
+          savedPresets = deletePreset(state.name);
+          setStatus(`Deleted "${state.name}" (if it was saved).`);
+        } catch {
+          setStatus("Delete failed (storage unavailable?).");
+        }
         renderControls();
       }),
       button("Export", () => {
@@ -809,6 +840,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
 
   function show() {
     if (disposed) return;
+    if (isOpen) return;  // Idempotent — don't open twice
     isOpen = true;
     root.hidden = false;
     ensurePreview();
@@ -819,6 +851,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   }
 
   function hide() {
+    if (!isOpen) return;
     isOpen = false;
     root.hidden = true;
     applyToken += 1;
@@ -870,5 +903,5 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     root.remove();
   }
 
-  return { root, show, hide, dispose, get isOpen() { return isOpen; } };
+  return { root, show, hide, dispose, get isOpen() { return isOpen; }, setTireSmokeStatus: setStatus };
 }

@@ -144,14 +144,14 @@ async function createMapEditOverlays(edits: MapEditStamp[]) {
   return group;
 }
 
-export async function createTrackView(scene: Scene, track: TrackConfig): Promise<TrackViewResult> {
+export async function createTrackView(scene: Scene | null, track: TrackConfig): Promise<TrackViewResult> {
   const indoor = isIndoorDriftVenue(track);
-  configureTrackMood(scene, indoor);
+  if (scene) configureTrackMood(scene, indoor);
   const root = new Group();
   const imported = await loadGltf(track.model);
   if (imported) {
     root.add(imported);
-    scene.add(root);
+    if (scene) scene.add(root);
     return { root, coneMeshes: [], cornerMarkers: [] };
   }
 
@@ -184,11 +184,11 @@ export async function createTrackView(scene: Scene, track: TrackConfig): Promise
     const { group, coneMeshes, cornerMarkers } = await createRoadFromPath(track, indoor);
     optimizeTrackShadows(group);
     root.add(group);
-    scene.add(root);
+    if (scene) scene.add(root);
     return { root, coneMeshes, cornerMarkers, arena };
   } else {
     root.add(createRingRoad(track));
-    scene.add(root);
+    if (scene) scene.add(root);
     return { root, coneMeshes: [], cornerMarkers: [], arena };
   }
 

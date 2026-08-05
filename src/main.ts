@@ -7,6 +7,7 @@ import {
   isPlayableMode,
   loadCarCustomization,
   loadCustomization,
+  mapEditorEnabled,
   paintColors,
   saveCustomization,
   type CarCustomization,
@@ -34,7 +35,7 @@ import { createArenaLightRig, type ArenaLightRig } from "./render/arena/lightRig
 import { bakeArenaEnvironment } from "./render/arena/environmentBake";
 import { createPostPipeline, type PostPipeline } from "./render/post/postPipeline";
 import { createCarView } from "./render/objects/carView";
-import { createTireSmoke, saveTireSmokePresetName, clearTireSmokePresetName, resolveTireSmokePreset } from "./render/objects/tireSmokeGpu";
+import { createTireSmoke, saveTireSmokePresetName, clearTireSmokePresetName, resolveTireSmokePreset, type ApplyPresetResult } from "./render/objects/tireSmokeGpu";
 import { createTireTracks } from "./render/objects/tireTracks";
 import { createTrackView, updateCornerMarkerFlex, type TrackViewResult } from "./render/objects/trackView";
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
@@ -46,7 +47,6 @@ import { createFullscreenToggle } from "./ui/fullscreenToggle";
 import { createEndlessResultsOverlay, createHud, createResultsOverlay } from "./ui/hud";
 import { createOnlineHud, type OnlineHudPlayer } from "./ui/onlineHud";
 import { createOnlineMatchUi } from "./ui/onlineMatchUi";
-import { createAttachmentTuner } from "./ui/attachmentTuner";
 import { createVfxEditor } from "./ui/vfxEditor";
 import { isImportedCar } from "./render/objects/importedCars";
 import { createGarageView } from "./render/garage/garageView";
@@ -62,7 +62,6 @@ import {
   type OnlinePlayerState,
   type OnlineRoomState,
 } from "./net/protocol";
-import { createMapEditor } from "./game/editor/mapEditor";
 import { createEndlessTrack } from "./game/endless/endlessTrack";
 import { createObstacleManager } from "./game/endless/endlessObstacles";
 import { createEndlessState } from "./game/endless/endlessState";
@@ -256,18 +255,26 @@ async function boot() {
 
   const garageView = createGarageView(canvas, renderer, customization);
 
-  const attachmentTuner = createAttachmentTuner((att) => {
-    carView.applyAttachments(att);
-  });
+  // Dormant systems: only instantiated when explicitly enabled via dev flags.
+  // In production builds, __DEV_SYSTEMS__ is false so these are never created.
+  const attachmentTunerEnabled = __DEV_SYSTEMS__ && new URLSearchParams(window.location.search).has("kitTuner");
+  type AttachmentTuner = Awaited<ReturnType<typeof import("./ui/attachmentTuner").createAttachmentTuner>>;
+  let attachmentTuner: AttachmentTuner | null = null;
+  if (attachmentTunerEnabled) {
+    const { createAttachmentTuner } = await import("./ui/attachmentTuner");
+    attachmentTuner = createAttachmentTuner((att) => {
+      carView.applyAttachments(att);
+    });
+    if (isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
+  }
   const runLength = 90;
   const fixedStepRunner = createFixedStepRunner(1 / 120, 0.1);
   const handlingProfile = query.get("handling") === "classic" ? "classic" : "polished";
   let lastFixedSteps = 0;
   let lastDroppedSeconds = 0;
   let sessionEndsAt = performance.now() + runLength * 1000;
-  const attachmentTunerEnabled = __DEV_SYSTEMS__ && new URLSearchParams(window.location.search).has("kitTuner");
-  if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
   let appState: AppState = "garage";
+  let vfxLabOpen = false;
   let activeMode: ModeId = customization.selectedMode;
   let endlessTrack: ReturnType<typeof createEndlessTrack> | null = null;
   let endlessObstacles: ReturnType<typeof createObstacleManager> | null = null;
@@ -463,56 +470,124 @@ async function boot() {
     });
   };
 
+  // --- Atomic track transition controller ---
+  // Only one transition may commit at a time. Each request gets a monotonic
+  // generation ID. The candidate is built without mutating activeTrack, trackView,
+  // colliders, lighting, cone references, or corner-marker references. The current
+  // valid track is retained until the candidate loads completely. A failed candidate
+  // leaves the existing track intact. A superseded candidate is disposed without commit.
+  let trackGeneration = 0;
   let trackTransition: Promise<void> = Promise.resolve();
-  const switchTrack = async (nextTrack: TrackConfig) => {
-    // Serialize track transitions — only one at a time, in order
+
+  const disposeTrackView = (view: TrackViewResult) => {
+    gameScene.remove(view.root);
+    view.root.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      child.geometry?.dispose();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) material.dispose();
+    });
+  };
+
+  const buildCandidate = async (track: TrackConfig): Promise<{
+    view: TrackViewResult;
+    endlessView: ReturnType<typeof createEndlessTrackView> | null;
+  }> => {
+    // Build without attaching to the active scene — createTrackView(null, ...) skips scene mutation
+    if (track.id === "endless") {
+      const root = new Group();
+      return { view: { root, coneMeshes: [], cornerMarkers: [] }, endlessView: null };
+    }
+    const view = await createTrackView(null, track);
+    return { view, endlessView: null };
+  };
+
+  const commitTrack = (track: TrackConfig, candidate: { view: TrackViewResult; endlessView: ReturnType<typeof createEndlessTrackView> | null }) => {
+    // Dispose the old track view and endless view
+    endlessTrackView?.dispose();
+    endlessTrackView = null;
+    disposeTrackView(trackView);
+
+    // Commit the new track as one operation
+    activeTrack = track;
+    trackView = candidate.view;
+    gameScene.add(trackView.root);
+
+    // Rebuild lighting, colliders, and references
+    if (track.id === "endless") {
+      // Endless track view is created later in resetEvent
+    }
+    setupArenaLighting();
+    colliders = createTrackColliders(activeTrack);
+    if (new URLSearchParams(window.location.search).has("debugColliders")) {
+      visualizeBarriers(gameScene, colliders.barriers);
+    }
+    coneMeshes = trackView.coneMeshes;
+    cornerMarkers = trackView.cornerMarkers;
+    onlineGhosts.setTrack(activeTrack);
+    practiceZoneIndex = 0;
+  };
+
+  const switchTrack = async (nextTrack: TrackConfig): Promise<void> => {
+    const gen = ++trackGeneration;
+    // Serialize transitions — chain so only one builds at a time
     trackTransition = trackTransition.then(async () => {
-      if (activeTrack.id === nextTrack.id) return;
-      endlessTrackView?.dispose();
-      endlessTrackView = null;
-      gameScene.remove(trackView.root);
-      disposeSceneRoot(trackView.root);
-      activeTrack = nextTrack;
-      if (activeTrack.id === "endless") {
-        const root = new Group();
-        gameScene.add(root);
-        trackView = { root, coneMeshes: [], cornerMarkers: [] };
-      } else {
-        trackView = await createTrackView(gameScene, activeTrack);
+      // A failed reload must not make a later same-track request return early.
+      // We compare against the *actual* active track, not a stale ID.
+      if (activeTrack.id === nextTrack.id && trackView.root.parent === gameScene) return;
+
+      let candidate: { view: TrackViewResult; endlessView: ReturnType<typeof createEndlessTrackView> | null };
+      try {
+        candidate = await buildCandidate(nextTrack);
+      } catch (error) {
+        // Candidate failed — retain existing track and all associated state.
+        // Propagate the error so callers can show retry/back UI.
+        throw error;
       }
-      setupArenaLighting();
-      colliders = createTrackColliders(activeTrack);
-      if (new URLSearchParams(window.location.search).has("debugColliders")) {
-        visualizeBarriers(gameScene, colliders.barriers);
+
+      // If superseded by a newer request, dispose the candidate without committing
+      if (gen !== trackGeneration) {
+        disposeTrackView(candidate.view);
+        candidate.endlessView?.dispose();
+        return;
       }
-      coneMeshes = trackView.coneMeshes;
-      cornerMarkers = trackView.cornerMarkers;
-      onlineGhosts.setTrack(activeTrack);
-      practiceZoneIndex = 0;
-    }).catch((error) => {
-      console.error("switchTrack failed:", error);
+
+      commitTrack(nextTrack, candidate);
     });
     await trackTransition;
   };
 
-  const reloadActiveTrack = async () => {
+  const reloadActiveTrack = async (): Promise<void> => {
+    const gen = ++trackGeneration;
+    const targetTrack = activeTrack;
     trackTransition = trackTransition.then(async () => {
-      if (activeTrack.id === "endless") return;
-      gameScene.remove(trackView.root);
-      disposeSceneRoot(trackView.root);
-      trackView = await createTrackView(gameScene, activeTrack);
-      setupArenaLighting();
-      colliders = createTrackColliders(activeTrack);
-      coneMeshes = trackView.coneMeshes;
-      cornerMarkers = trackView.cornerMarkers;
-      onlineGhosts.setTrack(activeTrack);
-    }).catch((error) => {
-      console.error("reloadActiveTrack failed:", error);
+      if (targetTrack.id === "endless") return;
+
+      let candidate: { view: TrackViewResult; endlessView: ReturnType<typeof createEndlessTrackView> | null };
+      try {
+        candidate = await buildCandidate(targetTrack);
+      } catch (error) {
+        throw error;
+      }
+
+      if (gen !== trackGeneration) {
+        disposeTrackView(candidate.view);
+        candidate.endlessView?.dispose();
+        return;
+      }
+
+      commitTrack(targetTrack, candidate);
     });
     await trackTransition;
   };
 
-  const mapEditor = createMapEditor(canvas, gameCamera, gameScene, { onReloadTrack: reloadActiveTrack });
+  // Map editor: only instantiated when enabled via dev flag
+  type MapEditor = Awaited<ReturnType<typeof import("./game/editor/mapEditor").createMapEditor>>;
+  let mapEditor: MapEditor | null = null;
+  if (mapEditorEnabled) {
+    const { createMapEditor } = await import("./game/editor/mapEditor");
+    mapEditor = createMapEditor(canvas, gameCamera, gameScene, { onReloadTrack: reloadActiveTrack });
+  }
 
   const resetEvent = () => {
     resetCar(car, activeTrack, getPracticeSpawn());
@@ -590,7 +665,7 @@ async function boot() {
     replaySession = null;
     hud.root.hidden = true;
     onlineHud.hide();
-    mapEditor.hide();
+    mapEditor?.hide();
     onlineMatchUi.hideAll();
     onlineClient.disconnect();
     onlineRoom = null;
@@ -611,15 +686,32 @@ async function boot() {
     garageUi.hide();
     garageView.applyCustomization(customization);
     mainMenu.show();
-    mainMenu.setPlayEnabled(true);
-    if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
-    else attachmentTuner.hide();
+    // Do not enable mode buttons until Practice Grounds has loaded successfully
+    mainMenu.setPlayEnabled(false);
+    if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
+    else attachmentTuner?.hide();
     void switchTrack(practiceTrack).then(() => {
       activeMode = "free-drive";
       practiceZoneIndex = 0;
       resetEvent();
       setHudCarName();
       bootOverlay.classList.add("is-ready");
+      mainMenu.setPlayEnabled(true);
+    }).catch((error) => {
+      console.error("Practice Grounds failed to load:", error);
+      loadingOverlay.showError(
+        `Could not load Practice Grounds. ${error instanceof Error ? error.message : String(error)}`,
+        () => void switchTrack(practiceTrack).then(() => {
+          activeMode = "free-drive";
+          practiceZoneIndex = 0;
+          resetEvent();
+          setHudCarName();
+          bootOverlay.classList.add("is-ready");
+          mainMenu.setPlayEnabled(true);
+          loadingOverlay.hide();
+        }).catch(() => window.location.reload()),
+        () => window.location.reload(),
+      );
     });
   };
 
@@ -669,7 +761,7 @@ async function boot() {
       replayOverlay.hide();
       garageUi.hide();
       mainMenu.hide();
-      attachmentTuner.hide();
+      attachmentTuner?.hide();
       resetEvent();
       if (activeMode !== "online-lobby") clearActiveQueuePad();
       setHudCarName();
@@ -681,9 +773,9 @@ async function boot() {
         tireTracks.root.visible = false;
         tireSmoke.root.visible = false;
         onlineGhosts.root.visible = false;
-        mapEditor.show(activeTrack);
+        mapEditor?.show(activeTrack);
       } else {
-        mapEditor.hide();
+        mapEditor?.hide();
         carView.root.visible = true;
         tireTracks.root.visible = true;
         tireSmoke.root.visible = true;
@@ -702,15 +794,22 @@ async function boot() {
       canvas.focus();
     } catch (error) {
       console.error("Could not start event", error);
-      loadingOverlay.hide();
-      appState = "garage";
-      hud.root.hidden = true;
-      garageUi.hide();
-      mainMenu.show();
-      mainMenu.setPlayEnabled(true);
+      // Show retry/back instead of silently returning to menu
+      loadingOverlay.showError(
+        `Could not load ${modeLabel(activeMode)}. ${error instanceof Error ? error.message : String(error)}`,
+        () => { startEventPending = false; void startEvent(); },
+        () => {
+          startEventPending = false;
+          loadingOverlay.hide();
+          appState = "garage";
+          hud.root.hidden = true;
+          garageUi.hide();
+          mainMenu.show();
+          mainMenu.setPlayEnabled(true);
+        },
+      );
     } finally {
       startEventPending = false;
-      mainMenu.setPlayEnabled(true);
     }
   };
 
@@ -731,8 +830,8 @@ async function boot() {
       results.hide();
       hud.root.hidden = false;
       garageUi.hide();
-      attachmentTuner.hide();
-      mapEditor.hide();
+      attachmentTuner?.hide();
+      mapEditor?.hide();
       carView.root.visible = true;
       tireTracks.root.visible = true;
       tireSmoke.root.visible = true;
@@ -928,19 +1027,27 @@ async function boot() {
 
   const vfxEditor = createVfxEditor({
     onClose: () => {
-      // Re-enable garage input when VFX Lab closes
-      if (appState === "garage") garageView.setActive(true);
+      // Re-enable garage rendering and input when VFX Lab closes
+      if (appState === "garage") {
+        garageView.setActive(true);
+        vfxLabOpen = false;
+      }
     },
     onApplyTireSmoke: (preset) => {
-      // Don't save the name until apply succeeds — the applyPreset method
-      // handles async races internally via generation tokens
-      void tireSmoke.applyPreset(preset).then(() => {
-        saveTireSmokePresetName(preset.name);
+      // Save the preset name only when apply actually succeeds
+      void tireSmoke.applyPreset(preset).then((result: ApplyPresetResult) => {
+        if (result.applied) {
+          saveTireSmokePresetName(preset.name);
+          vfxEditor.setTireSmokeStatus(`"${preset.name}" applied as tire smoke.`);
+        } else {
+          vfxEditor.setTireSmokeStatus(`Could not apply "${preset.name}": ${result.reason}`);
+        }
       });
     },
     onClearTireSmoke: () => {
       clearTireSmokePresetName();
       tireSmoke.clearPreset();
+      vfxEditor.setTireSmokeStatus("Tire smoke reset to default.");
     },
   });
   const replayOverlay = createReplayOverlay(() => exitReplay());
@@ -964,8 +1071,13 @@ async function boot() {
       carView.applyCustomization(customization);
       garageView.applyCustomization(customization);
       syncPaintTint(customization.paint);
-      if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
-      else attachmentTuner.hide();
+      if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
+      else attachmentTuner?.hide();
+      // Show loading indicator while imported car loads
+      garageUi.setLoading(carView.isLoading());
+      void carView.whenReady().then(() => {
+        garageUi.setLoading(false);
+      });
     },
     onProfileChange(profile) {
       playerProfile = { name: profile.name.trim().slice(0, 18) || "Driver" };
@@ -975,6 +1087,7 @@ async function boot() {
     onStart: startEvent,
     onOpenVfxLab: () => {
       garageView.setActive(false);
+      vfxLabOpen = true;
       vfxEditor.show();
     },
     onBack: () => showMainMenu(),
@@ -1001,34 +1114,84 @@ async function boot() {
   window.addEventListener("resize", onResize);
   onResize();
 
-  let rafEnabled = true;
+  // --- Single-loop RAF controller ---
+  // The application owns exactly one main RAF. Explicit state prevents
+  // visibility/context-loss/teardown from creating competing RAF chains.
+  let rafId: number | null = null;
+  let disposed = false;
+  let documentHidden = false;
+  let contextLost = false;
+  let hiddenStartTime = 0;
+
+  function startMainLoop() {
+    if (rafId !== null) return;  // Already scheduled
+    if (disposed || documentHidden || contextLost) return;
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function stopMainLoop() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
 
   renderer.domElement.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
-    document.body.classList.add("context-lost");
-    // Stop the RAF loop — rendering with a lost context throws
-    rafEnabled = false;
+    contextLost = true;
+    stopMainLoop();
+    resetInputState();
+    engineSound.suspend();
+    // Show a real DOM overlay (not just a CSS pseudo-element)
+    const overlay = document.createElement("div");
+    overlay.className = "context-lost-overlay";
+    overlay.innerHTML = `
+      <div class="context-lost-overlay__card">
+        <h1>Drift Attack lost its graphics context</h1>
+        <p>The browser reclaimed the GPU. This can happen when the device runs low on memory or after sleep/wake.</p>
+        <button type="button" data-reload>Reload</button>
+      </div>
+    `;
+    document.body.append(overlay);
+    overlay.querySelector<HTMLButtonElement>("[data-reload]")!.addEventListener("click", () => window.location.reload());
   });
 
   renderer.domElement.addEventListener("webglcontextrestored", () => {
     // The simplest reliable recovery is a full reload — Three.js internal state
     // (programs, geometries, textures) is too complex to rebuild piecemeal.
-    document.body.classList.remove("context-lost");
     window.location.reload();
   });
 
-  // Pause expensive work (RAF + audio) when the tab is hidden
+  // Pause expensive work (RAF + audio) when the tab is hidden.
+  // Also pause Drift Attack timing so the player's 90-second run is not consumed.
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      rafEnabled = false;
+      documentHidden = true;
+      hiddenStartTime = performance.now();
+      stopMainLoop();
+      resetInputState();
       engineSound.suspend();
     } else {
-      rafEnabled = true;
+      // A visibility event must not restart rendering while context is lost or after teardown
+      if (disposed || contextLost) return;
+      documentHidden = false;
+      // Move sessionEndsAt forward by the hidden duration
+      if (hiddenStartTime > 0) {
+        const hiddenDuration = performance.now() - hiddenStartTime;
+        sessionEndsAt += hiddenDuration;
+        hiddenStartTime = 0;
+      }
+      // Reset the Three.js timer cleanly on resume
       timer.update(performance.now());
       timer.getDelta();  // Reset delta to avoid a huge jump
       if (appState === "event" || appState === "replay") engineSound.resume();
-      requestAnimationFrame(frame);
+      startMainLoop();
     }
+  });
+
+  // Clear keyboard state on window blur (alt-tab, focus loss)
+  window.addEventListener("blur", () => {
+    resetInputState();
   });
 
   const engineSound = createEngineSound();
@@ -1238,7 +1401,7 @@ async function boot() {
         showGarage();
         return;
       }
-      mapEditor.update(dt);
+      mapEditor?.update(dt);
       renderGameScene(dt);
       return;
     }
@@ -1564,7 +1727,10 @@ async function boot() {
 
   let prevAppState: AppState = appState;
   function frame(timestamp?: number) {
-    if (!rafEnabled) return;
+    // Clear the RAF ID before deciding whether to schedule the next frame
+    rafId = null;
+    if (disposed || documentHidden || contextLost) return;
+
     timer.update(timestamp);
     const dt = Math.min(timer.getDelta(), 0.25);
 
@@ -1577,8 +1743,11 @@ async function boot() {
     if (appState === "garage") {
       lastFixedSteps = 0;
       lastDroppedSeconds = 0;
-      garageView.update(dt);
-      garageView.render();
+      // Skip garage rendering while VFX Lab is open — it has its own renderer
+      if (!vfxLabOpen) {
+        garageView.update(dt);
+        garageView.render();
+      }
     } else if (appState === "event") {
       updateEvent(dt);
     } else if (appState === "replay") {
@@ -1589,29 +1758,76 @@ async function boot() {
 
     performanceMonitor.update(dt, lastFixedSteps, lastDroppedSeconds);
 
-    requestAnimationFrame(frame);
+    // Schedule the next frame only if we're still running
+    if (!disposed && !documentHidden && !contextLost) {
+      rafId = requestAnimationFrame(frame);
+    }
   }
 
-  requestAnimationFrame(frame);
+  startMainLoop();
 
-  // Real teardown path — disposes GPU resources and stops the RAF loop
+  // Helper: dispose any object that has a dispose method or a removable root
+  function disposeSafe(obj: { dispose?: () => void; root?: HTMLElement | unknown }) {
+    if (typeof obj?.dispose === "function") obj.dispose();
+    else if (obj?.root instanceof HTMLElement) obj.root.remove();
+  }
+
+  // Real teardown path — disposes GPU resources and stops the RAF loop.
+  // Idempotent: safe to call multiple times.
   function teardown() {
-    rafEnabled = false;
-    engineSound.suspend();
-    vfxEditor.dispose();
-    garageView.dispose();
+    if (disposed) return;
+    disposed = true;
+    stopMainLoop();
+    resetInputState();
+    // Audio
+    engineSound.dispose?.();
+    // UI overlays — remove from DOM (dispose if available, otherwise just remove root)
+    disposeSafe(vfxEditor);
+    disposeSafe(garageView);
+    disposeSafe(garageUi);
+    disposeSafe(loadingOverlay);
+    disposeSafe(mainMenu);
+    disposeSafe(results);
+    disposeSafe(endlessResults);
+    disposeSafe(leaderboardUi);
+    disposeSafe(replayOverlay);
+    disposeSafe(attachmentTuner ?? {});
+    disposeSafe(onlineHud);
+    disposeSafe(onlineMatchUi);
+    disposeSafe(hud);
+    // 3D systems
     carView.dispose();
+    disposeSafe(replayCarView);
+    tireTracks.dispose();
     tireSmoke.dispose();
+    disposeSafe(onlineGhosts);
     endlessTrackView?.dispose();
-    endlessObstacleView?.root.parent?.remove(endlessObstacleView.root);
-    disposeSceneRoot(trackView.root);
+    disposeSafe(endlessObstacleView ?? {});
+    postPipeline?.dispose();
+    disposeSafe(mapEditor ?? {});
+    performanceMonitor.dispose();
+    // Scene resources
+    disposeTrackView(trackView);
     disposeSceneRoot(gameScene);
     arenaRig?.dispose();
     arenaEnv?.dispose();
+    defaultSceneEnvironment?.dispose();
+    // Renderer
     renderer.dispose();
   }
 
-  window.addEventListener("pagehide", teardown, { once: true });
+  // bfcache-safe: don't run destructive teardown for a page hide that will be persisted.
+  // Instead reload cleanly on a persisted pageshow.
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) return;  // bfcache — preserve the page
+    teardown();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      // Returning from bfcache — reload cleanly since GPU state may be invalid
+      window.location.reload();
+    }
+  });
 }
 
 boot().catch((error) => {

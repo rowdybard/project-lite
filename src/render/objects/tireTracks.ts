@@ -243,5 +243,10 @@ export function createTireTracks() {
       }
       rebuild();
     },
+    dispose() {
+      geometry.dispose();
+      material.dispose();
+      treadTexture.dispose();
+    },
   };
 }
