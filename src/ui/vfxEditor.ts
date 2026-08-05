@@ -48,7 +48,7 @@ function defaultPreset(): VfxPreset {
   return JSON.parse(JSON.stringify(builtinPresets[0])) as VfxPreset;
 }
 
-export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
+export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSmoke?: (preset: VfxPreset) => void; onClearTireSmoke?: () => void } = {}) {
   const root = document.createElement("div");
   root.className = "vfx-editor";
   root.hidden = true;
@@ -720,6 +720,18 @@ export function createVfxEditor(callbacks: { onClose?: () => void } = {}) {
         }
         applyPreset(preset);
         setStatus(`Loaded "${preset.name}" from share string.`);
+      }),
+      button("Apply as Tire Smoke", () => {
+        if (callbacks.onApplyTireSmoke) {
+          callbacks.onApplyTireSmoke(JSON.parse(JSON.stringify(state)) as VfxPreset);
+          setStatus(`"${state.name}" is now your tire smoke. Save the preset first to keep it across reloads.`);
+        }
+      }),
+      button("Reset Tire Smoke", () => {
+        if (callbacks.onClearTireSmoke) {
+          callbacks.onClearTireSmoke();
+          setStatus("Tire smoke reset to default.");
+        }
       }),
     );
     presetSection.append(presetSelect, nameRow, actions);

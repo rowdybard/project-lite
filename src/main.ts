@@ -33,7 +33,7 @@ import { createArenaLightRig, type ArenaLightRig } from "./render/arena/lightRig
 import { bakeArenaEnvironment } from "./render/arena/environmentBake";
 import { createPostPipeline, type PostPipeline } from "./render/post/postPipeline";
 import { createCarView } from "./render/objects/carView";
-import { createTireSmoke } from "./render/objects/tireSmokeGpu";
+import { createTireSmoke, saveTireSmokePresetName, clearTireSmokePresetName, resolveTireSmokePreset } from "./render/objects/tireSmokeGpu";
 import { createTireTracks } from "./render/objects/tireTracks";
 import { createTrackView, updateCornerMarkerFlex, type TrackViewResult } from "./render/objects/trackView";
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
@@ -48,6 +48,7 @@ import { createOnlineMatchUi } from "./ui/onlineMatchUi";
 import { createAttachmentTuner } from "./ui/attachmentTuner";
 import { createVfxEditor } from "./ui/vfxEditor";
 import { isImportedCar } from "./render/objects/importedCars";
+import { createGarageView } from "./render/garage/garageView";
 import { createEngineSound } from "./audio/engineSound";
 import { createTrackColliders, updateTrackCollision, type Barrier } from "./game/simulation/trackCollision";
 import type { Cone } from "./game/simulation/trackCollision";
@@ -202,6 +203,10 @@ async function boot() {
   replayCarView.root.visible = false;
   const tireTracks = createTireTracks();
   const tireSmoke = createTireSmoke();
+  // Load saved tire smoke preset if one was set in the VFX lab
+  void resolveTireSmokePreset().then((preset) => {
+    if (preset) void tireSmoke.applyPreset(preset);
+  });
   const onlineGhosts = createOnlineGhosts();
   const queueSlab = createQueueSlab();
   onlineGhosts.setTrack(activeTrack);
@@ -231,6 +236,8 @@ async function boot() {
   };
   setHudCarName();
   hud.root.hidden = true;
+
+  const garageView = createGarageView(canvas, renderer, customization);
 
   const attachmentTuner = createAttachmentTuner((att) => {
     carView.applyAttachments(att);
@@ -572,6 +579,7 @@ async function boot() {
     saveCustomization(customization);
     garageUi.update(customization);
     garageUi.hide();
+    garageView.applyCustomization(customization);
     mainMenu.show();
     mainMenu.setPlayEnabled(true);
     if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
@@ -887,7 +895,16 @@ async function boot() {
     },
   });
 
-  const vfxEditor = createVfxEditor();
+  const vfxEditor = createVfxEditor({
+    onApplyTireSmoke: (preset) => {
+      saveTireSmokePresetName(preset.name);
+      void tireSmoke.applyPreset(preset);
+    },
+    onClearTireSmoke: () => {
+      clearTireSmokePresetName();
+      tireSmoke.clearPreset();
+    },
+  });
   const replayOverlay = createReplayOverlay(() => exitReplay());
   const leaderboardUi = createLeaderboardUi<ReplayData>(leaderboardClient, {
     onWatch: (entry, replay) => startReplay(entry, replay),
@@ -907,6 +924,7 @@ async function boot() {
       saveCustomization(customization);
       garageUi.update(customization);
       carView.applyCustomization(customization);
+      garageView.applyCustomization(customization);
       if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
       else attachmentTuner.hide();
     },
@@ -935,6 +953,7 @@ async function boot() {
     const aspect = window.innerWidth / window.innerHeight;
     gameCamera.aspect = aspect;
     gameCamera.updateProjectionMatrix();
+    garageView.setAspect(aspect);
   };
   window.addEventListener("resize", onResize);
   onResize();
@@ -1488,10 +1507,8 @@ async function boot() {
     if (appState === "garage") {
       lastFixedSteps = 0;
       lastDroppedSeconds = 0;
-      carView.sync(car);
-      updateSceneLighting(gameScene, car.position);
-      applyFocusLighting();
-      renderGameScene(dt);
+      garageView.update(dt);
+      garageView.render();
     } else if (appState === "event") {
       updateEvent(dt);
     } else if (appState === "replay") {
