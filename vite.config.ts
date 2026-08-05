@@ -78,8 +78,13 @@ export default defineConfig({
   base: "./",
   plugins: [mapEditWriterPlugin()],
   define: {
-    // Strip dev-only systems from production builds
-    __DEV_SYSTEMS__: JSON.stringify(process.env.NODE_ENV !== "production"),
+    // Strip dev-only systems from production builds unless explicitly enabled for QA.
+    // ordinary `npm run build`: __DEV_SYSTEMS__ === false
+    // ordinary `npm run dev`: __DEV_SYSTEMS__ === true
+    // explicit QA build: ENABLE_DEV_SYSTEMS=1 npm run build -> __DEV_SYSTEMS__ === true
+    __DEV_SYSTEMS__: JSON.stringify(
+      process.env.NODE_ENV !== "production" || process.env.ENABLE_DEV_SYSTEMS === "1",
+    ),
   },
 });
 

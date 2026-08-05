@@ -1,5 +1,5 @@
 import "./style.css";
-import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, Material, Object3D, Timer, Vector3, type Texture } from "three";
+import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, Material, Object3D, Timer, type Texture } from "three";
 import {
   applyTuningPreset,
   carTuningPaths,
@@ -7,7 +7,6 @@ import {
   isPlayableMode,
   loadCarCustomization,
   loadCustomization,
-  mapEditorEnabled,
   paintColors,
   saveCustomization,
   type CarCustomization,
@@ -27,7 +26,7 @@ import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "
 import { applyStandardDriftTransmission } from "./game/simulation/driftTransmission";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
 import { applyVehicleGeometryTuning } from "./game/simulation/vehicleGeometry";
-import type { CarState, CarTuning, InputState, TrackConfig } from "./game/types";
+import type { CarState, CarTuning, TrackConfig } from "./game/types";
 import { createCamera, resetChaseCamera, updateChaseCamera } from "./render/app/camera";
 import { createRenderer, isMobileDevice } from "./render/app/createRenderer";
 import { createPerformanceMonitor } from "./render/app/performanceMonitor";
@@ -39,53 +38,23 @@ import { createCarView } from "./render/objects/carView";
 import { createTireSmoke, saveTireSmokePresetName, clearTireSmokePresetName, resolveTireSmokePreset } from "./render/objects/tireSmokeGpu";
 import { createTireTracks } from "./render/objects/tireTracks";
 import { createTrackView, applyTrackMood, updateCornerMarkerFlex, type TrackViewResult } from "./render/objects/trackView";
-import { createOnlineGhosts } from "./render/objects/onlineGhosts";
-import { createQueueSlab } from "./render/objects/queueSlab";
 import { createGarageUi } from "./ui/garageUi";
 import { createMainMenu } from "./ui/mainMenu";
 import { createLoadingOverlay } from "./ui/loadingOverlay";
 import { createFullscreenToggle } from "./ui/fullscreenToggle";
-import { createEndlessResultsOverlay, createHud, createResultsOverlay } from "./ui/hud";
-import { createOnlineHud, type OnlineHudPlayer } from "./ui/onlineHud";
-import { createOnlineMatchUi } from "./ui/onlineMatchUi";
+import { createHud, createResultsOverlay } from "./ui/hud";
 import { createVfxEditor } from "./ui/vfxEditor";
-import { isImportedCar } from "./render/objects/importedCars";
 import { createGarageView } from "./render/garage/garageView";
 import { createEngineSound } from "./audio/engineSound";
 import { resolveTrackCollisions, type Cone } from "./game/simulation/trackCollision";
 import { captureCarPose } from "./game/simulation/collisionSolver";
 import type { CollisionWorld } from "./game/simulation/collisionWorld";
-import { emptyCollisionResult } from "./game/simulation/collisionTypes";
 import { createCollisionWorld } from "./game/simulation/collisionWorld";
-import { disposeObject3D } from "./render/resources/disposeObject3D";
-import { createOnlineClient, type OnlineClient } from "./net/onlineClient";
 import { loadPlayerProfile, savePlayerProfile, type PlayerProfile } from "./net/profile";
-import {
-  dailySeedForTimestamp,
-  type LeaderboardBoard,
-  type LeaderboardEntry,
-  type OnlinePlayerState,
-  type OnlineRoomState,
-} from "./net/protocol";
-import { createEndlessTrack } from "./game/endless/endlessTrack";
-import { createObstacleManager } from "./game/endless/endlessObstacles";
-import { createEndlessState } from "./game/endless/endlessState";
-import { PHYSICS_VERSION, REPLAY_FIXED_STEP_SECONDS } from "./game/endless/physicsVersion";
-import { createReplayInputSampler, deserializeReplay, type ReplayData } from "./game/endless/replay";
-import {
-  commitEndlessRun,
-  loadEndlessRecords,
-  recordEndlessRunStart,
-  type EndlessRunSummary,
-} from "./game/endless/records";
-import { createEndlessTrackView } from "./render/endless/endlessTrackView";
-import { createObstacleCarView } from "./render/endless/obstacleCarView";
-import { createReplayCarView } from "./render/endless/replayCarView";
-import { createLeaderboardClient } from "./net/leaderboard";
-import { createLeaderboardUi } from "./ui/leaderboardUi";
-import { createReplayOverlay } from "./ui/replayOverlay";
+import { createDisabledDevSystems } from "./devSystems/disabledDevSystems";
+import type { DevSystems, DevSystemsHost } from "./devSystems/types";
 
-type AppState = "garage" | "event" | "results" | "replay";
+type AppState = "garage" | "event" | "results";
 const eventCarScale = 1.55;
 
 // P0-12: Collision debug visualization — supports oriented boxes, circles, profiles
@@ -199,16 +168,6 @@ async function boot() {
   const carEntry = manifest.cars[manifest.activeCar];
   const driftTrack = manifest.tracks[manifest.activeTrack];
   const practiceTrack = manifest.tracks["practice-grounds"] ?? driftTrack;
-  const onlineLobbyTrack = manifest.tracks["online-lobby"] ?? practiceTrack;
-  const endlessTrackStub: TrackConfig = {
-    id: "endless",
-    name: "Endless Drift",
-    start: { x: 0, z: 0, heading: 0 },
-    checkpoints: [],
-    roadPath: [],
-    roadWidth: 22,
-    boundaryMargin: 0,
-  };
   const tuningCache = new Map<string, CarTuning>();
   async function loadCarTuning(carId: string): Promise<CarTuning> {
     const cached = tuningCache.get(carId);
@@ -220,12 +179,13 @@ async function boot() {
   }
   let customization: CarCustomization = loadCustomization();
   let playerProfile: PlayerProfile = loadPlayerProfile();
-  const leaderboardClient = createLeaderboardClient();
-  const endlessRecords = loadEndlessRecords();
   let baseTuning = await loadCarTuning(customization.selectedCar);
   let activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
   const query = new URLSearchParams(window.location.search);
   const playerRouteProbeEnabled = query.has("playerRouteProbe");
+  // Dev systems runtime gate: requires both compile-time and runtime flags.
+  // A public user cannot enable dev systems by adding ?devSystems=1 to a normal release URL.
+  const devSystemsRuntimeEnabled = __DEV_SYSTEMS__ && query.get("devSystems") === "1";
   if (query.has("handlingHarness")) {
     const fleetIds = [...new Set([manifest.activeCar, ...Object.keys(carTuningPaths)])];
     const fleet = await Promise.all(
@@ -246,7 +206,6 @@ async function boot() {
 
   let activeTrack: TrackConfig = driftTrack;
   let trackView: TrackViewResult = await createTrackView(gameScene, activeTrack);
-  let endlessTrackView: ReturnType<typeof createEndlessTrackView> | null = null;
   let arenaRig: ArenaLightRig | null = null;
   let arenaEnv: Texture | null = null;
   const setupArenaLighting = () => {
@@ -269,8 +228,6 @@ async function boot() {
   let cornerMarkers = trackView.cornerMarkers;
   const carView = createCarView((carEntry.scale ?? 1) * eventCarScale);
   carView.applyCustomization(customization);
-  const replayCarView = createReplayCarView((carEntry.scale ?? 1) * eventCarScale);
-  replayCarView.root.visible = false;
   const tireTracks = createTireTracks();
   const tireSmoke = createTireSmoke();
   // Load saved tire smoke preset if one was set in the VFX lab
@@ -299,10 +256,7 @@ async function boot() {
     }
   };
   syncPaintTint(customization.paint);
-  const onlineGhosts = createOnlineGhosts();
-  const queueSlab = createQueueSlab();
-  onlineGhosts.setTrack(activeTrack);
-  gameScene.add(tireTracks.root, tireSmoke.root, carView.root, replayCarView.root, onlineGhosts.root, queueSlab.root);
+  gameScene.add(tireTracks.root, tireSmoke.root, carView.root);
 
   const car = createCarState(activeTrack);
   const playerRouteProbe = {
@@ -315,14 +269,6 @@ async function boot() {
   (window as Window & { __driftAttackRouteProbe?: typeof playerRouteProbe }).__driftAttackRouteProbe = playerRouteProbe;
   const drift = createDriftState();
   const hud = createHud();
-  const onlineHud = createOnlineHud();
-  let onlineRoom: OnlineRoomState | null = null;
-  let onlinePlayerId: string | null = null;
-  let onlineMatchActive = false;
-  let onlineInputSeq = 0;
-  let onlineInputDebt = 0;
-  let onlineQueueOpen = false;
-  let activeQueuePad: { roomCode: string; x: number; z: number; heading: number } | null = null;
   const setHudCarName = () => {
     hud.setCarName(getCarLabel(customization.selectedCar) ?? carEntry.name);
   };
@@ -331,18 +277,6 @@ async function boot() {
 
   const garageView = createGarageView(canvas, renderer, customization);
 
-  // Dormant systems: only instantiated when explicitly enabled via dev flags.
-  // In production builds, __DEV_SYSTEMS__ is false so these are never created.
-  const attachmentTunerEnabled = __DEV_SYSTEMS__ && new URLSearchParams(window.location.search).has("kitTuner");
-  type AttachmentTuner = Awaited<ReturnType<typeof import("./ui/attachmentTuner").createAttachmentTuner>>;
-  let attachmentTuner: AttachmentTuner | null = null;
-  if (attachmentTunerEnabled) {
-    const { createAttachmentTuner } = await import("./ui/attachmentTuner");
-    attachmentTuner = createAttachmentTuner((att) => {
-      carView.applyAttachments(att);
-    });
-    if (isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
-  }
   const runLength = 90;
   const fixedStepRunner = createFixedStepRunner(1 / 120, 0.1);
   const handlingProfile = query.get("handling") === "classic" ? "classic" : "polished";
@@ -352,187 +286,20 @@ async function boot() {
   let appState: AppState = "garage";
   let vfxLabOpen = false;
   let activeMode: ModeId = customization.selectedMode;
-  let endlessTrack: ReturnType<typeof createEndlessTrack> | null = null;
-  let endlessObstacles: ReturnType<typeof createObstacleManager> | null = null;
-  let endlessObstacleView: ReturnType<typeof createObstacleCarView> | null = null;
-  let endlessRun: ReturnType<typeof createEndlessState> | null = null;
-  let activeEndlessBoard: LeaderboardBoard = "daily";
-  let activeEndlessSeed = 1;
-  let pendingEndlessLaunch: { board: LeaderboardBoard; seed: number } | null = null;
-  let replaySession: {
-    entry: LeaderboardEntry;
-    data: ReplayData;
-    decoded: ReturnType<typeof deserializeReplay>;
-    sampler: ReturnType<typeof createReplayInputSampler>;
-    car: CarState;
-    track: ReturnType<typeof createEndlessTrack>;
-    tuning: CarTuning;
-    elapsed: number;
-    accumulator: number;
-    checkpointCursor: number;
-    finished: boolean;
-  } | null = null;
   let sessionTime = runLength;
   let cameraShake = 0;
   let runoffTime = 0;
   let practiceZoneIndex = 0;
 
-  const getTrackForMode = (mode: ModeId) => {
-    if (mode === "online-lobby") return onlineLobbyTrack;
-    if (mode === "map-editor") return onlineLobbyTrack;
-    if (mode === "endless") return endlessTrackStub;
+  const getTrackForMode = (mode: ModeId): TrackConfig => {
     if (mode === "free-drive") return practiceTrack;
     return driftTrack;
   };
-
-  const randomEndlessSeed = () => {
-    const value = crypto.getRandomValues(new Uint32Array(1))[0];
-    return value || 1;
-  };
-
-  const localDailySeed = () => dailySeedForTimestamp(Date.now()).seed;
-
-  async function resolveEndlessLaunch() {
-    if (pendingEndlessLaunch) {
-      const launch = pendingEndlessLaunch;
-      pendingEndlessLaunch = null;
-      return launch;
-    }
-    try {
-      const daily = await leaderboardClient.fetchDailySeed();
-      return { board: "daily" as const, seed: daily.seed >>> 0 || 1 };
-    } catch {
-      return { board: "daily" as const, seed: localDailySeed() };
-    }
-  }
-
-  function launchEndless(board: LeaderboardBoard, seed?: number) {
-    pendingEndlessLaunch = { board, seed: (seed ?? randomEndlessSeed()) >>> 0 || 1 };
-    customization = { ...customization, selectedMode: "endless" };
-    saveCustomization(customization);
-    garageUi.update(customization);
-    void startEvent();
-  }
-
-  async function launchDailyEndless() {
-    try {
-      const daily = await leaderboardClient.fetchDailySeed();
-      launchEndless("daily", daily.seed);
-    } catch {
-      launchEndless("daily", localDailySeed());
-    }
-  }
 
   const getPracticeSpawn = () => {
     if (activeMode !== "free-drive") return activeTrack.start;
     return activeTrack.practiceZones?.[practiceZoneIndex] ?? activeTrack.start;
   };
-
-  const getQueuePortal = () => activeTrack.portals?.find((portal) => portal.mode === "drift-attack") ?? null;
-
-  function hashRoomCode(roomCode: string) {
-    let hash = 0;
-    for (const char of roomCode) hash = (hash * 33 + char.charCodeAt(0)) >>> 0;
-    return hash;
-  }
-
-  function getQueuePadForRoom(roomCode: string) {
-    const hash = hashRoomCode(roomCode);
-    const slot = hash % 12;
-    const col = slot % 4;
-    const row = Math.floor(slot / 4);
-    return {
-      roomCode,
-      x: -480 + col * 320,
-      z: 430 - row * 170,
-      heading: ((hash >> 8) % 2) * Math.PI,
-    };
-  }
-
-  function setActiveQueuePad(roomCode: string) {
-    activeQueuePad = getQueuePadForRoom(roomCode);
-    queueSlab.setRoom(roomCode, activeQueuePad);
-    parkLocalCarOnQueuePad();
-  }
-
-  function clearActiveQueuePad() {
-    activeQueuePad = null;
-    queueSlab.hide();
-  }
-
-  function transformQueueLocal(localX: number, localZ: number) {
-    if (!activeQueuePad) return null;
-    const cos = Math.cos(activeQueuePad.heading);
-    const sin = Math.sin(activeQueuePad.heading);
-    return {
-      x: activeQueuePad.x + cos * localX + sin * localZ,
-      z: activeQueuePad.z - sin * localX + cos * localZ,
-    };
-  }
-
-  function getQueuePose(index: number, count: number) {
-    if (!activeQueuePad) return null;
-    const safeCount = Math.max(1, count);
-    const radius = safeCount <= 1 ? 0 : 10.2;
-    const angle = -Math.PI / 2 + (index / safeCount) * Math.PI * 2;
-    const position = transformQueueLocal(Math.cos(angle) * radius, Math.sin(angle) * radius);
-    if (!position) return null;
-    return {
-      x: position.x,
-      z: position.z,
-      heading: Math.atan2(activeQueuePad.x - position.x, activeQueuePad.z - position.z),
-      speed: 0,
-    };
-  }
-
-  function applyQueuePose(pose: { x: number; z: number; heading: number; speed: number }) {
-    car.position.x = pose.x;
-    car.position.z = pose.z;
-    car.heading = pose.heading;
-    car.velocity.x = 0;
-    car.velocity.z = 0;
-    car.speed = pose.speed;
-    car.yawVelocity = 0;
-    car.throttleAxis = 0;
-    car.brakeAxis = 0;
-    car.frontWheelAngle = 0;
-  }
-
-  function parkLocalCarOnQueuePad() {
-    const pose = getQueuePose(0, 1);
-    if (pose) applyQueuePose(pose);
-  }
-
-  function stagedOnlinePlayers(room: OnlineRoomState): OnlinePlayerState[] {
-    return room.players.map((player, index) => {
-      const pose = getQueuePose(index, room.players.length);
-      return pose ? { ...player, pose } : player;
-    });
-  }
-
-  function lockLocalCarToQueue(room: OnlineRoomState) {
-    const index = room.players.findIndex((player) => player.id === onlinePlayerId);
-    if (index < 0) return;
-    const pose = getQueuePose(index, room.players.length);
-    if (!pose) return;
-    applyQueuePose(pose);
-  }
-
-  function returnCarToQueuePortal() {
-    const portal = getQueuePortal();
-    if (!portal) {
-      resetCar(car, activeTrack);
-      return;
-    }
-    const heading = portal.heading ?? 0;
-    car.position.x = portal.x - Math.sin(heading) * 18;
-    car.position.z = portal.z - Math.cos(heading) * 18;
-    car.heading = heading;
-    car.velocity.x = 0;
-    car.velocity.z = 0;
-    car.speed = 0;
-    car.yawVelocity = 0;
-  }
 
   let startEventPending = false;
   let startEventRequestedAt = 0;
@@ -559,23 +326,8 @@ async function boot() {
     view: TrackViewResult;
   };
 
-  function createEmptyEndlessTrackViewResult(): TrackViewResult {
-    const root = new Group();
-    return {
-      root,
-      collisionWorld: createCollisionWorld([]),
-      cones: [],
-      coneMeshes: [],
-      cornerMarkers: [],
-      dispose: () => disposeObject3D(root),
-    };
-  }
-
   async function buildTrackCandidate(track: TrackConfig): Promise<TrackCandidate> {
-    const view =
-      track.id === "endless"
-        ? createEmptyEndlessTrackViewResult()
-        : await createTrackView(null, track);
+    const view = await createTrackView(null, track);
     return { track, view };
   }
 
@@ -601,7 +353,6 @@ async function boot() {
     // Preserve references to the old state until the candidate is ready
     const oldTrack = activeTrack;
     const oldView = trackView;
-    const oldEndlessView = endlessTrackView;
 
     // Add the candidate root
     gameScene.add(candidate.view.root);
@@ -617,7 +368,7 @@ async function boot() {
       cones = trackView.cones ?? [];
       coneMeshes = trackView.coneMeshes;
       cornerMarkers = trackView.cornerMarkers;
-      onlineGhosts.setTrack(activeTrack);
+      devSystems.onTrackCommitted(activeTrack);
       practiceZoneIndex = 0;
 
       // Rebuild lighting/environment
@@ -638,9 +389,7 @@ async function boot() {
       throw error;
     }
 
-    // Only now remove/dispose the old view and old endless view
-    endlessTrackView = null;
-    oldEndlessView?.dispose();
+    // Only now remove/dispose the old view
     gameScene.remove(oldView.root);
     oldView.dispose();
   }
@@ -687,36 +436,19 @@ async function boot() {
     });
   }
 
-  // Map editor: only instantiated when enabled via dev flag
-  type MapEditor = Awaited<ReturnType<typeof import("./game/editor/mapEditor").createMapEditor>>;
-  let mapEditor: MapEditor | null = null;
-  if (mapEditorEnabled) {
-    const { createMapEditor } = await import("./game/editor/mapEditor");
-    mapEditor = createMapEditor(canvas, gameCamera, gameScene, { onReloadTrack: reloadActiveTrack });
-  }
+  // --- Dev systems facade ---
+  // One dynamic-import boundary. The disabled facade is tiny and imports no
+  // development runtime. The enabled implementation is only reached when both
+  // the compile-time constant and the runtime query flag are set.
+  // The host is created later (after results/garageUi/engineSound are defined).
+  let devSystems: DevSystems = createDisabledDevSystems();
 
   const resetEvent = () => {
-    resetCar(car, activeTrack, getPracticeSpawn());
-    resetDrift(drift);
-    if (activeMode === "endless") {
-      endlessTrack = createEndlessTrack(activeEndlessSeed);
-      endlessObstacles = createObstacleManager(activeEndlessSeed);
-      endlessRun = createEndlessState(activeEndlessSeed, {
-        carId: customization.selectedCar,
-        tuningPreset: customization.tuningPreset,
-      });
-      endlessTrackView?.dispose();
-      endlessTrackView = createEndlessTrackView(gameScene);
-      endlessObstacleView?.root.parent?.remove(endlessObstacleView.root);
-      endlessObstacleView = createObstacleCarView(gameScene);
-      endlessObstacleView.reset();
-      endlessTrackView.update(endlessTrack.state, car.position);
-      sessionTime = endlessRun.state.clock;
-      recordEndlessRunStart(endlessRecords);
+    if (devSystems.resetActiveMode()) {
+      // Dev mode reset handled by dev systems
     } else {
-      endlessTrack = null;
-      endlessObstacles = null;
-      endlessRun = null;
+      resetCar(car, activeTrack, getPracticeSpawn());
+      resetDrift(drift);
       sessionTime = activeMode === "drift-attack" ? runLength : Infinity;
     }
     tireTracks.reset();
@@ -731,7 +463,6 @@ async function boot() {
     runoffTime = 0;
     carView.applyCustomization(customization);
     carView.root.visible = true;
-    replayCarView.root.visible = false;
     resetChaseCamera(gameCamera, car);
   };
 
@@ -756,34 +487,9 @@ async function boot() {
     appState = "garage";
     garageView.setActive(true);
     results.hide();
-    endlessResults.hide();
-    leaderboardUi.hide();
-    replayOverlay.hide();
-    endlessTrackView?.dispose();
-    endlessTrackView = null;
-    endlessTrack = null;
-    endlessObstacles = null;
-    if (endlessObstacleView) {
-      endlessObstacleView.root.parent?.remove(endlessObstacleView.root);
-      endlessObstacleView = null;
-    }
-    endlessRun = null;
-    replaySession = null;
     hud.root.hidden = true;
-    onlineHud.hide();
-    mapEditor?.hide();
-    onlineMatchUi.hideAll();
-    onlineClient.disconnect();
-    onlineRoom = null;
-    onlinePlayerId = null;
-    onlineMatchActive = false;
-    onlineQueueOpen = false;
-    onlineInputDebt = 0;
-    onlineGhosts.clearRemotePlayers();
-    clearActiveQueuePad();
     fixedStepRunner.reset();
     carView.root.visible = true;
-    replayCarView.root.visible = false;
     tireTracks.root.visible = true;
     tireSmoke.root.visible = true;
     customization = { ...customization, selectedMode: "free-drive" };
@@ -794,8 +500,6 @@ async function boot() {
     mainMenu.show();
     // Do not enable mode buttons until Practice Grounds has loaded successfully
     mainMenu.setPlayEnabled(false);
-    if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
-    else attachmentTuner?.hide();
     void switchTrack(practiceTrack).then(() => {
       activeMode = "free-drive";
       practiceZoneIndex = 0;
@@ -826,7 +530,6 @@ async function boot() {
       resetInputState();
       appState = "garage";
       hud.root.hidden = true;
-      onlineHud.hide();
       car.throttleAxis = 0;
       car.brakeAxis = 0;
     }
@@ -848,16 +551,45 @@ async function boot() {
       saveCustomization(customization);
       garageUi.update(customization);
     }
+    // Normalize stale dev modes when dev systems are disabled at runtime
+    // (e.g. production build without ?devSystems=1, but localStorage has "endless")
+    if (!devSystems.handlesMode(customization.selectedMode) && customization.selectedMode !== "drift-attack" && customization.selectedMode !== "free-drive") {
+      customization = { ...customization, selectedMode: "free-drive" };
+      saveCustomization(customization);
+      garageUi.update(customization);
+    }
     resetInputState();
     activeMode = customization.selectedMode;
     mainMenu.setPlayEnabled(false);
     loadingOverlay.show(modeLabel(activeMode));
     try {
-      if (activeMode === "endless") {
-        const launch = await resolveEndlessLaunch();
-        activeEndlessBoard = launch.board;
-        activeEndlessSeed = launch.seed;
+      // Dev mode start routing — dev systems handle online-lobby/endless/map-editor
+      if (devSystems.handlesMode(activeMode)) {
+        await switchTrack(getTrackForMode(activeMode));
+        baseTuning = await loadCarTuning(customization.selectedCar);
+        activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
+        const carResult = await carView.whenReady();
+        if (!carResult.ok && carResult.carId === customization.selectedCar) {
+          throw new Error(
+            `Could not load ${getCarLabel(customization.selectedCar)}: ` +
+            carResult.error.message,
+          );
+        }
+        appState = "event";
+        garageView.setActive(false);
+        results.hide();
+        garageUi.hide();
+        mainMenu.hide();
+        const devResult = await devSystems.startMode(activeMode);
+        if (devResult.handled && !devResult.started) {
+          throw devResult.error;
+        }
+        setHudCarName();
+        loadingOverlay.hide();
+        canvas.focus();
+        return;
       }
+      // Public mode handling — drift-attack and free-drive only
       await switchTrack(getTrackForMode(activeMode));
       baseTuning = await loadCarTuning(customization.selectedCar);
       activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
@@ -875,40 +607,15 @@ async function boot() {
       appState = "event";
       garageView.setActive(false);
       results.hide();
-      endlessResults.hide();
-      leaderboardUi.hide();
-      replayOverlay.hide();
       garageUi.hide();
       mainMenu.hide();
-      attachmentTuner?.hide();
       resetEvent();
-      if (activeMode !== "online-lobby") clearActiveQueuePad();
       setHudCarName();
-      if (activeMode === "map-editor") {
-        hud.root.hidden = true;
-        onlineHud.hide();
-        onlineMatchUi.hideAll();
-        carView.root.visible = false;
-        tireTracks.root.visible = false;
-        tireSmoke.root.visible = false;
-        onlineGhosts.root.visible = false;
-        mapEditor?.show(activeTrack);
-      } else {
-        mapEditor?.hide();
-        carView.root.visible = true;
-        tireTracks.root.visible = true;
-        tireSmoke.root.visible = true;
-        hud.root.hidden = false;
-        hud.setMode(
-          activeMode === "online-lobby"
-            ? "online-lobby"
-            : activeMode === "free-drive"
-              ? "free-drive"
-              : activeMode === "endless"
-                ? "endless"
-                : "drift-attack",
-        );
-      }
+      carView.root.visible = true;
+      tireTracks.root.visible = true;
+      tireSmoke.root.visible = true;
+      hud.root.hidden = false;
+      hud.setMode(activeMode === "free-drive" ? "free-drive" : "drift-attack");
       loadingOverlay.hide();
       canvas.focus();
     } catch (error) {
@@ -928,217 +635,14 @@ async function boot() {
     }
   };
 
-  const beginOnlineDriftMatch = async () => {
-    if (startEventPending) return;
-    startEventPending = true;
-    activeMode = "drift-attack";
-    customization = { ...customization, selectedMode: "online-lobby" };
-    saveCustomization(customization);
-    resetInputState();
-    try {
-      await switchTrack(driftTrack);
-      baseTuning = await loadCarTuning(customization.selectedCar);
-      activeTuning = applyTuningPreset(baseTuning, customization.tuningPreset);
-      appState = "event";
-      onlineMatchActive = true;
-      onlineInputDebt = 0;
-      results.hide();
-      hud.root.hidden = false;
-      garageUi.hide();
-      attachmentTuner?.hide();
-      mapEditor?.hide();
-      carView.root.visible = true;
-      tireTracks.root.visible = true;
-      tireSmoke.root.visible = true;
-      onlineMatchUi.hideQueue();
-      clearActiveQueuePad();
-      resetEvent();
-      setHudCarName();
-      hud.setMode("drift-attack");
-      canvas.focus();
-    } finally {
-      startEventPending = false;
-    }
-  };
-
   const finishRun = () => {
     const finalScore = finishDriftRun(drift);
     appState = "results";
     car.throttleAxis = 0;
     car.brakeAxis = 0;
     hud.root.hidden = true;
-    onlineHud.hide();
     results.show(finalScore, drift.bestCombo, drift.bestRun);
   };
-
-  const finishEndlessRun = () => {
-    if (appState !== "event" || activeMode !== "endless" || !endlessRun) return;
-    const finalScore = finishDriftRun(drift);
-    endlessRun.syncTelemetry({
-      car,
-      drift,
-      trackProgress: endlessTrack?.state.progressDistance ?? endlessRun.state.distance,
-      nextGateDistance: endlessTrack?.state.nextGateDistance ?? Infinity,
-      onTrack: endlessTrack?.isOnTrack(car.position) ?? false,
-    });
-    endlessRun.captureCheckpoint(car, true);
-    const runState = endlessRun.state;
-    const failReason = runState.failReason ?? "clock";
-    const replay = endlessRun.finish({
-      carId: customization.selectedCar,
-      tuningPreset: customization.tuningPreset,
-      finalScore,
-      gatesPassed: runState.gatesPassed,
-      distance: runState.distance,
-      duration: runState.duration,
-    });
-    const summary: EndlessRunSummary = {
-      score: finalScore,
-      bestCombo: Math.max(drift.bestCombo, runState.bestCombo),
-      stage: runState.stage,
-      distance: runState.distance,
-      gatesPassed: runState.gatesPassed,
-      duration: runState.duration,
-      objectivesCompleted: runState.objectivesCompleted,
-      failReason,
-      seed: runState.seed,
-      board: activeEndlessBoard,
-      createdAt: Date.now(),
-    };
-    const record = commitEndlessRun(endlessRecords, summary);
-
-    appState = "results";
-    car.throttleAxis = 0;
-    car.brakeAxis = 0;
-    hud.root.hidden = true;
-    onlineHud.hide();
-    results.hide();
-    endlessResults.show({
-      finalScore,
-      bestCombo: summary.bestCombo,
-      stage: summary.stage,
-      gatesPassed: summary.gatesPassed,
-      distance: summary.distance,
-      duration: summary.duration,
-      failReason,
-      objectivesCompleted: summary.objectivesCompleted,
-      isPersonalBest: record.isPersonalBest,
-      bestScore: record.bestScore,
-      nextTarget: record.nextTarget,
-    });
-
-    if (finalScore <= 0) {
-      endlessResults.setSubmission("Build a scoring drift to post this run.");
-      return;
-    }
-    void leaderboardClient.submitRun(replay, activeEndlessBoard, playerProfile.name).then(
-      (response) => {
-        const rank = response.rank ? ` Rank #${response.rank}.` : "";
-        endlessResults.setSubmission(`${response.message}${rank}`);
-      },
-      (error: unknown) => {
-        endlessResults.setSubmission(
-          error instanceof Error ? `Run saved locally. ${error.message}` : "Run saved locally; upload failed.",
-          true,
-        );
-      },
-    );
-  };
-
-  const finishOnlineRun = (room: OnlineRoomState) => {
-    onlineMatchActive = false;
-    onlineQueueOpen = false;
-    onlineRoom = room;
-    appState = "results";
-    car.throttleAxis = 0;
-    car.brakeAxis = 0;
-    hud.root.hidden = true;
-    onlineHud.hide();
-    onlineMatchUi.updateRoom(room);
-    onlineMatchUi.hideQueue();
-    clearActiveQueuePad();
-    const local = room.players.find((player) => player.id === onlinePlayerId);
-    results.show(local ? local.score : finishDriftRun(drift), drift.bestCombo, drift.bestRun);
-  };
-
-  const leaveOnlineQueue = () => {
-    onlineClient.disconnect();
-    onlineRoom = null;
-    onlinePlayerId = null;
-    onlineMatchActive = false;
-    onlineQueueOpen = false;
-    onlineInputDebt = 0;
-    onlineMatchUi.hideAll();
-    onlineGhosts.clearRemotePlayers();
-    clearActiveQueuePad();
-    if (activeMode === "online-lobby") returnCarToQueuePortal();
-  };
-
-  let onlineClient: OnlineClient;
-  const onlineMatchUi = createOnlineMatchUi({
-    onConnect(roomCode) {
-      onlineQueueOpen = true;
-      onlineRoom = null;
-      onlinePlayerId = null;
-      onlineGhosts.clearRemotePlayers();
-      const joinedCode = onlineClient.connect(playerProfile, customization, roomCode);
-      setActiveQueuePad(joinedCode);
-      onlineMatchUi.show(joinedCode);
-    },
-    onReady(ready) {
-      onlineClient.setReady(ready);
-    },
-    onLeave() {
-      leaveOnlineQueue();
-    },
-    onShowQueue() {
-      onlineQueueOpen = true;
-      onlineRoom = null;
-      onlinePlayerId = null;
-      onlineGhosts.clearRemotePlayers();
-      onlineMatchUi.show();
-    },
-  });
-
-  onlineClient = createOnlineClient({
-    onJoined(playerId, room) {
-      onlinePlayerId = playerId;
-      onlineRoom = room;
-      if (!activeQueuePad || activeQueuePad.roomCode !== room.roomCode) setActiveQueuePad(room.roomCode);
-      onlineMatchUi.setLocalPlayer(playerId);
-      onlineMatchUi.updateRoom(room);
-      if (activeMode === "online-lobby" && onlineQueueOpen) {
-        lockLocalCarToQueue(room);
-        onlineGhosts.setRemotePlayers(stagedOnlinePlayers(room), onlinePlayerId);
-      }
-    },
-    onRoom(room) {
-      onlineRoom = room;
-      if (activeMode === "online-lobby" && onlineQueueOpen && (!activeQueuePad || activeQueuePad.roomCode !== room.roomCode)) {
-        setActiveQueuePad(room.roomCode);
-      }
-      onlineMatchUi.updateRoom(room);
-      if (onlineMatchActive) onlineGhosts.setRemotePlayers(room.players, onlinePlayerId);
-      else if (activeMode === "online-lobby" && onlineQueueOpen) {
-        lockLocalCarToQueue(room);
-        onlineGhosts.setRemotePlayers(stagedOnlinePlayers(room), onlinePlayerId);
-      }
-    },
-    onMatchStart(room) {
-      onlineRoom = room;
-      onlineMatchUi.updateRoom(room);
-      void beginOnlineDriftMatch();
-    },
-    onMatchEnd(room) {
-      finishOnlineRun(room);
-    },
-    onError(message) {
-      onlineMatchUi.setStatus(message);
-    },
-    onStatus(message) {
-      onlineMatchUi.setStatus(message);
-    },
-  });
 
   const vfxEditor = createVfxEditor({
     onClose: () => {
@@ -1169,11 +673,6 @@ async function boot() {
       vfxEditor.setTireSmokeStatus("Tire smoke reset to default.");
     },
   });
-  const replayOverlay = createReplayOverlay(() => exitReplay());
-  const leaderboardUi = createLeaderboardUi<ReplayData>(leaderboardClient, {
-    onWatch: (entry, replay) => startReplay(entry, replay),
-    onClose: () => canvas.focus(),
-  });
   let garageVehicleRequest = 0;
   const garageUi = createGarageUi(customization, playerProfile, {
     onCustomizationChange(slot, value) {
@@ -1194,8 +693,6 @@ async function boot() {
       if (slot === "paint" || slot === "selectedCar") {
         syncPaintTint(customization.paint);
       }
-      if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner?.show(customization.selectedCar);
-      else attachmentTuner?.hide();
       // Show loading indicator while imported car loads
       const requestId = ++garageVehicleRequest;
       const requestedCar = customization.selectedCar;
@@ -1226,12 +723,123 @@ async function boot() {
   });
 
   const results = createResultsOverlay(startEvent, showMainMenu);
-  const endlessResults = createEndlessResultsOverlay({
-    onRetry: () => launchEndless("all-time"),
-    onDailyRetry: () => void launchDailyEndless(),
-    onGarage: showMainMenu,
-  });
   hud.root.hidden = true;
+
+  // Tire effects adapter for dev systems host
+  const tireEffects = {
+    reset: () => { tireTracks.reset(); tireSmoke.reset(); },
+    update: (carState: CarState, onTrack: boolean, dt: number) => {
+      tireTracks.update(carState, onTrack);
+      tireSmoke.update(carState, onTrack, dt);
+    },
+    root: tireTracks.root,
+  };
+
+  // --- Helpers shared with dev systems host ---
+  function syncConeMeshes(meshes: readonly Mesh[], cones: readonly Cone[]) {
+    const count = Math.min(meshes.length, cones.length);
+    for (let i = 0; i < count; i += 1) {
+      const mesh = meshes[i];
+      const cone = cones[i];
+      mesh.position.x = cone.x;
+      mesh.position.z = cone.z;
+      if (cone.knocked) {
+        mesh.rotation.x = Math.min(
+          Math.PI * 0.5,
+          Math.abs(cone.spin),
+        );
+        mesh.rotation.z = cone.spin;
+        mesh.rotation.y += cone.angularVelocity;
+      }
+    }
+  }
+
+  function getNearbyGarage() {
+    if (activeMode !== "free-drive" || activeTrack.id !== "practice-grounds") return false;
+    const start = activeTrack.start;
+    return Math.hypot(car.position.x - start.x, car.position.z - start.z) <= 16;
+  }
+
+  const applyFocusLighting = () => {
+    if (arenaRig) arenaRig.update(car.position);
+    else updateSceneLighting(gameScene, car.position);
+  };
+
+  // --- Now that all public systems are defined, create the dev systems facade ---
+  const devSystemsHost: DevSystemsHost = {
+    scene: gameScene,
+    camera: gameCamera,
+    renderer,
+    car,
+    canvas,
+    get customization() { return customization; },
+    get activeTuning() { return activeTuning; },
+    get activeTrack() { return activeTrack; },
+    get drift() { return drift; },
+    get playerProfile() { return playerProfile; },
+    get hud() { return hud; },
+    get results() { return results; },
+    get tireEffects() { return tireEffects; },
+    get carView() { return carView; },
+    get fixedStepRunner() { return fixedStepRunner; },
+    get collisionWorld() { return collisionWorld; },
+    get handlingProfile() { return handlingProfile; },
+    get playerRouteProbeEnabled() { return playerRouteProbeEnabled; },
+    get playerRouteProbeElapsed() { return playerRouteProbe.elapsed; },
+    switchTrack,
+    reloadActiveTrack,
+    loadCarTuning,
+    renderGameScene,
+    showMainMenu: () => showMainMenu(),
+    showGarage: () => showGarage(),
+    showOptionsMenu: () => showOptionsMenu(),
+    resetPublicInput: resetInputState,
+    setPublicCarVisible(visible) { carView.root.visible = visible; },
+    setGarageActive(active) { garageView.setActive(active); },
+    reportError(title, error) { console.error(title, error); },
+    saveCustomization,
+    updateGarageUi: () => garageUi.update(customization),
+    updateChaseCamera: (dt, shake, useObstructions) => updateChaseCamera(gameCamera, car, dt, shake, getCameraOrbit(), useObstructions ? collisionWorld.cameraObstructions : []),
+    resetChaseCamera: () => resetChaseCamera(gameCamera, car),
+    applyFocusLighting,
+    updateEngineSound: () => engineSound.update(car, activeTuning),
+    resumeEngineSound: () => engineSound.resume(),
+    suspendEngineSound: () => engineSound.suspend(),
+    updateCornerMarkerFlex: (dt) => updateCornerMarkerFlex(cornerMarkers, car, dt),
+    updateWindUniforms: (dt) => { if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt; },
+    syncConeMeshes: () => syncConeMeshes(coneMeshes, cones),
+    getCameraOrbit,
+    getNearbyGarage,
+    setSessionTime: (t) => { sessionTime = t; },
+    getSessionTime: () => sessionTime,
+    setCameraShake: (s) => { cameraShake = s; },
+    getCameraShakeValue: () => cameraShake,
+    setLastFixedStats: (steps, dropped) => { lastFixedSteps = steps; lastDroppedSeconds = dropped; },
+    resetDrift: () => resetDrift(drift),
+    finishDriftRun: () => finishDriftRun(drift),
+    updateDriftScore: (dt, scoringSurface, driftZone, impact) => updateDriftScore(drift, car, dt, scoringSurface, driftZone, impact),
+    setDriftCallout: (text, timer) => { drift.callout = text; drift.calloutTimer = timer; },
+    addPlayerRouteProbeTime: (dt) => { playerRouteProbe.elapsed += dt; },
+    recordPlayerRouteProbeShift: (from, to) => {
+      playerRouteProbe.shiftEvents.push({
+        from, to,
+        mph: car.speed * 2.237,
+        rpm: car.rpm,
+        rpmFraction: car.rpm / activeTuning.redlineRpm,
+      });
+    },
+    setPlayerRouteProbeScore: (score) => { playerRouteProbe.score = score; },
+    resetPlayerRouteProbe: () => {
+      playerRouteProbe.elapsed = 0;
+      playerRouteProbe.previousGear = car.gear;
+      playerRouteProbe.shiftEvents.length = 0;
+      playerRouteProbe.score = 0;
+    },
+  };
+
+  devSystems = devSystemsRuntimeEnabled
+    ? await import("./devSystems/createDevSystems").then(({ createDevSystems }) => createDevSystems(devSystemsHost))
+    : createDisabledDevSystems();
 
   // --- Named event handlers (removable during teardown) ---
   const onResize = () => {
@@ -1313,6 +921,7 @@ async function boot() {
       stopMainLoop();
       resetInputState();
       engineSound.suspend();
+      devSystems.suspend();
     } else {
       // A visibility event must not restart rendering while context is lost or after teardown
       if (disposed || contextLost) return;
@@ -1326,7 +935,8 @@ async function boot() {
       // Reset the Three.js timer cleanly on resume
       timer.update(performance.now());
       timer.getDelta();  // Reset delta to avoid a huge jump
-      if (appState === "event" || appState === "replay") engineSound.resume();
+      if (appState === "event") engineSound.resume();
+      devSystems.resume();
       startMainLoop();
     }
   };
@@ -1344,190 +954,14 @@ async function boot() {
   const fullscreenToggle = createFullscreenToggle();
   showMainMenu();
 
-  function syncConeMeshes(meshes: readonly Mesh[], cones: readonly Cone[]) {
-    const count = Math.min(meshes.length, cones.length);
-    for (let i = 0; i < count; i += 1) {
-      const mesh = meshes[i];
-      const cone = cones[i];
-      mesh.position.x = cone.x;
-      mesh.position.z = cone.z;
-      if (cone.knocked) {
-        mesh.rotation.x = Math.min(
-          Math.PI * 0.5,
-          Math.abs(cone.spin),
-        );
-        mesh.rotation.z = cone.spin;
-        mesh.rotation.y += cone.angularVelocity;
-      }
-    }
-  }
-
-  function getNearbyGarage() {
-    if (activeMode !== "free-drive" || activeTrack.id !== "practice-grounds") return false;
-    const start = activeTrack.start;
-    return Math.hypot(car.position.x - start.x, car.position.z - start.z) <= 16;
-  }
-
-  const screenProjector = new Vector3();
-  function projectOnlineLabel(position: { x: number; z: number }, distance: number) {
-    screenProjector.set(position.x, 3.2, position.z).project(gameCamera);
-    const visible =
-      screenProjector.z > -1 &&
-      screenProjector.z < 1 &&
-      screenProjector.x > -1.12 &&
-      screenProjector.x < 1.12 &&
-      screenProjector.y > -1.08 &&
-      screenProjector.y < 1.08;
-    return {
-      x: (screenProjector.x * 0.5 + 0.5) * window.innerWidth,
-      y: (-screenProjector.y * 0.5 + 0.5) * window.innerHeight,
-      visible,
-      scale: Math.max(0.72, Math.min(1, 1.08 - distance / 260)),
-    };
-  }
-
-  const applyFocusLighting = () => {
-    if (arenaRig) arenaRig.update(car.position);
-    else updateSceneLighting(gameScene, car.position);
-  };
-
-  async function startReplay(entry: LeaderboardEntry, data: ReplayData) {
-    const decoded = deserializeReplay(data);
-    const tuning = applyTuningPreset(await loadCarTuning(data.carId), data.tuningPreset);
-    await switchTrack(endlessTrackStub);
-    endlessTrackView?.dispose();
-    const track = createEndlessTrack(data.seed);
-    const replayCar = createCarState(endlessTrackStub);
-    const replayCustomization: CarCustomization = {
-      ...customization,
-      ...loadCarCustomization(data.carId),
-      selectedCar: data.carId,
-      selectedMode: "endless",
-      tuningPreset: data.tuningPreset,
-    };
-    replayCarView.applyCustomization(replayCustomization);
-    await replayCarView.whenReady();
-    endlessTrackView = createEndlessTrackView(gameScene);
-    endlessTrackView.update(track.state, replayCar.position);
-    replaySession = {
-      entry,
-      data,
-      decoded,
-      sampler: createReplayInputSampler(decoded.inputs),
-      car: replayCar,
-      track,
-      tuning,
-      elapsed: 0,
-      accumulator: 0,
-      checkpointCursor: 0,
-      finished: false,
-    };
-    endlessTrack = null;
-    endlessRun = null;
-    activeMode = "endless";
-    appState = "replay";
-    garageView.setActive(false);
-    resetInputState();
-    fixedStepRunner.reset();
-    tireTracks.reset();
-    tireSmoke.reset();
-    carView.root.visible = false;
-    replayCarView.root.visible = true;
-    onlineGhosts.root.visible = false;
-    hud.root.hidden = true;
-    onlineHud.hide();
-    results.hide();
-    endlessResults.hide();
-    leaderboardUi.hide();
-    replayOverlay.show(entry, data.version !== PHYSICS_VERSION);
-    resetChaseCamera(gameCamera, replayCar);
-    canvas.focus();
-  }
-
-  function exitReplay() {
-    if (appState !== "replay") return;
-    replaySession = null;
-    replayOverlay.hide();
-    replayCarView.root.visible = false;
-    endlessTrackView?.dispose();
-    endlessTrackView = null;
-    showMainMenu();
-  }
-
-  function updateReplay(dt: number) {
-    const session = replaySession;
-    if (!session) {
-      exitReplay();
-      return;
-    }
-    const liveInput = readInput();
-    if (liveInput.menu) {
-      exitReplay();
-      return;
-    }
-
-    if (!session.finished) {
-      session.accumulator = Math.min(0.1, session.accumulator + Math.max(0, dt));
-      while (session.accumulator + 1e-9 >= REPLAY_FIXED_STEP_SECONDS && session.elapsed < session.data.duration) {
-        const recorded = session.sampler.sample(session.elapsed);
-        const replayInput: InputState = {
-          throttle: recorded.throttle,
-          brake: recorded.brake,
-          steer: recorded.steer,
-          handbrake: recorded.handbrake,
-          reset: false,
-          confirm: false,
-          zoneNext: false,
-          debug: false,
-          menu: false,
-        };
-        session.track.update(session.car.position);
-        const onTrack = session.track.isOnTrack(session.car.position);
-        const replayPreviousPose = captureCarPose(session.car);
-        updateCar(session.car, replayInput, session.tuning, REPLAY_FIXED_STEP_SECONDS, onTrack, handlingProfile);
-        // Replay uses the same collision solver as live play
-        session.track.resolveGuardrail(session.car, replayPreviousPose, session.tuning);
-        session.elapsed = Math.min(session.data.duration, session.elapsed + REPLAY_FIXED_STEP_SECONDS);
-        session.accumulator -= REPLAY_FIXED_STEP_SECONDS;
-
-        while (
-          session.checkpointCursor < session.decoded.checkpoints.length &&
-          session.decoded.checkpoints[session.checkpointCursor].t <= session.elapsed + 1e-6
-        ) {
-          const checkpoint = session.decoded.checkpoints[session.checkpointCursor++];
-          const error = Math.hypot(session.car.position.x - checkpoint.x, session.car.position.z - checkpoint.z);
-          if (error > 2) {
-            session.car.position.x = checkpoint.x;
-            session.car.position.z = checkpoint.z;
-            session.car.heading = checkpoint.heading;
-            session.car.speed = checkpoint.speed;
-            session.car.velocity.x = Math.sin(checkpoint.heading) * checkpoint.speed;
-            session.car.velocity.z = Math.cos(checkpoint.heading) * checkpoint.speed;
-            session.car.yawVelocity = 0;
-          }
-        }
-      }
-      if (session.elapsed >= session.data.duration - 1e-6) {
-        session.finished = true;
-        replayOverlay.setFinished();
-      }
-    }
-
-    const onTrack = session.track.isOnTrack(session.car.position);
-    endlessTrackView?.update(session.track.state, session.car.position);
-    tireTracks.update(session.car, onTrack);
-    tireSmoke.update(session.car, onTrack, dt);
-    replayCarView.sync(session.car);
-    engineSound.update(session.car, session.tuning);
-    updateChaseCamera(gameCamera, session.car, dt, 0, getCameraOrbit(), []);
-    updateSceneLighting(gameScene, session.car.position);
-    replayOverlay.update(session.elapsed, session.data.duration);
-    lastFixedSteps = Math.round(Math.min(0.1, dt) / REPLAY_FIXED_STEP_SECONDS);
-    lastDroppedSeconds = Math.max(0, dt - 0.1);
-    renderGameScene(dt);
-  }
-
   function updateEvent(dt: number) {
+    // Dev modes (online-lobby, endless, map-editor) are fully delegated to dev systems.
+    if (devSystems.handlesMode(activeMode)) {
+      const result = devSystems.update(dt, readInput());
+      if (result.handled) return;
+      // If dev systems declined, fall through to public mode handling
+    }
+
     const liveInput = readInput();
     const probeTime = playerRouteProbe.elapsed;
     const probeSlideTime = Math.max(0, probeTime - 5.5);
@@ -1544,122 +978,31 @@ async function boot() {
         }
       : liveInput;
 
-    if (activeMode === "map-editor") {
-      fixedStepRunner.reset();
-      lastFixedSteps = 0;
-      lastDroppedSeconds = 0;
-      if (input.menu) {
-        showGarage();
-        return;
-      }
-      mapEditor?.update(dt);
-      renderGameScene(dt);
-      return;
-    }
-
     if (input.zoneNext && activeMode === "free-drive" && activeTrack.practiceZones?.length) {
       practiceZoneIndex = (practiceZoneIndex + 1) % activeTrack.practiceZones.length;
       resetEvent();
     }
-    const queueStaging = activeMode === "online-lobby" && onlineQueueOpen && !onlineMatchActive;
-    if (input.reset && !queueStaging) resetEvent();
+    if (input.reset) resetEvent();
     if (input.menu) {
-      if (queueStaging) leaveOnlineQueue();
-      else showGarage();
-      return;
-    }
-
-    if (queueStaging) {
-      fixedStepRunner.reset();
-      lastFixedSteps = 0;
-      lastDroppedSeconds = 0;
-      if (input.confirm && onlineRoom) {
-        const local = onlineRoom.players.find((player) => player.id === onlinePlayerId);
-        onlineClient.setReady(!local?.ready);
-      }
-
-      if (onlineRoom) {
-        lockLocalCarToQueue(onlineRoom);
-        onlineGhosts.setRemotePlayers(stagedOnlinePlayers(onlineRoom), onlinePlayerId);
-      } else if (activeQueuePad) {
-        parkLocalCarOnQueuePad();
-      }
-
-      onlineGhosts.root.visible = true;
-      onlineGhosts.update(dt);
-      tireSmoke.reset();
-      carView.sync(car);
-      updateCornerMarkerFlex(cornerMarkers, car, dt);
-      if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt;
-      engineSound.update(car, activeTuning);
-      cameraShake = Math.max(0, cameraShake - dt * 1.7);
-      updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), collisionWorld.cameraObstructions);
-      applyFocusLighting();
-      hud.update(car, drift);
-      hud.updateTimer(Infinity);
-      hud.setOnlineStatus(onlineRoom ? `Queue Pad ${onlineRoom.roomCode}` : "Opening Queue Pad");
-      const ghostPlayers = onlineGhosts.getPlayers();
-      const onlinePlayers: OnlineHudPlayer[] = [
-        {
-          id: "local-player",
-          name: "You",
-          color: 0xf1c75b,
-          position: { ...car.position },
-          speedMph: 0,
-          local: true,
-          distance: 0,
-        },
-        ...ghostPlayers.map((player) => {
-          const distance = Math.hypot(player.position.x - car.position.x, player.position.z - car.position.z);
-          return {
-            ...player,
-            distance,
-            screen: projectOnlineLabel(player.position, distance),
-          };
-        }),
-      ];
-      onlineHud.update({
-        players: onlinePlayers,
-        localPosition: car.position,
-        portalLabel: onlineRoom
-          ? `Pad ${onlineRoom.roomCode}: Press E to ready - Esc leaves`
-          : activeQueuePad
-            ? `Opening private queue pad ${activeQueuePad.roomCode}`
-            : "Joining Drift Attack queue",
-      });
-      hud.root.hidden = false;
-      renderGameScene(dt);
+      showGarage();
       return;
     }
 
     if (activeMode === "drift-attack") {
-      sessionTime = onlineMatchActive && onlineRoom?.matchEndsAt
-        ? Math.max(0, (onlineRoom.matchEndsAt - Date.now()) / 1000)
-        : Math.max(0, (sessionEndsAt - performance.now()) / 1000);
-      if (sessionTime <= 0 && !onlineMatchActive) {
+      sessionTime = Math.max(0, (sessionEndsAt - performance.now()) / 1000);
+      if (sessionTime <= 0) {
         sessionTime = 0;
         finishRun();
         return;
       }
     }
 
-    const runningEndless = activeMode === "endless" && endlessTrack !== null && endlessRun !== null;
     let frameImpact = 0;
-    let scoringSurface = runningEndless && endlessTrack
-      ? endlessTrack.isOnTrack(car.position)
-      : isOnTrack(car.position, activeTrack);
+    let scoringSurface = isOnTrack(car.position, activeTrack);
     const fixedStats = fixedStepRunner.advance(dt, (stepDt) => {
-      if (runningEndless && (!endlessRun || !endlessTrack || !endlessRun.state.alive)) return;
       if (playerRouteProbeEnabled && activeMode === "drift-attack") playerRouteProbe.elapsed += stepDt;
-      const endlessUpdate = runningEndless && endlessTrack ? endlessTrack.update(car.position) : null;
-      if (runningEndless && endlessRun && endlessUpdate) {
-        endlessRun.recordStep(input, car, stepDt);
-        for (const gate of endlessUpdate.passedGates) endlessRun.onGatePassed(gate.distance);
-      }
       const gearBeforeStep = car.gear;
-      const surfaceBeforeStep = runningEndless && endlessTrack
-        ? endlessTrack.isOnTrack(car.position)
-        : isOnTrack(car.position, activeTrack);
+      const surfaceBeforeStep = isOnTrack(car.position, activeTrack);
       const previousPose = captureCarPose(car);
       updateCar(car, input, activeTuning, stepDt, surfaceBeforeStep, handlingProfile);
 
@@ -1674,12 +1017,8 @@ async function boot() {
       }
       playerRouteProbe.previousGear = car.gear;
 
-      const stepOnTrack = runningEndless && endlessTrack
-        ? endlessTrack.isOnTrack(car.position)
-        : isOnTrack(car.position, activeTrack);
-      const stepInRunoff = runningEndless && endlessTrack
-        ? endlessTrack.isInRunoff(car.position)
-        : isInRunoff(car.position, activeTrack);
+      const stepOnTrack = isOnTrack(car.position, activeTrack);
+      const stepInRunoff = isInRunoff(car.position, activeTrack);
       if (stepOnTrack) runoffTime = 0;
       else if (stepInRunoff) runoffTime += stepDt;
       else runoffTime = 999;
@@ -1687,111 +1026,28 @@ async function boot() {
 
       let stepImpact = 0;
       const collisionStart = collisionStatsEnabled ? performance.now() : 0;
-
-      if (runningEndless && endlessTrack) {
-        const guardrailResult = endlessTrack.resolveGuardrail(car, previousPose, activeTuning);
-        const obstacleResult = endlessObstacles
-          ? endlessObstacles.resolveCollisions(car, previousPose, activeTuning)
-          : emptyCollisionResult;
-        stepImpact = Math.max(guardrailResult.severity, obstacleResult.severity);
-      } else {
-        const trackResult = resolveTrackCollisions(car, previousPose, collisionWorld, cones, stepDt, activeTuning);
-        const boundaryResult = resolveTrackSafetyBoundary(car, previousPose, activeTrack, activeTuning);
-        stepImpact = Math.max(trackResult.severity, boundaryResult.severity);
-      }
+      const trackResult = resolveTrackCollisions(car, previousPose, collisionWorld, cones, stepDt, activeTuning);
+      const boundaryResult = resolveTrackSafetyBoundary(car, previousPose, activeTrack, activeTuning);
+      stepImpact = Math.max(trackResult.severity, boundaryResult.severity);
       if (collisionStatsEnabled) {
         updateCollisionStats((performance.now() - collisionStart) * 1000, stepImpact);
       }
       frameImpact = Math.max(frameImpact, stepImpact);
 
-      if (activeMode === "drift-attack" || runningEndless) {
-        const driftZone = runningEndless && endlessTrack
-          ? Math.floor(endlessTrack.getProgress(car.position) / 80)
-          : getDriftZone(car.position, activeTrack);
+      if (activeMode === "drift-attack") {
+        const driftZone = getDriftZone(car.position, activeTrack);
         updateDriftScore(drift, car, stepDt, scoringSurface, driftZone, stepImpact);
         if (playerRouteProbeEnabled) playerRouteProbe.score = drift.totalScore + drift.comboScore;
       }
-      if (runningEndless && endlessRun && endlessTrack) {
-        endlessRun.syncTelemetry({
-          car,
-          drift,
-          trackProgress: endlessTrack.state.progressDistance,
-          nextGateDistance: endlessTrack.getNextGateDistance(car.position),
-          onTrack: scoringSurface,
-        }, stepDt);
-        endlessRun.update(stepDt);
-        endlessRun.onCrash(stepImpact);
-      }
-      if (onlineMatchActive) onlineInputDebt += stepDt;
     });
     lastFixedSteps = fixedStats.steps;
     lastDroppedSeconds = fixedStats.droppedSeconds;
 
-    if (runningEndless && endlessRun) {
-      sessionTime = endlessRun.state.clock;
-      for (const event of endlessRun.consumeEvents()) {
-        if (event.type === "objective-complete") {
-          drift.callout = "Objective complete";
-          drift.calloutTimer = 1.4;
-        } else if (event.type === "gate") {
-          drift.callout = `Gate ${event.gatesPassed} +${event.clockAdded}s`;
-          drift.calloutTimer = 1.35;
-        } else if (event.type === "stage" && event.majorMilestone) {
-          drift.callout = `Milestone - Stage ${event.stage}`;
-          drift.calloutTimer = 1.7;
-        }
-      }
-      if (!endlessRun.state.alive) {
-        finishEndlessRun();
-        return;
-      }
-    }
-
-    const onTrack = runningEndless && endlessTrack
-      ? endlessTrack.isOnTrack(car.position)
-      : isOnTrack(car.position, activeTrack);
+    const onTrack = isOnTrack(car.position, activeTrack);
     if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
     if (frameImpact > 0) cameraShake = Math.max(cameraShake, frameImpact * 0.75);
 
-    if (onlineMatchActive) {
-      if (onlineInputDebt >= 1 / 20) {
-        onlineInputDebt %= 1 / 20;
-        onlineClient.sendInput({
-          seq: ++onlineInputSeq,
-          steer: input.steer,
-          throttle: input.throttle,
-          brake: input.brake,
-          handbrake: input.handbrake,
-          reset: input.reset,
-          pose: {
-            x: car.position.x,
-            z: car.position.z,
-            heading: car.heading,
-            speed: car.speed,
-          },
-          speedMph: car.speed * 2.237,
-          angle: car.slipAngle,
-          rearSlip: car.rearSlipAngle,
-          driftAmount: car.driftAmount,
-          onTrack: scoringSurface,
-          score: drift.totalScore + drift.comboScore,
-          combo: drift.comboScore,
-          multiplier: drift.multiplier,
-        });
-      }
-    }
-
     syncConeMeshes(coneMeshes, cones);
-    if (runningEndless && endlessTrack) {
-      endlessTrackView?.update(endlessTrack.state, car.position);
-      if (endlessObstacles && endlessObstacleView) {
-        endlessObstacles.update(endlessTrack, car, dt);
-        endlessObstacleView.update(endlessObstacles.obstacles);
-      }
-    }
-    if (onlineMatchActive && onlineRoom) onlineGhosts.setRemotePlayers(onlineRoom.players, onlinePlayerId);
-    onlineGhosts.root.visible = activeMode === "online-lobby" || onlineMatchActive;
-    onlineGhosts.update(dt);
 
     const nearGarage = getNearbyGarage();
     if (nearGarage && input.confirm) {
@@ -1806,78 +1062,16 @@ async function boot() {
     if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt;
     engineSound.update(car, activeTuning);
     cameraShake = Math.max(0, cameraShake - dt * 1.7);
-    updateChaseCamera(
-      gameCamera,
-      car,
-      dt,
-      cameraShake,
-      getCameraOrbit(),
-      runningEndless && endlessTrack ? [] : collisionWorld.cameraObstructions,
-    );
+    updateChaseCamera(gameCamera, car, dt, cameraShake, getCameraOrbit(), collisionWorld.cameraObstructions);
     applyFocusLighting();
     hud.update(car, drift);
     hud.updateTimer(sessionTime);
-    if (runningEndless && endlessRun) {
-      const objective = endlessRun.state.objective;
-      const progress = objective.unit === "score"
-        ? `${Math.round(objective.value).toLocaleString("en-US")} / ${Math.round(objective.target).toLocaleString("en-US")}`
-        : objective.unit === "meters"
-          ? `${Math.round(objective.value)} / ${Math.round(objective.target)} m`
-          : objective.unit === "seconds"
-            ? `${objective.value.toFixed(1)} / ${objective.target.toFixed(1)}s`
-            : `${Math.floor(objective.value)} / ${Math.floor(objective.target)}`;
-      hud.setEndlessStats({
-        stage: endlessRun.state.stage,
-        gatesPassed: endlessRun.state.gatesPassed,
-        distance: endlessRun.state.distance,
-        nextGateDistance: endlessRun.state.nextGateDistance,
-        potential: endlessRun.state.potentialBonus,
-        objective: objective.label,
-        objectiveProgress: objective.completed ? "Complete" : progress,
-        bestDelta: Math.round(endlessRun.state.totalScore - endlessRecords.bestScore),
-        risk: endlessRun.state.riskLevel === "safe"
-          ? "Low"
-          : endlessRun.state.riskLevel === "building"
-            ? "Medium"
-            : "High",
-      });
-      onlineHud.hide();
-    } else if (activeMode === "free-drive") {
+    if (activeMode === "free-drive") {
       hud.setPracticeZone(
         nearGarage
           ? "Garage — Press E"
           : activeTrack.practiceZones?.[practiceZoneIndex]?.label ?? "Practice",
       );
-      onlineHud.hide();
-    } else if (activeMode === "online-lobby") {
-      hud.setOnlineStatus("Cruise Lobby");
-      const ghostPlayers = onlineGhosts.getPlayers();
-      const onlinePlayers: OnlineHudPlayer[] = [
-        {
-          id: "local-player",
-          name: "You",
-          color: 0xf1c75b,
-          position: { ...car.position },
-          speedMph: car.speed * 2.237,
-          local: true,
-          distance: 0,
-        },
-        ...ghostPlayers.map((player) => {
-          const distance = Math.hypot(player.position.x - car.position.x, player.position.z - car.position.z);
-          return {
-            ...player,
-            distance,
-            screen: projectOnlineLabel(player.position, distance),
-          };
-        }),
-      ];
-      onlineHud.update({
-        players: onlinePlayers,
-        localPosition: car.position,
-        portalLabel: null,
-      });
-    } else {
-      onlineHud.hide();
     }
     hud.root.hidden = false;
     renderGameScene(dt);
@@ -1893,7 +1087,7 @@ async function boot() {
     const dt = Math.min(timer.getDelta(), 0.25);
 
     if (appState !== prevAppState) {
-      if (appState === "event" || appState === "replay") engineSound.resume();
+      if (appState === "event") engineSound.resume();
       else engineSound.suspend();
       prevAppState = appState;
     }
@@ -1908,8 +1102,6 @@ async function boot() {
       }
     } else if (appState === "event") {
       updateEvent(dt);
-    } else if (appState === "replay") {
-      updateReplay(dt);
     } else {
       renderGameScene(dt);
     }
@@ -1960,26 +1152,15 @@ async function boot() {
     loadingOverlay.dispose();
     disposeSafe(mainMenu);
     disposeSafe(results);
-    disposeSafe(endlessResults);
-    disposeSafe(leaderboardUi);
-    disposeSafe(replayOverlay);
-    disposeSafe(attachmentTuner ?? {});
-    disposeSafe(onlineHud);
-    disposeSafe(onlineMatchUi);
     disposeSafe(hud);
     // 3D systems — explicit owner disposal, exactly once
     carView.dispose();
-    disposeSafe(replayCarView);
     tireTracks.dispose();
     tireSmoke.dispose();
-    disposeSafe(onlineGhosts);
-    endlessTrackView?.dispose();
-    disposeSafe(endlessObstacleView ?? {});
     postPipeline?.dispose();
-    disposeSafe(mapEditor ?? {});
     performanceMonitor.dispose();
-    queueSlab.dispose();
-    onlineClient.disconnect();
+    // Dev systems — disposes all dev-only resources (online, endless, replay, etc.)
+    devSystems.dispose();
     // Scene resources — explicit owner disposal only, no broad traversal
     trackView.dispose();
     gameScene.clear();

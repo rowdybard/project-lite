@@ -1,6 +1,29 @@
 import type { CarTuning } from "./types";
 
-export type ModeId = "online-lobby" | "map-editor" | "drift-attack" | "endless" | "free-drive" | "drag-race" | "lap-race";
+export type PublicModeId = "drift-attack" | "free-drive";
+export type DevModeId = "online-lobby" | "endless" | "map-editor";
+export type ModeId = PublicModeId | DevModeId;
+
+const publicModes = new Set<PublicModeId>(["drift-attack", "free-drive"]);
+const devModes = new Set<DevModeId>(["online-lobby", "endless", "map-editor"]);
+
+export function isPublicMode(value: unknown): value is PublicModeId {
+  return typeof value === "string" && publicModes.has(value as PublicModeId);
+}
+
+export function isDevMode(value: unknown): value is DevModeId {
+  return typeof value === "string" && devModes.has(value as DevModeId);
+}
+
+export function isPlayableMode(value: unknown): value is ModeId {
+  return isPublicMode(value) || isDevMode(value);
+}
+
+export function normalizeSelectedMode(value: unknown, devSystemsEnabled: boolean): ModeId {
+  if (isPublicMode(value)) return value;
+  if (devSystemsEnabled && isDevMode(value)) return value;
+  return "free-drive";
+}
 export type CustomizationSlot =
   | "selectedCar"
   | "paint"
@@ -87,13 +110,7 @@ export const modeOptions: CustomizationOption[] = [
   ...(mapEditorEnabled ? [{ id: "map-editor", label: "Map Editor (Dev)" }] : []),
   { id: "drift-attack", label: "Drift Attack" },
   { id: "free-drive", label: "Practice Grounds" },
-  { id: "drag-race", label: "Drag Race", disabled: true },
-  { id: "lap-race", label: "Lap Race", disabled: true },
 ];
-
-export function isPlayableMode(mode: string): mode is ModeId {
-  return (mapEditorEnabled && mode === "map-editor") || mode === "drift-attack" || mode === "free-drive";
-}
 
 export const customizationCategories: CustomizationCategory[] = [
   {
@@ -208,7 +225,7 @@ export function loadCustomization(): CarCustomization {
     try {
       const g = JSON.parse(global);
       if (g.selectedCar && allSelectableCarOptions.some((o) => o.id === g.selectedCar)) selectedCar = g.selectedCar;
-      if (g.selectedMode && isPlayableMode(g.selectedMode)) selectedMode = g.selectedMode;
+      if (g.selectedMode) selectedMode = normalizeSelectedMode(g.selectedMode, __DEV_SYSTEMS__);
     } catch { /* ignore */ }
   }
   const perCar = window.localStorage.getItem(storageKeyPrefix + selectedCar);
