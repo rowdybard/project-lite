@@ -231,6 +231,7 @@ async function createRoadFromPath(track: TrackConfig, indoor = false) {
   group.add(createRoadWearDecals(samples, roadWidth, indoor));
   group.add(createPaintedLines(samples, roadWidth, indoor));
   group.add(createPracticeAreas(track, samples, roadWidth, indoor));
+  group.add(createPracticeGarage(track));
   group.add(await createModePortals(track));
   group.add(createOnlineLobbyDressing(track));
   group.add(createCurbs(track, samples, roadWidth, dressing, indoor));
@@ -264,6 +265,70 @@ function createPracticeAreaSurface(
   mesh.position.set(area.x, -0.012, area.z);
   mesh.rotation.y = heading;
   return mesh;
+}
+
+function createPracticeGarage(track: TrackConfig) {
+  const group = new Group();
+  if (track.id !== "practice-grounds") return group;
+
+  const position = track.start;
+  const width = 38;
+  const depth = 44;
+  const height = 12;
+  const concrete = createConcreteMaterial({ x: 5, y: 3 });
+  const rubber = createRubberMaterial({ x: 3, y: 2 }, 0.34);
+  const wall = new MeshStandardMaterial({ color: 0x1d252d, roughness: 0.7, metalness: 0.12, envMapIntensity: 0.3 });
+  const roof = new MeshStandardMaterial({ color: 0x111820, roughness: 0.62, metalness: 0.36, envMapIntensity: 0.38 });
+  const frame = new MeshStandardMaterial({ color: 0x273541, roughness: 0.42, metalness: 0.68, envMapIntensity: 0.46 });
+  const accent = new MeshStandardMaterial({ color: 0xd0a63e, emissive: 0x3b2300, emissiveIntensity: 0.7, roughness: 0.42, metalness: 0.28 });
+  const fixture = new MeshStandardMaterial({ color: 0xf4f8ff, emissive: 0xaed9ff, emissiveIntensity: 3.2, roughness: 0.25 });
+
+  group.position.set(position.x, 0, position.z);
+  group.rotation.y = position.heading;
+  const floor = new Mesh(new PlaneGeometry(width, depth), concrete);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  group.add(floor);
+  const servicePad = new Mesh(new PlaneGeometry(9, 8), rubber);
+  servicePad.rotation.x = -Math.PI / 2;
+  servicePad.position.y = 0.018;
+  servicePad.receiveShadow = true;
+  group.add(servicePad);
+  const backWall = new Mesh(new BoxGeometry(width, height, 0.42), wall);
+  backWall.position.set(0, height / 2, -depth / 2);
+  backWall.receiveShadow = true;
+  group.add(backWall);
+  for (const x of [-width / 2, width / 2]) {
+    const sideWall = new Mesh(new BoxGeometry(0.42, height, depth), wall);
+    sideWall.position.set(x, height / 2, 0);
+    sideWall.receiveShadow = true;
+    group.add(sideWall);
+  }
+  const roofMesh = new Mesh(new BoxGeometry(width + 0.8, 0.48, depth + 0.8), roof);
+  roofMesh.position.y = height;
+  roofMesh.castShadow = true;
+  roofMesh.receiveShadow = true;
+  group.add(roofMesh);
+  for (const z of [-depth / 2 + 3, -11, 0, 11, depth / 2 - 3]) {
+    const crossbeam = new Mesh(new BoxGeometry(width, 0.34, 0.34), frame);
+    crossbeam.position.set(0, height - 0.9, z);
+    group.add(crossbeam);
+    for (const x of [-width / 2 + 0.8, width / 2 - 0.8]) {
+      const post = new Mesh(new BoxGeometry(0.5, height, 0.5), frame);
+      post.position.set(x, height / 2, z);
+      post.castShadow = true;
+      group.add(post);
+    }
+  }
+  for (const x of [-11, 0, 11]) {
+    const lightStrip = new Mesh(new BoxGeometry(5.4, 0.12, 0.5), fixture);
+    lightStrip.position.set(x, height - 1.1, -3);
+    group.add(lightStrip);
+  }
+  const fascia = new Mesh(new BoxGeometry(width + 0.7, 0.7, 0.25), accent);
+  fascia.position.set(0, height - 0.7, depth / 2);
+  group.add(fascia);
+  return group;
 }
 
 function createPracticeAreas(track: TrackConfig, samples: Vector3[], roadWidth: number, indoor = false) {

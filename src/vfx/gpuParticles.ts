@@ -133,9 +133,12 @@ const vertexShader = `
     if (uBillboardMode > 0.5) {
       vec3 curVel = aVelocity * exp(-uDrag * age) + vec3(0.0, uGravity * age, 0.0);
       vec3 viewVel = (viewMatrix * (uWorldSpace > 0.5 ? vec4(curVel, 0.0) : modelMatrix * vec4(curVel, 0.0))).xyz;
-      vec2 axis = normalize(viewVel.xy + vec2(0.00001, 0.0));
+      float viewSpeed2D = length(viewVel.xy);
+      vec2 axis = viewSpeed2D > 0.01
+        ? viewVel.xy / viewSpeed2D
+        : vec2(0.0, 1.0);
       vec2 perp = vec2(-axis.y, axis.x);
-      float speed = length(viewVel.xy);
+      float speed = viewSpeed2D;
       mvPosition.xy += perp * corner.x * size + axis * corner.y * (size + speed * uStretch);
     } else {
       float rot = rotSpeed * age + seed * 6.28318;
@@ -202,7 +205,8 @@ export function createRadialSpriteTexture(size = 128, innerAlpha = 0.75) {
 }
 
 export function createGpuParticleSystem(options: ParticleSystemOptions): GpuParticleSystem {
-  const capacity = claimParticleBudget(options.maxInstances ?? 512);
+  const claimed = claimParticleBudget(options.maxInstances ?? 512);
+  const capacity = Math.max(1, claimed);
   const blending = options.blending ?? "normal";
   const billboardMode = options.billboard === "velocity" ? 1 : 0;
   const worldSpace = options.space !== "local";
@@ -389,7 +393,7 @@ export function createGpuParticleSystem(options: ParticleSystemOptions): GpuPart
       if (!options.sizeOverLife) sizeLut.dispose();
       if (!options.opacityOverLife) opacityLut.dispose();
       if (!options.colorOverLife) colorLut.dispose();
-      releaseParticleBudget(capacity);
+      releaseParticleBudget(claimed);
     },
   };
 }

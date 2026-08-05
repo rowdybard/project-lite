@@ -32,7 +32,6 @@ import { createScene, updateSceneLighting } from "./render/app/createScene";
 import { createArenaLightRig, type ArenaLightRig } from "./render/arena/lightRig";
 import { bakeArenaEnvironment } from "./render/arena/environmentBake";
 import { createPostPipeline, type PostPipeline } from "./render/post/postPipeline";
-import { createGarageView } from "./render/garage/garageView";
 import { createCarView } from "./render/objects/carView";
 import { createTireSmoke } from "./render/objects/tireSmokeGpu";
 import { createTireTracks } from "./render/objects/tireTracks";
@@ -40,6 +39,8 @@ import { createTrackView, updateCornerMarkerFlex, type TrackViewResult } from ".
 import { createOnlineGhosts } from "./render/objects/onlineGhosts";
 import { createQueueSlab } from "./render/objects/queueSlab";
 import { createGarageUi } from "./ui/garageUi";
+import { createMainMenu } from "./ui/mainMenu";
+import { createLoadingOverlay } from "./ui/loadingOverlay";
 import { createEndlessResultsOverlay, createHud, createResultsOverlay } from "./ui/hud";
 import { createOnlineHud, type OnlineHudPlayer } from "./ui/onlineHud";
 import { createOnlineMatchUi } from "./ui/onlineMatchUi";
@@ -60,6 +61,7 @@ import {
 } from "./net/protocol";
 import { createMapEditor } from "./game/editor/mapEditor";
 import { createEndlessTrack } from "./game/endless/endlessTrack";
+import { createObstacleManager } from "./game/endless/endlessObstacles";
 import { createEndlessState } from "./game/endless/endlessState";
 import { PHYSICS_VERSION, REPLAY_FIXED_STEP_SECONDS } from "./game/endless/physicsVersion";
 import { createReplayInputSampler, deserializeReplay, type ReplayData } from "./game/endless/replay";
@@ -70,6 +72,7 @@ import {
   type EndlessRunSummary,
 } from "./game/endless/records";
 import { createEndlessTrackView } from "./render/endless/endlessTrackView";
+import { createObstacleCarView } from "./render/endless/obstacleCarView";
 import { createReplayCarView } from "./render/endless/replayCarView";
 import { createLeaderboardClient } from "./net/leaderboard";
 import { createLeaderboardUi } from "./ui/leaderboardUi";
@@ -84,9 +87,17 @@ if (import.meta.hot) {
 }
 
 async function boot() {
-  document.querySelector<HTMLDivElement>("#app")!.innerHTML = '<canvas id="game"></canvas>';
+  document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
+    <canvas id="game"></canvas>
+    <div class="boot-overlay" data-boot-overlay>
+      <div class="boot-overlay__mark">Project Lite</div>
+      <p>Loading</p>
+      <span></span>
+    </div>
+  `;
 
   const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
+  const bootOverlay = document.querySelector<HTMLElement>("[data-boot-overlay]")!;
   canvas.tabIndex = 0;
   canvas.addEventListener("pointerdown", () => canvas.focus());
   canvas.focus();
@@ -208,10 +219,8 @@ async function boot() {
   setHudCarName();
   hud.root.hidden = true;
 
-  const garageView = createGarageView(canvas, renderer, customization);
   const attachmentTuner = createAttachmentTuner((att) => {
     carView.applyAttachments(att);
-    garageView.carView.applyAttachments(att);
   });
   const runLength = 90;
   const fixedStepRunner = createFixedStepRunner(1 / 120, 0.1);
@@ -224,6 +233,8 @@ async function boot() {
   let appState: AppState = "garage";
   let activeMode: ModeId = customization.selectedMode;
   let endlessTrack: ReturnType<typeof createEndlessTrack> | null = null;
+  let endlessObstacles: ReturnType<typeof createObstacleManager> | null = null;
+  let endlessObstacleView: ReturnType<typeof createObstacleCarView> | null = null;
   let endlessRun: ReturnType<typeof createEndlessState> | null = null;
   let activeEndlessBoard: LeaderboardBoard = "daily";
   let activeEndlessSeed = 1;
@@ -456,17 +467,22 @@ async function boot() {
     resetDrift(drift);
     if (activeMode === "endless") {
       endlessTrack = createEndlessTrack(activeEndlessSeed);
+      endlessObstacles = createObstacleManager(activeEndlessSeed);
       endlessRun = createEndlessState(activeEndlessSeed, {
         carId: customization.selectedCar,
         tuningPreset: customization.tuningPreset,
       });
       endlessTrackView?.dispose();
       endlessTrackView = createEndlessTrackView(gameScene);
+      endlessObstacleView?.root.parent?.remove(endlessObstacleView.root);
+      endlessObstacleView = createObstacleCarView(gameScene);
+      endlessObstacleView.reset();
       endlessTrackView.update(endlessTrack.state, car.position);
       sessionTime = endlessRun.state.clock;
       recordEndlessRunStart(endlessRecords);
     } else {
       endlessTrack = null;
+      endlessObstacles = null;
       endlessRun = null;
       sessionTime = activeMode === "drift-attack" ? runLength : Infinity;
     }
@@ -486,7 +502,17 @@ async function boot() {
     resetChaseCamera(gameCamera, car);
   };
 
-  const showGarage = () => {
+  const mainMenu = createMainMenu({
+    onPlay: () => void startEvent(),
+    onOptions: () => showOptionsMenu(),
+  });
+  const loadingOverlay = createLoadingOverlay();
+  mainMenu.hide();
+
+  const modeLabel = (mode: ModeId) =>
+    mode === "drift-attack" ? "Loading Drift Attack" : "Opening Practice Grounds";
+
+  const showMainMenu = () => {
     startEventPending = false;
     portalLaunchPending = false;
     resetInputState();
@@ -498,6 +524,11 @@ async function boot() {
     endlessTrackView?.dispose();
     endlessTrackView = null;
     endlessTrack = null;
+    endlessObstacles = null;
+    if (endlessObstacleView) {
+      endlessObstacleView.root.parent?.remove(endlessObstacleView.root);
+      endlessObstacleView = null;
+    }
     endlessRun = null;
     replaySession = null;
     hud.root.hidden = true;
@@ -517,12 +548,29 @@ async function boot() {
     replayCarView.root.visible = false;
     tireTracks.root.visible = true;
     tireSmoke.root.visible = true;
+    customization = { ...customization, selectedMode: "free-drive" };
+    saveCustomization(customization);
     garageUi.update(customization);
-    garageUi.show();
-    garageView.applyCustomization(customization);
+    garageUi.hide();
+    mainMenu.show();
+    mainMenu.setPlayEnabled(true);
     if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
     else attachmentTuner.hide();
+    void switchTrack(practiceTrack).then(() => {
+      activeMode = "free-drive";
+      practiceZoneIndex = 0;
+      resetEvent();
+      setHudCarName();
+      bootOverlay.classList.add("is-ready");
+    });
   };
+
+  const showOptionsMenu = () => {
+    mainMenu.hide();
+    garageUi.show();
+  };
+
+  const showGarage = showMainMenu;
 
   const startEvent = async () => {
     const now = performance.now();
@@ -530,12 +578,14 @@ async function boot() {
     startEventPending = true;
     startEventRequestedAt = now;
     if (!isPlayableMode(customization.selectedMode)) {
-      customization = { ...customization, selectedMode: "drift-attack" };
+      customization = { ...customization, selectedMode: "free-drive" };
       saveCustomization(customization);
       garageUi.update(customization);
     }
     resetInputState();
     activeMode = customization.selectedMode;
+    mainMenu.setPlayEnabled(false);
+    loadingOverlay.show(modeLabel(activeMode));
     try {
       if (activeMode === "endless") {
         const launch = await resolveEndlessLaunch();
@@ -551,6 +601,7 @@ async function boot() {
       leaderboardUi.hide();
       replayOverlay.hide();
       garageUi.hide();
+      mainMenu.hide();
       attachmentTuner.hide();
       resetEvent();
       if (activeMode !== "online-lobby") clearActiveQueuePad();
@@ -580,14 +631,19 @@ async function boot() {
                 : "drift-attack",
         );
       }
+      loadingOverlay.hide();
       canvas.focus();
     } catch (error) {
       console.error("Could not start event", error);
+      loadingOverlay.hide();
       appState = "garage";
       hud.root.hidden = true;
-      garageUi.show();
+      garageUi.hide();
+      mainMenu.show();
+      mainMenu.setPlayEnabled(true);
     } finally {
       startEventPending = false;
+      mainMenu.setPlayEnabled(true);
     }
   };
 
@@ -740,14 +796,6 @@ async function boot() {
 
   const launchModeFromPortal = (mode: "drift-attack" | "free-drive") => {
     if (portalLaunchPending || startEventPending) return;
-    if (mode === "drift-attack" && activeMode === "online-lobby") {
-      if (onlineQueueOpen) {
-        onlineMatchUi.show(onlineRoom?.roomCode ?? activeQueuePad?.roomCode);
-        return;
-      }
-      onlineMatchUi.showModal();
-      return;
-    }
     portalLaunchPending = true;
     customization = { ...customization, selectedMode: mode };
     saveCustomization(customization);
@@ -842,17 +890,9 @@ async function boot() {
       }
       saveCustomization(customization);
       garageUi.update(customization);
-      garageView.applyCustomization(customization);
       carView.applyCustomization(customization);
       if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
       else attachmentTuner.hide();
-    },
-    onModeChange(mode) {
-      startEventPending = false;
-      const nextMode = isPlayableMode(mode) ? mode : "drift-attack";
-      customization = { ...customization, selectedMode: nextMode };
-      saveCustomization(customization);
-      garageUi.update(customization);
     },
     onProfileChange(profile) {
       playerProfile = { name: profile.name.trim().slice(0, 18) || "Driver" };
@@ -861,15 +901,14 @@ async function boot() {
     },
     onStart: startEvent,
     onOpenVfxLab: () => vfxEditor.show(),
-    onOpenLeaderboard: () => leaderboardUi.show(),
+    onBack: () => showMainMenu(),
   });
 
-  const results = createResultsOverlay(startEvent, showGarage);
+  const results = createResultsOverlay(startEvent, showMainMenu);
   const endlessResults = createEndlessResultsOverlay({
     onRetry: () => launchEndless("all-time"),
     onDailyRetry: () => void launchDailyEndless(),
-    onLeaderboard: () => leaderboardUi.show(activeEndlessBoard),
-    onGarage: showGarage,
+    onGarage: showMainMenu,
   });
   hud.root.hidden = true;
 
@@ -880,7 +919,6 @@ async function boot() {
     const aspect = window.innerWidth / window.innerHeight;
     gameCamera.aspect = aspect;
     gameCamera.updateProjectionMatrix();
-    garageView.setAspect(aspect);
   };
   window.addEventListener("resize", onResize);
   onResize();
@@ -893,6 +931,7 @@ async function boot() {
   const engineSound = createEngineSound();
 
   bindInput();
+  showMainMenu();
 
   function syncConeMeshes(meshes: Mesh[], cones: Cone[]) {
     for (let i = 0; i < meshes.length && i < cones.length; i++) {
@@ -908,7 +947,7 @@ async function boot() {
   }
 
   function getNearbyPortal() {
-    if (activeMode !== "online-lobby" || !activeTrack.portals) return null;
+    if (activeMode !== "free-drive" || !activeTrack.portals) return null;
     return activeTrack.portals.find((portal) => {
       return Math.hypot(car.position.x - portal.x, car.position.z - portal.z) <= portal.radius;
     }) ?? null;
@@ -996,8 +1035,7 @@ async function boot() {
     replayCarView.root.visible = false;
     endlessTrackView?.dispose();
     endlessTrackView = null;
-    showGarage();
-    leaderboardUi.show();
+    showMainMenu();
   }
 
   function updateReplay(dt: number) {
@@ -1228,13 +1266,16 @@ async function boot() {
       scoringSurface = stepOnTrack || (stepInRunoff && runoffTime <= 1.15);
 
       const boundaryImpact = runningEndless ? 0 : keepCarNearTrack(car, activeTrack);
-      const collisionImpact = updateTrackCollision(
-        car,
-        runningEndless && endlessTrack ? endlessTrack.getColliders() : colliders,
-        stepDt,
-        activeTuning,
-      );
-      const stepImpact = Math.max(boundaryImpact, collisionImpact);
+      const guardrailImpact = runningEndless && endlessTrack
+        ? endlessTrack.resolveGuardrail(car)
+        : 0;
+      const trackImpact = runningEndless
+        ? 0
+        : updateTrackCollision(car, colliders, stepDt, activeTuning);
+      const obstacleImpact = runningEndless && endlessObstacles
+        ? endlessObstacles.checkCollision(car)
+        : 0;
+      const stepImpact = Math.max(boundaryImpact, guardrailImpact, trackImpact, obstacleImpact);
       frameImpact = Math.max(frameImpact, stepImpact);
 
       if (activeMode === "drift-attack" || runningEndless) {
@@ -1315,7 +1356,13 @@ async function boot() {
     }
 
     syncConeMeshes(coneMeshes, colliders.cones);
-    if (runningEndless && endlessTrack) endlessTrackView?.update(endlessTrack.state, car.position);
+    if (runningEndless && endlessTrack) {
+      endlessTrackView?.update(endlessTrack.state, car.position);
+      if (endlessObstacles && endlessObstacleView) {
+        endlessObstacles.update(endlessTrack, car, dt);
+        endlessObstacleView.update(endlessObstacles.obstacles);
+      }
+    }
     if (onlineMatchActive && onlineRoom) onlineGhosts.setRemotePlayers(onlineRoom.players, onlinePlayerId);
     onlineGhosts.root.visible = activeMode === "online-lobby" || onlineMatchActive;
     onlineGhosts.update(dt);
@@ -1366,7 +1413,7 @@ async function boot() {
       });
       onlineHud.hide();
     } else if (activeMode === "free-drive") {
-      hud.setPracticeZone(activeTrack.practiceZones?.[practiceZoneIndex]?.label ?? "Practice");
+      hud.setPracticeZone(nearbyPortal ? `${nearbyPortal.label} Pad — Press E` : activeTrack.practiceZones?.[practiceZoneIndex]?.label ?? "Practice");
       onlineHud.hide();
     } else if (activeMode === "online-lobby") {
       hud.setOnlineStatus(nearbyPortal ? `${nearbyPortal.label} Hauler` : "Cruise Lobby");
@@ -1420,8 +1467,10 @@ async function boot() {
     if (appState === "garage") {
       lastFixedSteps = 0;
       lastDroppedSeconds = 0;
-      garageView.update(dt);
-      garageView.render();
+      carView.sync(car);
+      updateSceneLighting(gameScene, car.position);
+      applyFocusLighting();
+      renderGameScene(dt);
     } else if (appState === "event") {
       updateEvent(dt);
     } else if (appState === "replay") {

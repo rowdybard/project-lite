@@ -1,4 +1,5 @@
 import type { Barrier, TrackColliders } from "../simulation/trackCollision";
+import type { CarState } from "../types";
 import type { Vec2 } from "../types";
 import {
   createTrackGenerator,
@@ -103,6 +104,8 @@ export type EndlessTrack = {
   nextGate(): Gate | null;
   consumePassedGates(): Gate[];
   getColliders(): TrackColliders;
+  /** Centerline-distance guardrail pushback. Returns impact severity 0..1. */
+  resolveGuardrail(car: CarState): number;
 };
 
 function projectToSegment(point: Vec2, segment: TrackSegment) {
@@ -211,32 +214,29 @@ export function createEndlessTrack(seed: number, options: EndlessTrackOptions = 
   };
 
   const rebuildBarriers = () => {
-    const nextBarriers: Barrier[] = [];
-    for (const segment of segments) {
-      const tangentX = (segment.b.x - segment.a.x) / segment.length;
-      const tangentZ = (segment.b.z - segment.a.z) / segment.length;
-      const normalX = -tangentZ;
-      const normalZ = tangentX;
-      const centerX = (segment.a.x + segment.b.x) * 0.5;
-      const centerZ = (segment.a.z + segment.b.z) * 0.5;
-      const edgeDistance = segment.roadWidth * 0.5 + config.guardrailEdgeOffset;
-      const angle = Math.atan2(tangentZ, tangentX);
-      for (const side of [-1, 1]) {
-        nextBarriers.push({
-          x: centerX + normalX * edgeDistance * side,
-          z: centerZ + normalZ * edgeDistance * side,
-          angle,
-          // Small overlap seals joins between streaming pieces on sharper bends.
-          halfLength: segment.length * 0.5 + 0.55,
-          halfWidth: config.guardrailHalfWidth,
-        });
-      }
-    }
-    colliders.barriers.splice(0, colliders.barriers.length, ...nextBarriers);
+    // Guardrail collision is now handled by resolveGuardrail() using centerline
+    // projection, not box barriers. Keep the barriers array empty so
+    // updateTrackCollision (used for cones) doesn't process stale boxes.
+    colliders.barriers.length = 0;
   };
 
   const project = (point: Vec2): TrackProjection => {
     if (segments.length === 0) throw new Error("Endless track has no generated segments.");
+    // If the point is non-finite, return the last segment's projection as a
+    // safe fallback so downstream code doesn't propagate NaN.
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.z)) {
+      const fallback = segments[segments.length - 1];
+      return {
+        point: { x: fallback.b.x, z: fallback.b.z },
+        distance: fallback.endDistance,
+        lateralDistance: 0,
+        signedLateralDistance: 0,
+        heading: fallback.heading,
+        roadWidth: fallback.roadWidth,
+        segment: fallback,
+        segmentT: 1,
+      };
+    }
     let bestSegment = segments[0];
     let best = projectToSegment(point, bestSegment);
     for (let index = 1; index < segments.length; index += 1) {
@@ -306,7 +306,12 @@ export function createEndlessTrack(seed: number, options: EndlessTrackOptions = 
   const update = (carPosition: Vec2): EndlessTrackUpdate => {
     const revisionBefore = state.revision;
     let projection = project(carPosition);
-    state.progressDistance = Math.max(state.progressDistance, projection.distance);
+    // Guard against NaN car positions — if the car is at NaN, keep the last
+    // known good progress so the track keeps streaming and the run can end
+    // gracefully instead of freezing.
+    if (Number.isFinite(projection.distance)) {
+      state.progressDistance = Math.max(state.progressDistance, projection.distance);
+    }
     state.roadWidth = projection.roadWidth;
 
     let geometryChanged = generateThrough(state.progressDistance + config.aheadDistance);
@@ -381,6 +386,50 @@ export function createEndlessTrack(seed: number, options: EndlessTrackOptions = 
     return gate ? Math.max(0, gate.distance - progress) : Infinity;
   };
 
+  const resolveGuardrail = (car: CarState): number => {
+    const projection = project(car.position);
+    const halfWidth = projection.roadWidth * 0.5;
+    const edge = halfWidth + config.guardrailEdgeOffset;
+    const lateral = projection.signedLateralDistance;
+    const absLateral = Math.abs(lateral);
+
+    // Guard against NaN — if the car position is non-finite, don't push it further.
+    if (!Number.isFinite(absLateral)) return 0;
+
+    // Car half-width approximated from collision circle radius used in trackCollision.ts
+    const carHalfWidth = 1.38;
+    const limit = edge - carHalfWidth;
+    if (absLateral <= limit) return 0;
+
+    // Push the car back inside the guardrail.
+    const side = lateral >= 0 ? 1 : -1;
+    const overshoot = absLateral - limit;
+    const tangentX = Math.sin(projection.heading);
+    const tangentZ = Math.cos(projection.heading);
+    const normalX = -tangentZ;
+    const normalZ = tangentX;
+    const pushX = normalX * side * overshoot * 0.82;
+    const pushZ = normalZ * side * overshoot * 0.82;
+    car.position.x += pushX;
+    car.position.z += pushZ;
+
+    // Kill inward velocity component and compute impact severity.
+    const normalSpeed = car.velocity.x * normalX * side + car.velocity.z * normalZ * side;
+    if (normalSpeed > 0) {
+      car.velocity.x -= normalSpeed * 1.18 * normalX * side;
+      car.velocity.z -= normalSpeed * 1.18 * normalZ * side;
+      car.velocity.x *= 0.88;
+      car.velocity.z *= 0.88;
+
+      const leverX = (car.position.x - projection.point.x);
+      const leverZ = (car.position.z - projection.point.z);
+      const hitOffset = leverX * (normalZ * side) - leverZ * (normalX * side);
+      car.yawVelocity += hitOffset * Math.abs(normalSpeed) * 0.012;
+      return Math.min(1, Math.abs(normalSpeed) / 18);
+    }
+    return 0;
+  };
+
   return {
     state,
     update,
@@ -394,5 +443,6 @@ export function createEndlessTrack(seed: number, options: EndlessTrackOptions = 
     nextGate: () => findNextGate(),
     consumePassedGates: () => passedGateQueue.splice(0, passedGateQueue.length),
     getColliders: () => colliders,
+    resolveGuardrail,
   };
 }

@@ -52,7 +52,7 @@ export const defaultCustomization: CarCustomization = {
   sideSkirts: "none",
   underglow: "off",
   tuningPreset: "balanced",
-  selectedMode: "drift-attack",
+  selectedMode: "free-drive",
 };
 
 export const carOptions: CustomizationOption[] = [];
@@ -62,7 +62,6 @@ export const importedCarOptions: CustomizationOption[] = [
   { id: "pack-pickup", label: "Pack Pickup" },
   { id: "pack-hatchback", label: "Pack Hatchback" },
   { id: "pack-sedan", label: "Pack Sedan" },
-  { id: "pack-muscle", label: "Pack Muscle" },
   { id: "pack-muscle-2", label: "Pack Muscle 2" },
 ];
 
@@ -77,7 +76,6 @@ export const carTuningPaths: Record<string, string> = {
   "pack-pickup": "/assets/cars/imports/pickup-tuning.json",
   "pack-hatchback": "/assets/cars/imports/hatchback-tuning.json",
   "pack-sedan": "/assets/cars/imports/sedan-tuning.json",
-  "pack-muscle": "/assets/cars/imports/muscle-tuning.json",
   "pack-muscle-2": "/assets/cars/imports/muscle2-tuning.json",
 };
 
@@ -85,17 +83,15 @@ export const carTuningPaths: Record<string, string> = {
 export const mapEditorEnabled = new URLSearchParams(window.location.search).get("devMapEditor") === "1";
 
 export const modeOptions: CustomizationOption[] = [
-  { id: "online-lobby", label: "Online" },
   ...(mapEditorEnabled ? [{ id: "map-editor", label: "Map Editor (Dev)" }] : []),
   { id: "drift-attack", label: "Drift Attack" },
-  { id: "endless", label: "Endless" },
   { id: "free-drive", label: "Practice Grounds" },
   { id: "drag-race", label: "Drag Race", disabled: true },
   { id: "lap-race", label: "Lap Race", disabled: true },
 ];
 
 export function isPlayableMode(mode: string): mode is ModeId {
-  return mode === "online-lobby" || (mapEditorEnabled && mode === "map-editor") || mode === "drift-attack" || mode === "endless" || mode === "free-drive";
+  return (mapEditorEnabled && mode === "map-editor") || mode === "drift-attack" || mode === "free-drive";
 }
 
 export const customizationCategories: CustomizationCategory[] = [

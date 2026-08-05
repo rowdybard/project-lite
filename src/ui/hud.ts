@@ -169,7 +169,6 @@ export function createHud() {
 export function createEndlessResultsOverlay(callbacks: {
   onRetry: () => void;
   onDailyRetry: () => void;
-  onLeaderboard: () => void;
   onGarage: () => void;
 }) {
   const root = document.createElement("div");
@@ -197,7 +196,6 @@ export function createEndlessResultsOverlay(callbacks: {
       <div class="session-card__actions endless-results__actions">
         <button data-endless-retry type="button">Run Again</button>
         <button data-endless-daily type="button">Daily Seed</button>
-        <button class="session-card__secondary" data-endless-board type="button">Leaderboard</button>
         <button class="session-card__secondary" data-endless-garage type="button">Garage</button>
       </div>
     </section>
@@ -205,7 +203,6 @@ export function createEndlessResultsOverlay(callbacks: {
   document.body.append(root);
   root.querySelector("[data-endless-retry]")!.addEventListener("click", callbacks.onRetry);
   root.querySelector("[data-endless-daily]")!.addEventListener("click", callbacks.onDailyRetry);
-  root.querySelector("[data-endless-board]")!.addEventListener("click", callbacks.onLeaderboard);
   root.querySelector("[data-endless-garage]")!.addEventListener("click", callbacks.onGarage);
 
   return {

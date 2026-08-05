@@ -142,9 +142,9 @@ export function createEndlessTrackView(scene: Scene) {
   const savedBackground = scene.background;
   const savedFog = scene.fog;
   const savedEnvironmentIntensity = scene.environmentIntensity;
-  scene.background = new Color(0x04070c);
-  scene.fog = new FogExp2(0x04070c, 0.0062);
-  scene.environmentIntensity = 0.17;
+  scene.background = new Color(0x0d1117);
+  scene.fog = new FogExp2(0x0d1117, 0.0038);
+  scene.environmentIntensity = 0.42;
 
   const outdoorLights = scene.userData.outdoorLights as Record<string, { intensity: number; visible: boolean }> | undefined;
   const savedLights = outdoorLights
@@ -152,13 +152,13 @@ export function createEndlessTrackView(scene: Scene) {
     : null;
   if (outdoorLights) {
     for (const light of Object.values(outdoorLights)) light.visible = true;
-    if (outdoorLights.ambient) outdoorLights.ambient.intensity = 0.13;
-    if (outdoorLights.hemi) outdoorLights.hemi.intensity = 0.55;
-    if (outdoorLights.sun) outdoorLights.sun.intensity = 1.7;
-    if (outdoorLights.skyFill) outdoorLights.skyFill.intensity = 0.22;
+    if (outdoorLights.ambient) outdoorLights.ambient.intensity = 0.32;
+    if (outdoorLights.hemi) outdoorLights.hemi.intensity = 0.9;
+    if (outdoorLights.sun) outdoorLights.sun.intensity = 3.2;
+    if (outdoorLights.skyFill) outdoorLights.skyFill.intensity = 0.5;
   }
 
-  const groundMaterial = new MeshStandardMaterial({ color: 0x06090d, roughness: 1, metalness: 0 });
+  const groundMaterial = new MeshStandardMaterial({ color: 0x141a22, roughness: 1, metalness: 0 });
   const ground = new Mesh(new PlaneGeometry(460, 460), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.055;
@@ -166,29 +166,32 @@ export function createEndlessTrackView(scene: Scene) {
   root.add(ground);
 
   const roadMaterial = createAsphaltMaterial({ x: 4.5, y: 24 });
-  roadMaterial.color.setHex(0x20262b);
-  roadMaterial.roughness = 0.92;
-  roadMaterial.envMapIntensity = 0.09;
+  roadMaterial.color.setHex(0x2e353d);
+  roadMaterial.roughness = 0.88;
+  roadMaterial.envMapIntensity = 0.22;
   let road = new Mesh(geometryFromSegments({ roadWidth: 20, segments: [], gates: [] }), roadMaterial);
+  road.frustumCulled = false;
   road.receiveShadow = true;
   root.add(road);
 
   const railMaterial = new MeshStandardMaterial({
-    color: 0x27333d,
-    roughness: 0.52,
-    metalness: 0.46,
-    envMapIntensity: 0.22,
+    color: 0x3a4a5a,
+    roughness: 0.48,
+    metalness: 0.52,
+    envMapIntensity: 0.38,
   });
   const rails = new InstancedMesh(new BoxGeometry(1, 1, 1), railMaterial, maxGuardrails);
+  rails.frustumCulled = false;
   rails.castShadow = false;
   rails.receiveShadow = true;
   rails.count = 0;
   root.add(rails);
 
-  const edgeMaterial = createRoadPaintMaterial({ x: 1, y: 6 }, 0x5b7683, 0.72);
-  edgeMaterial.emissive = new Color(0x082432);
-  edgeMaterial.emissiveIntensity = 0.7;
+  const edgeMaterial = createRoadPaintMaterial({ x: 1, y: 6 }, 0x7a9aad, 0.82);
+  edgeMaterial.emissive = new Color(0x0c3a52);
+  edgeMaterial.emissiveIntensity = 1.2;
   const edges = new InstancedMesh(new BoxGeometry(1, 1, 1), edgeMaterial, maxGuardrails);
+  edges.frustumCulled = false;
   edges.count = 0;
   root.add(edges);
 

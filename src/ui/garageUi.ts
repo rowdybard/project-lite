@@ -1,21 +1,18 @@
 import {
   customizationCategories,
   importedCarOptions,
-  modeOptions,
   type CarCustomization,
   type CustomizationCategory,
   type CustomizationSlot,
-  type ModeId,
 } from "../game/customization";
 import type { PlayerProfile } from "../net/profile";
 
 type GarageUiCallbacks = {
   onCustomizationChange: (slot: CustomizationSlot, value: string) => void;
-  onModeChange: (mode: ModeId) => void;
   onProfileChange: (profile: PlayerProfile) => void;
   onStart: () => void;
   onOpenVfxLab: () => void;
-  onOpenLeaderboard: () => void;
+  onBack: () => void;
 };
 
 function optionButton(option: { id: string; label: string; color?: number; disabled?: boolean }, active: boolean) {
@@ -52,16 +49,15 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
       <header class="garage-header">
         <p>Project Lite</p>
         <h1>Garage</h1>
-        <span>Build, tune, launch</span>
+        <span>Build, tune, drive out</span>
         <label class="garage-profile">
           <small>Driver</small>
           <input data-profile-name maxlength="18" value="${profile.name}" />
         </label>
       </header>
       <aside class="garage-mode">
-        <p class="garage-kicker">Event</p>
-        <h2>Mode Select</h2>
-        <div data-modes></div>
+        <p class="garage-kicker">Practice Grounds</p>
+        <h2>Garage Bay</h2>
         <section class="garage-cars">
           <div class="garage-cars__header">
             <div>
@@ -75,9 +71,9 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
           </div>
           <div class="garage-car-grid" data-cars></div>
         </section>
-        <button class="garage-start" type="button">Start Event</button>
-        <button class="garage-leaderboard" type="button">Leaderboards + Replays</button>
+        <button class="garage-start" type="button">Drive Practice</button>
         <button class="garage-vfx" type="button">VFX Lab</button>
+        <button class="garage-back" type="button">Back to Menu</button>
       </aside>
       <section class="garage-panel">
         <nav class="garage-tabs" data-tabs></nav>
@@ -88,15 +84,6 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
         <div class="garage-options" data-options></div>
       </section>
     `;
-
-    const modes = root.querySelector("[data-modes]")!;
-    for (const mode of modeOptions) {
-      const button = optionButton(mode, customization.selectedMode === mode.id);
-      button.classList.add("garage-mode__button");
-      if (mode.disabled) button.innerHTML += "<small>Coming Soon</small>";
-      button.addEventListener("click", () => callbacks.onModeChange(mode.id as ModeId));
-      modes.append(button);
-    }
 
     const importedSelect = root.querySelector<HTMLSelectElement>("[data-import-cars]")!;
     importedSelect.innerHTML = `<option value="">Choose car</option>`;
@@ -176,7 +163,7 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
     startButton.addEventListener("click", requestStart);
 
     root.querySelector(".garage-vfx")!.addEventListener("click", () => callbacks.onOpenVfxLab());
-    root.querySelector(".garage-leaderboard")!.addEventListener("click", () => callbacks.onOpenLeaderboard());
+    root.querySelector(".garage-back")!.addEventListener("click", () => callbacks.onBack());
 
     const profileName = root.querySelector<HTMLInputElement>("[data-profile-name]")!;
     profileName.addEventListener("change", () => callbacks.onProfileChange({ name: profileName.value }));

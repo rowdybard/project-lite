@@ -261,6 +261,28 @@
           "z": -24
         }
       ],
+      "portals": [
+        {
+          "id": "practice-pad",
+          "mode": "free-drive",
+          "label": "Practice",
+          "x": -150,
+          "z": 22,
+          "heading": 1.55,
+          "radius": 12,
+          "color": 6879487
+        },
+        {
+          "id": "drift-attack-pad",
+          "mode": "drift-attack",
+          "label": "Drift Attack",
+          "x": -104,
+          "z": 28,
+          "heading": 1.42,
+          "radius": 12,
+          "color": 15845166
+        }
+      ],
       "practiceZones": [
         {
           "id": "start",
