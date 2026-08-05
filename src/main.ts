@@ -7,6 +7,7 @@ import {
   isPlayableMode,
   loadCarCustomization,
   loadCustomization,
+  paintColors,
   saveCustomization,
   type CarCustomization,
   type ModeId,
@@ -207,6 +208,22 @@ async function boot() {
   void resolveTireSmokePreset().then((preset) => {
     if (preset) void tireSmoke.applyPreset(preset);
   });
+
+  // Sync tire smoke tint to the current paint color.
+  // Bright pink paint gets pink/white smoke; all other colors use default heat tint.
+  const syncPaintTint = (paintId: string) => {
+    if (paintId === "pink") {
+      const hex = paintColors.pink ?? 0xff2d9b;
+      tireSmoke.setPaintTint({
+        r: ((hex >> 16) & 0xff) / 255,
+        g: ((hex >> 8) & 0xff) / 255,
+        b: (hex & 0xff) / 255,
+      });
+    } else {
+      tireSmoke.setPaintTint(null);
+    }
+  };
+  syncPaintTint(customization.paint);
   const onlineGhosts = createOnlineGhosts();
   const queueSlab = createQueueSlab();
   onlineGhosts.setTrack(activeTrack);
@@ -946,6 +963,7 @@ async function boot() {
       garageUi.update(customization);
       carView.applyCustomization(customization);
       garageView.applyCustomization(customization);
+      syncPaintTint(customization.paint);
       if (attachmentTunerEnabled && isImportedCar(customization.selectedCar)) attachmentTuner.show(customization.selectedCar);
       else attachmentTuner.hide();
     },

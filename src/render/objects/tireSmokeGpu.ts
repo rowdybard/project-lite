@@ -83,6 +83,9 @@ export function createTireSmoke() {
   let currentTexture: Texture = createRadialSpriteTexture();
   let currentLuts: (import("three").DataTexture | null)[] = [];
   let usingDefault = true;
+  // Optional paint-driven tint override. When set, smoke blends toward this color
+  // instead of the default gray heat tint. Cleared by passing null.
+  let paintTint: { r: number; g: number; b: number } | null = null;
 
   let emitters: GpuParticleSystem[] = rearOffsets.map(() => {
     const opts = createDefaultOptions();
@@ -170,6 +173,9 @@ export function createTireSmoke() {
       generation++;  // Invalidate any pending preset application
       resetToDefault();
     },
+    setPaintTint(tint: { r: number; g: number; b: number } | null) {
+      paintTint = tint;
+    },
     update(car: CarState, onTrack: boolean, dt: number) {
       const wheelSlip = Math.max(car.rearSlipVisual, car.handbrakeAmount * 0.72, car.slipAmount * 0.55);
       const activeSlide = Math.max(0, wheelSlip - 0.09);
@@ -180,9 +186,20 @@ export function createTireSmoke() {
       const sin = Math.sin(car.heading);
       const cos = Math.cos(car.heading);
       const heatTint = Math.min(1, car.tireHeat);
-      const tintR = 0.92 + (0.85 - 0.92) * heatTint;
-      const tintG = 0.93 + (0.72 - 0.93) * heatTint;
-      const tintB = 0.94 + (0.6 - 0.94) * heatTint;
+
+      // Default heat-based tint: white -> warm gray as tires heat up
+      let tintR = 0.92 + (0.85 - 0.92) * heatTint;
+      let tintG = 0.93 + (0.72 - 0.93) * heatTint;
+      let tintB = 0.94 + (0.6 - 0.94) * heatTint;
+
+      // When a paint tint is set, blend toward pink/white: fresh smoke is pink-tinted,
+      // fading to white as it ages (driven by heatTint as a proxy for life).
+      if (paintTint) {
+        const pinkWeight = 1 - heatTint * 0.6;  // pink fades as heat rises
+        tintR = paintTint.r * pinkWeight + 0.95 * (1 - pinkWeight);
+        tintG = paintTint.g * pinkWeight + 0.95 * (1 - pinkWeight);
+        tintB = paintTint.b * pinkWeight + 0.95 * (1 - pinkWeight);
+      }
 
       for (let i = 0; i < emitters.length; i++) {
         const offset = rearOffsets[i];

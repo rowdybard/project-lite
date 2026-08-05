@@ -106,6 +106,7 @@ export const customizationCategories: CustomizationCategory[] = [
       { id: "black", label: "Black", color: 0x11151b },
       { id: "green", label: "Green", color: 0x315c43 },
       { id: "purple", label: "Purple", color: 0x514078 },
+      { id: "pink", label: "Bright Pink", color: 0xff2d9b },
     ],
   },
   {
