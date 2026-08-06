@@ -15,7 +15,7 @@ export type OnlinePose = {
 
 export type OnlineCustomization = Pick<
   CarCustomization,
-  "selectedCar" | "paint" | "wheelColor" | "stance" | "spoiler" | "frontLip" | "sideSkirts" | "underglow" | "tuningPreset"
+  "selectedCar" | "paint" | "wheelColor" | "stance" | "spoiler" | "frontLip" | "sideSkirts" | "underglow" | "underglowColor" | "tuningPreset"
 >;
 
 export type OnlinePlayerState = {

@@ -33,6 +33,7 @@ export type CustomizationSlot =
   | "frontLip"
   | "sideSkirts"
   | "underglow"
+  | "underglowColor"
   | "tuningPreset";
 
 export type CarCustomization = {
@@ -44,6 +45,7 @@ export type CarCustomization = {
   frontLip: string;
   sideSkirts: string;
   underglow: string;
+  underglowColor: string;
   tuningPreset: string;
   selectedMode: ModeId;
 };
@@ -74,6 +76,7 @@ export const defaultCustomization: CarCustomization = {
   frontLip: "none",
   sideSkirts: "none",
   underglow: "off",
+  underglowColor: "#2f8fff",
   tuningPreset: "balanced",
   selectedMode: "free-drive",
 };
@@ -181,6 +184,7 @@ export const customizationCategories: CustomizationCategory[] = [
       { id: "blue", label: "Blue", color: 0x2f8fff },
       { id: "green", label: "Green", color: 0x55e27d },
       { id: "purple", label: "Purple", color: 0x9a5cff },
+      { id: "custom", label: "Custom" },
     ],
   },
   {
@@ -216,6 +220,17 @@ export const underglowColors: Record<string, number> = {
   green: 0x55e27d,
   purple: 0x9a5cff,
 };
+
+export function resolveUnderglowColor(customization: CarCustomization): number {
+  if (customization.underglow === "custom") {
+    const hex = customization.underglowColor;
+    if (typeof hex === "string" && /^#[0-9a-fA-F]{6}$/.test(hex)) {
+      return parseInt(hex.slice(1), 16);
+    }
+    return 0x2f8fff;
+  }
+  return underglowColors[customization.underglow] ?? underglowColors.off;
+}
 
 export function loadCustomization(): CarCustomization {
   const global = window.localStorage.getItem(globalStorageKey);

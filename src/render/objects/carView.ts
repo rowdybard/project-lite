@@ -12,7 +12,7 @@ import {
   type BufferGeometry,
   type Material,
 } from "three";
-import { paintColors, underglowColors, wheelColors, type CarCustomization } from "../../game/customization";
+import { paintColors, resolveUnderglowColor, wheelColors, type CarCustomization } from "../../game/customization";
 import type { CarState } from "../../game/types";
 import { applyProceduralPaint } from "../materials/carPaint";
 import { createImportedCarModel, getAttachments, isImportedCar, type ImportedCarAttachments, type ImportedCarModel, type ImportedWheel } from "./importedCars";
@@ -349,10 +349,14 @@ export function createCarView(scale = 1) {
   const wideSkirtR = wideSkirtL.clone();
   wideSkirtR.position.x = 1.08;
 
-  const underglowLeft = new PointLight(0x2f8fff, 0, 4.2, 2.4);
-  underglowLeft.position.set(-0.82, 0.16, 0);
-  const underglowRight = new PointLight(0x2f8fff, 0, 4.2, 2.4);
-  underglowRight.position.set(0.82, 0.16, 0);
+  const underglowFL = new PointLight(0x2f8fff, 0, 7, 3.6);
+  underglowFL.position.set(-0.82, 0.14, 2.1);
+  const underglowFR = new PointLight(0x2f8fff, 0, 7, 3.6);
+  underglowFR.position.set(0.82, 0.14, 2.1);
+  const underglowRL = new PointLight(0x2f8fff, 0, 7, 3.6);
+  underglowRL.position.set(-0.82, 0.14, -2.1);
+  const underglowRR = new PointLight(0x2f8fff, 0, 7, 3.6);
+  underglowRR.position.set(0.82, 0.14, -2.1);
 
   customParts.add(
     ducktail,
@@ -364,8 +368,10 @@ export function createCarView(scale = 1) {
     streetSkirtR,
     wideSkirtL,
     wideSkirtR,
-    underglowLeft,
-    underglowRight,
+    underglowFL,
+    underglowFR,
+    underglowRL,
+    underglowRR,
   );
   customParts.traverse((child) => {
     if (child instanceof Mesh) {
@@ -404,8 +410,10 @@ export function createCarView(scale = 1) {
     wideSkirtL.scale.z = att.skirtLength / 2.48;
     wideSkirtR.scale.z = att.skirtLength / 2.48;
 
-    underglowLeft.position.set(-att.underglowX, 0.16, 0);
-    underglowRight.position.set(att.underglowX, 0.16, 0);
+    underglowFL.position.set(-att.underglowX, 0.14, att.skirtLength * 0.42);
+    underglowFR.position.set(att.underglowX, 0.14, att.skirtLength * 0.42);
+    underglowRL.position.set(-att.underglowX, 0.14, -att.skirtLength * 0.42);
+    underglowRR.position.set(att.underglowX, 0.14, -att.skirtLength * 0.42);
   }
 
   function positionLightRig(width: number, frontZ: number, rearZ: number, headY: number, tailY: number) {
@@ -569,11 +577,16 @@ export function createCarView(scale = 1) {
       wideSkirtR.visible = true;
     }
 
-    const color = underglowColors[customization.underglow] ?? underglowColors.off;
-    underglowLeft.color.setHex(color);
-    underglowRight.color.setHex(color);
-    underglowLeft.intensity = customization.underglow === "off" ? 0 : 2.4;
-    underglowRight.intensity = customization.underglow === "off" ? 0 : 2.4;
+    const color = resolveUnderglowColor(customization);
+    const glowIntensity = customization.underglow === "off" ? 0 : 6;
+    underglowFL.color.setHex(color);
+    underglowFR.color.setHex(color);
+    underglowRL.color.setHex(color);
+    underglowRR.color.setHex(color);
+    underglowFL.intensity = glowIntensity;
+    underglowFR.intensity = glowIntensity;
+    underglowRL.intensity = glowIntensity;
+    underglowRR.intensity = glowIntensity;
   }
 
   function beginImportedLoad(carId: string) {
@@ -776,11 +789,16 @@ export function createCarView(scale = 1) {
       wideSkirtR.visible = true;
     }
 
-    const color = underglowColors[customization.underglow] ?? underglowColors.off;
-    underglowLeft.color.setHex(color);
-    underglowRight.color.setHex(color);
-    underglowLeft.intensity = customization.underglow === "off" ? 0 : 2.4;
-    underglowRight.intensity = customization.underglow === "off" ? 0 : 2.4;
+    const color = resolveUnderglowColor(customization);
+    const glowIntensity = customization.underglow === "off" ? 0 : 6;
+    underglowFL.color.setHex(color);
+    underglowFR.color.setHex(color);
+    underglowRL.color.setHex(color);
+    underglowRR.color.setHex(color);
+    underglowFL.intensity = glowIntensity;
+    underglowFR.intensity = glowIntensity;
+    underglowRL.intensity = glowIntensity;
+    underglowRR.intensity = glowIntensity;
   }
 
   // No automatic car load at construction — callers apply customization explicitly.

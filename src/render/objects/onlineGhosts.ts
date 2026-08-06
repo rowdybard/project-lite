@@ -184,6 +184,7 @@ function customizationForPlayer(player: OnlinePlayerState): CarCustomization {
     frontLip: player.customization.frontLip,
     sideSkirts: player.customization.sideSkirts,
     underglow: player.customization.underglow,
+    underglowColor: player.customization.underglowColor ?? "#2f8fff",
     tuningPreset: player.customization.tuningPreset,
   };
 }

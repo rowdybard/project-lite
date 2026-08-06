@@ -1665,6 +1665,37 @@ canvas {
   opacity: 0.65;
 }
 
+.garage-color-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #1a2331;
+  border: 1px solid #2a3a50;
+  border-radius: 6px;
+  color: #b8c4d4;
+  font-size: 13px;
+}
+
+.garage-color-picker input[type="color"] {
+  width: 48px;
+  height: 32px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.garage-color-picker input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.garage-color-picker input[type="color"]::-webkit-color-swatch {
+  border: 1px solid #2a3a50;
+  border-radius: 4px;
+}
+
 .garage-mode__button {
   justify-content: space-between;
 }

@@ -134,6 +134,20 @@ export function createGarageUi(customization: CarCustomization, profile: PlayerP
         button.addEventListener("click", () => callbacks.onCustomizationChange(activeBodySlot, option.id));
         group.append(button);
       }
+      // Color picker for custom underglow
+      if (activeBodySlot === "underglow" && customization.underglow === "custom") {
+        const pickerWrap = document.createElement("label");
+        pickerWrap.className = "garage-color-picker";
+        pickerWrap.innerHTML = `<span>Custom Color</span>`;
+        const picker = document.createElement("input");
+        picker.type = "color";
+        picker.value = customization.underglowColor || "#2f8fff";
+        picker.addEventListener("input", () => {
+          callbacks.onCustomizationChange("underglowColor", picker.value);
+        });
+        pickerWrap.append(picker);
+        group.append(pickerWrap);
+      }
       options.append(group);
     } else if (!activeCategory.comingSoon) {
       for (const option of activeCategory.options) {
