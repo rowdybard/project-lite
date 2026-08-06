@@ -863,7 +863,7 @@ export function createDevSystems(host: DevSystemsHost): DevSystems {
       }
     }
 
-    host.syncConeMeshes();
+    host.syncConeMeshes(dt);
     if (runningEndless && endlessTrack) {
       endlessTrackView?.update(endlessTrack.state, car.position);
       if (endlessObstacles && endlessObstacleView) {

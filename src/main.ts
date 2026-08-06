@@ -16,12 +16,6 @@ import { loadJson, loadManifest } from "./game/content/manifest";
 import { bindInput, readInput, getCameraOrbit, resetInputState } from "./game/input/inputMap";
 import { createCarState, resolveTrackSafetyBoundary, resetCar, updateCar } from "./game/simulation/car";
 import { createFixedStepRunner } from "./game/simulation/fixedStep";
-import {
-  mountHandlingHarnessReport,
-  runFleetTransmissionHarness,
-  runHandlingHarness,
-} from "./game/simulation/handlingHarness";
-import { mountCollisionHarnessReport, runCollisionHarness } from "./game/simulation/collisionHarness";
 import { createDriftState, finishDriftRun, resetDrift, updateDriftScore } from "./game/simulation/drift";
 import { applyStandardDriftTransmission } from "./game/simulation/driftTransmission";
 import { getDriftZone, isInRunoff, isOnTrack } from "./game/simulation/trackSurface";
@@ -186,7 +180,9 @@ async function boot() {
   // Dev systems runtime gate: requires both compile-time and runtime flags.
   // A public user cannot enable dev systems by adding ?devSystems=1 to a normal release URL.
   const devSystemsRuntimeEnabled = __DEV_SYSTEMS__ && query.get("devSystems") === "1";
-  if (query.has("handlingHarness")) {
+  if (__DEV_SYSTEMS__ && query.has("handlingHarness")) {
+    const { mountHandlingHarnessReport, runFleetTransmissionHarness, runHandlingHarness } =
+      await import("./game/simulation/handlingHarness");
     const fleetIds = [...new Set([manifest.activeCar, ...Object.keys(carTuningPaths)])];
     const fleet = await Promise.all(
       fleetIds.map(async (id) => ({ id, tuning: applyTuningPreset(await loadCarTuning(id), "balanced") })),
@@ -198,7 +194,9 @@ async function boot() {
     (window as Window & { __driftAttackHandlingReport?: typeof report }).__driftAttackHandlingReport = report;
     mountHandlingHarnessReport(report);
   }
-  if (query.has("collisionHarness")) {
+  if (__DEV_SYSTEMS__ && query.has("collisionHarness")) {
+    const { mountCollisionHarnessReport, runCollisionHarness } =
+      await import("./game/simulation/collisionHarness");
     const collisionReport = runCollisionHarness();
     (window as Window & { __driftAttackCollisionReport?: typeof collisionReport }).__driftAttackCollisionReport = collisionReport;
     mountCollisionHarnessReport(collisionReport);
@@ -736,7 +734,7 @@ async function boot() {
   };
 
   // --- Helpers shared with dev systems host ---
-  function syncConeMeshes(meshes: readonly Mesh[], cones: readonly Cone[]) {
+  function syncConeMeshes(meshes: readonly Mesh[], cones: readonly Cone[], dt: number) {
     const count = Math.min(meshes.length, cones.length);
     for (let i = 0; i < count; i += 1) {
       const mesh = meshes[i];
@@ -749,7 +747,7 @@ async function boot() {
           Math.abs(cone.spin),
         );
         mesh.rotation.z = cone.spin;
-        mesh.rotation.y += cone.angularVelocity;
+        mesh.rotation.y += cone.angularVelocity * dt;
       }
     }
   }
@@ -807,7 +805,7 @@ async function boot() {
     suspendEngineSound: () => engineSound.suspend(),
     updateCornerMarkerFlex: (dt) => updateCornerMarkerFlex(cornerMarkers, car, dt),
     updateWindUniforms: (dt) => { if (trackView.windUniforms) for (const w of trackView.windUniforms) w.value += dt; },
-    syncConeMeshes: () => syncConeMeshes(coneMeshes, cones),
+    syncConeMeshes: (hostDt: number) => syncConeMeshes(coneMeshes, cones, hostDt),
     getCameraOrbit,
     getNearbyGarage,
     setSessionTime: (t) => { sessionTime = t; },
@@ -1047,7 +1045,7 @@ async function boot() {
     if (!onTrack && car.speed > 8) cameraShake = Math.max(cameraShake, Math.min(0.45, car.speed * 0.008));
     if (frameImpact > 0) cameraShake = Math.max(cameraShake, frameImpact * 0.75);
 
-    syncConeMeshes(coneMeshes, cones);
+    syncConeMeshes(coneMeshes, cones, dt);
 
     const nearGarage = getNearbyGarage();
     if (nearGarage && input.confirm) {

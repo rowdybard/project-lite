@@ -3,6 +3,9 @@ import type { BoxCollider, CircleCollider, CollisionResult } from "./collisionTy
 import { createCollisionWorld, type CollisionWorld } from "./collisionWorld";
 import {
   captureCarPose,
+  circleVsBoxContact,
+  circleVsCircleContact,
+  getCarCollisionCircles,
   resolveStaticCollisions,
   resolveVehicleContact,
 } from "./collisionSolver";
@@ -181,9 +184,11 @@ function measureState(car: CarState, normal: { x: number; z: number }) {
 }
 
 function maxPenetration(car: CarState, world: CollisionWorld): number {
-  const circles = [
-    { x: car.position.x, z: car.position.z, radius: 1.38 },
-  ];
+  // Use the same gameplay circles as the solver — all three must be checked.
+  const circles = getCarCollisionCircles(
+    { x: car.position.x, z: car.position.z, heading: car.heading },
+    defaultTuning,
+  );
   let maxPen = 0;
   const nearby = world.queryAabb(
     car.position.x - 4,
@@ -193,27 +198,16 @@ function maxPenetration(car: CarState, world: CollisionWorld): number {
   );
   for (const c of nearby) {
     for (const circle of circles) {
-      if (c.shape === "box") {
-        const box = c as BoxCollider;
-        const dx = circle.x - box.x;
-        const dz = circle.z - box.z;
-        const cos = Math.cos(box.angle);
-        const sin = Math.sin(box.angle);
-        const lx = dx * cos + dz * sin;
-        const lz = -dx * sin + dz * cos;
-        const cx = Math.max(-box.halfLength, Math.min(box.halfLength, lx));
-        const cz = Math.max(-box.halfWidth, Math.min(box.halfWidth, lz));
-        const dist = Math.hypot(lx - cx, lz - cz);
-        if (dist < circle.radius) {
-          maxPen = Math.max(maxPen, circle.radius - dist);
-        }
-      } else {
-        const circ = c as CircleCollider;
-        const dist = Math.hypot(circle.x - circ.x, circle.z - circ.z);
-        const combined = circle.radius + circ.radius;
-        if (dist < combined) {
-          maxPen = Math.max(maxPen, combined - dist);
-        }
+      const hit =
+        c.shape === "box"
+          ? circleVsBoxContact(circle, c as BoxCollider)
+          : circleVsCircleContact(circle, {
+              x: (c as CircleCollider).x,
+              z: (c as CircleCollider).z,
+              radius: (c as CircleCollider).radius,
+            });
+      if (hit) {
+        maxPen = Math.max(maxPen, hit.penetration);
       }
     }
   }
@@ -245,11 +239,12 @@ function runScenario(
 
   let lastResult: CollisionResult = { severity: 0, contactCount: 0, colliderIds: [] };
   for (let i = 0; i < steps; i++) {
+    // Capture pose BEFORE integrating movement — sweep needs motion delta.
+    const previousPose = captureCarPose(car);
     // Integrate velocity into position (simple Euler — harness doesn't need full car physics)
     car.position.x += car.velocity.x * FIXED_STEP;
     car.position.z += car.velocity.z * FIXED_STEP;
     car.heading += car.yawVelocity * FIXED_STEP;
-    const previousPose = captureCarPose(car);
     lastResult = resolveStaticCollisions(car, previousPose, world.queryAabb(
       Math.min(previousPose.x, car.position.x) - 4,
       Math.min(previousPose.z, car.position.z) - 4,
@@ -372,10 +367,11 @@ export function runCollisionHarness(): CollisionHarnessReport {
     for (let i = 0; i < 240; i++) {
       // Light continuous push toward wall (negative z)
       car.velocity.z = Math.max(car.velocity.z - 0.5 * FIXED_STEP, -1.5);
+      // Capture pose BEFORE integrating movement
+      const previousPose = captureCarPose(car);
       // Integrate position
       car.position.x += car.velocity.x * FIXED_STEP;
       car.position.z += car.velocity.z * FIXED_STEP;
-      const previousPose = captureCarPose(car);
       const result = resolveStaticCollisions(car, previousPose, world.queryAabb(
         car.position.x - 4, car.position.z - 4, car.position.x + 4, car.position.z + 4,
       ), defaultTuning);
@@ -456,7 +452,7 @@ export function runCollisionHarness(): CollisionHarnessReport {
     const car = makeCarState(0, 5, 0, 0, -50);
     const wall = makeBoxCollider("thin-wall", 0, 0, 50, 0.15);
     scenarios.push(
-      runScenario("high-speed-thin-wall", car, [wall], { x: 0, z: -1 }, 20, ({ car, after, penetration }) => [
+      runScenario("high-speed-thin-wall", car, [wall], { x: 0, z: -1 }, 20, ({ car, after, penetration, result }) => [
         {
           name: "no NaN",
           passed: isFiniteState(car),
@@ -468,12 +464,140 @@ export function runCollisionHarness(): CollisionHarnessReport {
           actual: `pen=${penetration.toFixed(3)}`,
         },
         {
+          name: "contact registered",
+          passed: result.contactCount > 0 || result.colliderIds.includes("thin-wall"),
+          actual: `contacts=${result.contactCount}, ids=${JSON.stringify(result.colliderIds)}`,
+        },
+        {
+          name: "car stays on legal side (z > 0)",
+          passed: car.position.z > 0,
+          actual: `z=${car.position.z.toFixed(2)}`,
+        },
+        {
           name: "rebound capped (< 6)",
           passed: after.speed < 6,
           actual: `speed=${after.speed.toFixed(2)}`,
         },
       ]),
     );
+  }
+
+  // 7b. Reverse thin-wall — rear circle reaches wall first
+  {
+    const car = makeCarState(0, -5, Math.PI, 0, -45);
+    const wall = makeBoxCollider("thin-wall-rear", 0, 0, 50, 0.15);
+    scenarios.push(
+      runScenario("reverse-thin-wall", car, [wall], { x: 0, z: 1 }, 20, ({ car, penetration, result }) => [
+        {
+          name: "no NaN",
+          passed: isFiniteState(car),
+          actual: `pos=${car.position.x.toFixed(2)},${car.position.z.toFixed(2)}`,
+        },
+        {
+          name: "no tunnel (penetration < 0.5)",
+          passed: penetration < 0.5,
+          actual: `pen=${penetration.toFixed(3)}`,
+        },
+        {
+          name: "contact registered",
+          passed: result.contactCount > 0 || result.colliderIds.includes("thin-wall-rear"),
+          actual: `contacts=${result.contactCount}, ids=${JSON.stringify(result.colliderIds)}`,
+        },
+        {
+          name: "car stays on legal side (z < 0)",
+          passed: car.position.z < 0,
+          actual: `z=${car.position.z.toFixed(2)}`,
+        },
+      ]),
+    );
+  }
+
+  // 7c. Lateral thin-post — high side velocity, car heading perpendicular to travel
+  {
+    const car = makeCarState(-5, 0, Math.PI / 2, 45, 0);
+    const post = makeCircleCollider("thin-post", 0, 0, 0.3, "post");
+    scenarios.push(
+      runScenario("lateral-thin-post", car, [post], { x: -1, z: 0 }, 20, ({ car, penetration, result }) => [
+        {
+          name: "no NaN",
+          passed: isFiniteState(car),
+          actual: `pos=${car.position.x.toFixed(2)},${car.position.z.toFixed(2)}`,
+        },
+        {
+          name: "no tunnel (penetration < 0.5)",
+          passed: penetration < 0.5,
+          actual: `pen=${penetration.toFixed(3)}`,
+        },
+        {
+          name: "contact registered",
+          passed: result.contactCount > 0 || result.colliderIds.includes("thin-post"),
+          actual: `contacts=${result.contactCount}, ids=${JSON.stringify(result.colliderIds)}`,
+        },
+        {
+          name: "car stays on legal side (x < 0)",
+          passed: car.position.x < 0,
+          actual: `x=${car.position.x.toFixed(2)}`,
+        },
+      ]),
+    );
+  }
+
+  // 7d. Spin contact — non-zero yaw and diagonal movement
+  {
+    const car = makeCarState(5, 5, 0.3, 18, -18);
+    car.yawVelocity = 1.5;
+    const wall = makeBoxCollider("spin-wall", 0, 0, 50, 0.5);
+    scenarios.push(
+      runScenario("spin-contact", car, [wall], { x: 0, z: 1 }, 20, ({ car, penetration, result }) => [
+        {
+          name: "no NaN",
+          passed: isFiniteState(car),
+          actual: `pos=${car.position.x.toFixed(2)},${car.position.z.toFixed(2)}`,
+        },
+        {
+          name: "no tunnel (penetration < 0.5)",
+          passed: penetration < 0.5,
+          actual: `pen=${penetration.toFixed(3)}`,
+        },
+        {
+          name: "contact registered",
+          passed: result.contactCount > 0,
+          actual: `contacts=${result.contactCount}`,
+        },
+      ]),
+    );
+  }
+
+  // 7e. Deep-overlap correction — spawn deeply inside a collider
+  {
+    const car = makeCarState(0, 0.2, 0, 0, 0);
+    const wall = makeBoxCollider("deep-wall", 0, 0, 50, 2);
+    const world = createCollisionWorld([wall]);
+    let lastResult: CollisionResult = { severity: 0, contactCount: 0, colliderIds: [] };
+    let lastPen = 0;
+    // Run a few iterations to let the position solver push the car out
+    for (let i = 0; i < 4; i++) {
+      const previousPose = captureCarPose(car);
+      lastResult = resolveStaticCollisions(
+        car,
+        previousPose,
+        world.queryAabb(car.position.x - 4, car.position.z - 4, car.position.x + 4, car.position.z + 4),
+        defaultTuning,
+      );
+      lastPen = maxPenetration(car, world);
+    }
+    scenarios.push({
+      name: "deep-overlap-correction",
+      passed: lastPen < 0.03 && lastResult.contactCount <= 1 && isFiniteState(car),
+      expectations: [
+        { name: "penetration converges (< 0.03)", passed: lastPen < 0.03, actual: `pen=${lastPen.toFixed(3)}` },
+        { name: "at most one velocity response", passed: lastResult.contactCount <= 1, actual: `contacts=${lastResult.contactCount}` },
+        { name: "no NaN", passed: isFiniteState(car), actual: `pos=${car.position.x.toFixed(2)},${car.position.z.toFixed(2)}` },
+      ],
+      before: { speed: 0, normalSpeed: 0, tangentSpeed: 0, yaw: 0, penetration: 2 },
+      after: { speed: car.speed, normalSpeed: car.velocity.z, tangentSpeed: car.velocity.x, yaw: car.yawVelocity, penetration: lastPen },
+      severity: lastResult.severity,
+    });
   }
 
   // 8. Safety boundary
@@ -577,10 +701,11 @@ export function runCollisionHarness(): CollisionHarnessReport {
     // Run enough steps for the car to reach the cone
     let result = { severity: 0, contactCount: 0, colliderIds: [] as string[] };
     for (let i = 0; i < 20; i++) {
+      // Capture pose BEFORE integrating movement
+      const previousPose = captureCarPose(car);
       // Integrate position
       car.position.x += car.velocity.x * FIXED_STEP;
       car.position.z += car.velocity.z * FIXED_STEP;
-      const previousPose = captureCarPose(car);
       result = resolveTrackCollisions(car, previousPose, world, cones, FIXED_STEP, defaultTuning);
     }
     const after = measureState(car, { x: -1, z: 0 });
@@ -605,9 +730,9 @@ export function runCollisionHarness(): CollisionHarnessReport {
       x: 0, z: 0, vx: 0, vz: 0, spin: 0, angularVelocity: 0, radius: 0.38, knocked: false,
     }];
     for (let i = 0; i < 20; i++) {
+      const prev2 = captureCarPose(car2);
       car2.position.x += car2.velocity.x * FIXED_STEP;
       car2.position.z += car2.velocity.z * FIXED_STEP;
-      const prev2 = captureCarPose(car2);
       resolveTrackCollisions(car2, prev2, world, cones2, FIXED_STEP, defaultTuning);
     }
     const deterministic = car2.position.x === car.position.x && car2.position.z === car.position.z;
@@ -627,10 +752,11 @@ export function runCollisionHarness(): CollisionHarnessReport {
     const world = createCollisionWorld([wall]);
     const initialSpeed = car.speed;
     for (let i = 0; i < 600; i++) {
+      // Capture pose BEFORE integrating movement
+      const previousPose = captureCarPose(car);
       // Integrate position
       car.position.x += car.velocity.x * FIXED_STEP;
       car.position.z += car.velocity.z * FIXED_STEP;
-      const previousPose = captureCarPose(car);
       resolveStaticCollisions(car, previousPose, world.queryAabb(
         car.position.x - 4, car.position.z - 4, car.position.x + 4, car.position.z + 4,
       ), defaultTuning);
@@ -655,10 +781,11 @@ export function runCollisionHarness(): CollisionHarnessReport {
       car.velocity.z = -20;
       car.heading = 0;
       car.yawVelocity = 0;
+      // Capture pose BEFORE integrating movement
+      const previousPose = captureCarPose(car);
       // Integrate position to create a collision scenario
       car.position.x += car.velocity.x * FIXED_STEP;
       car.position.z += car.velocity.z * FIXED_STEP;
-      const previousPose = captureCarPose(car);
       const start = performance.now();
       resolveStaticCollisions(car, previousPose, world.queryAabb(
         car.position.x - 4, car.position.z - 4, car.position.x + 4, car.position.z + 4,

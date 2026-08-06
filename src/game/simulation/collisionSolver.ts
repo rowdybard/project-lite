@@ -26,10 +26,21 @@ export type CarCollisionCircle = {
   localForwardOffset: number;
 };
 
-export function getCarCollisionCircles(
+export type CarCollisionCircles = [CarCollisionCircle, CarCollisionCircle, CarCollisionCircle];
+
+export function createCarCircleBuffer(): CarCollisionCircles {
+  return [
+    { x: 0, z: 0, radius: 0, localForwardOffset: 0 },
+    { x: 0, z: 0, radius: 0, localForwardOffset: 0 },
+    { x: 0, z: 0, radius: 0, localForwardOffset: 0 },
+  ];
+}
+
+export function writeCarCollisionCircles(
+  out: CarCollisionCircles,
   pose: CarPose2D,
   tuning?: CarTuning,
-): CarCollisionCircle[] {
+): CarCollisionCircles {
   const halfLength = Math.max(
     2.35,
     (tuning?.collisionLength ?? 6.3) * 0.5,
@@ -46,26 +57,29 @@ export function getCarCollisionCircles(
   const forwardX = Math.sin(pose.heading);
   const forwardZ = Math.cos(pose.heading);
 
-  return [
-    {
-      x: pose.x + forwardX * endOffset,
-      z: pose.z + forwardZ * endOffset,
-      radius: endRadius,
-      localForwardOffset: endOffset,
-    },
-    {
-      x: pose.x,
-      z: pose.z,
-      radius: centerRadius,
-      localForwardOffset: 0,
-    },
-    {
-      x: pose.x - forwardX * endOffset,
-      z: pose.z - forwardZ * endOffset,
-      radius: endRadius,
-      localForwardOffset: -endOffset,
-    },
-  ];
+  out[0].x = pose.x + forwardX * endOffset;
+  out[0].z = pose.z + forwardZ * endOffset;
+  out[0].radius = endRadius;
+  out[0].localForwardOffset = endOffset;
+
+  out[1].x = pose.x;
+  out[1].z = pose.z;
+  out[1].radius = centerRadius;
+  out[1].localForwardOffset = 0;
+
+  out[2].x = pose.x - forwardX * endOffset;
+  out[2].z = pose.z - forwardZ * endOffset;
+  out[2].radius = endRadius;
+  out[2].localForwardOffset = -endOffset;
+
+  return out;
+}
+
+export function getCarCollisionCircles(
+  pose: CarPose2D,
+  tuning?: CarTuning,
+): CarCollisionCircles {
+  return writeCarCollisionCircles(createCarCircleBuffer(), pose, tuning);
 }
 
 export function captureCarPose(car: CarState): CarPose2D {
@@ -437,6 +451,54 @@ function fillContact(
 
 const MAX_POSITION_ITERATIONS = 4;
 
+// Module-owned scratch buffers — never exposed to nested calls
+const _prevCircles = createCarCircleBuffer();
+const _curCircles = createCarCircleBuffer();
+const _correctedCircles = createCarCircleBuffer();
+
+/**
+ * Find the deepest contact across all car circles for a single collider.
+ */
+function findDeepestContact(
+  circles: CarCollisionCircles,
+  collider: StaticCollider,
+): {
+  normal: { x: number; z: number };
+  point: { x: number; z: number };
+  penetration: number;
+  circleOffset: number;
+} | null {
+  let deepest: {
+    normal: { x: number; z: number };
+    point: { x: number; z: number };
+    penetration: number;
+    circleOffset: number;
+  } | null = null;
+
+  for (const circle of circles) {
+    const hit =
+      collider.shape === "box"
+        ? circleVsBoxContact(circle, collider as BoxCollider)
+        : circleVsCircleContact(circle, {
+            x: (collider as CircleCollider).x,
+            z: (collider as CircleCollider).z,
+            radius: (collider as CircleCollider).radius,
+          });
+
+    if (!hit) continue;
+    if (!deepest || hit.penetration > deepest.penetration) {
+      deepest = {
+        normal: hit.normal,
+        point: hit.point,
+        penetration: hit.penetration,
+        circleOffset: circle.localForwardOffset,
+      };
+    }
+  }
+
+  return deepest;
+}
+
 /**
  * Resolve static collider contacts for the car.
  * Returns the strongest severity and contact count.
@@ -450,8 +512,15 @@ export function resolveStaticCollisions(
   if (colliders.length === 0) return emptyCollisionResult;
 
   let strongestSeverity = 0;
-  const contactedIds = new Set<string>();
+  const respondedIds = new Set<string>(); // colliders that got a velocity response
+  const touchedIds = new Set<string>();    // colliders that were position-corrected
   let contactCount = 0;
+
+  const currentPose = { x: car.position.x, z: car.position.z, heading: car.heading };
+
+  // Compute circles once for previous and current poses
+  writeCarCollisionCircles(_prevCircles, previousPose, tuning);
+  writeCarCollisionCircles(_curCircles, currentPose, tuning);
 
   // --- Sweep phase (only when moving fast enough) ---
   const moveDist = Math.hypot(
@@ -465,52 +534,60 @@ export function resolveStaticCollisions(
       collider: StaticCollider;
       normal: { x: number; z: number };
       point: { x: number; z: number };
+      circleOffset: number;
     } | null = null;
 
     for (const collider of colliders) {
-      if (collider.shape === "box") {
-        // Sweep the front circle (most likely to hit first)
-        const circles = getCarCollisionCircles(previousPose, tuning);
-        // Use the front circle for sweep
-        const front = circles[0];
-        const hit = sweepCircleVsBox(
-          previousPose.x + Math.sin(previousPose.heading) * front.localForwardOffset,
-          previousPose.z + Math.cos(previousPose.heading) * front.localForwardOffset,
-          car.position.x + Math.sin(car.heading) * front.localForwardOffset,
-          car.position.z + Math.cos(car.heading) * front.localForwardOffset,
-          front.radius,
-          collider as BoxCollider,
-        );
+      for (let ci = 0; ci < _prevCircles.length; ci++) {
+        const prevCircle = _prevCircles[ci];
+        const curCircle = _curCircles[ci];
+
+        // Start-overlap rule: if already overlapping, skip sweep — let position solver handle it
+        const startedOverlapping =
+          collider.shape === "box"
+            ? circleVsBoxContact(prevCircle, collider as BoxCollider) !== null
+            : circleVsCircleContact(prevCircle, {
+                x: (collider as CircleCollider).x,
+                z: (collider as CircleCollider).z,
+                radius: (collider as CircleCollider).radius,
+              }) !== null;
+
+        const hit =
+          collider.shape === "box"
+            ? sweepCircleVsBox(
+                prevCircle.x, prevCircle.z,
+                curCircle.x, curCircle.z,
+                prevCircle.radius,
+                collider as BoxCollider,
+              )
+            : sweepCircleVsCircle(
+                prevCircle.x, prevCircle.z,
+                curCircle.x, curCircle.z,
+                prevCircle.radius,
+                collider as CircleCollider,
+              );
+
         if (hit && hit.t < earliestT) {
+          // Skip t≈0 results when already overlapping — position solver will handle
+          if (hit.t <= 1e-6 && startedOverlapping) continue;
           earliestT = hit.t;
-          earliestHit = { collider, normal: hit.normal, point: hit.point };
-        }
-      } else {
-        const circles = getCarCollisionCircles(previousPose, tuning);
-        const front = circles[0];
-        const hit = sweepCircleVsCircle(
-          previousPose.x + Math.sin(previousPose.heading) * front.localForwardOffset,
-          previousPose.z + Math.cos(previousPose.heading) * front.localForwardOffset,
-          car.position.x + Math.sin(car.heading) * front.localForwardOffset,
-          car.position.z + Math.cos(car.heading) * front.localForwardOffset,
-          front.radius,
-          collider as CircleCollider,
-        );
-        if (hit && hit.t < earliestT) {
-          earliestT = hit.t;
-          earliestHit = { collider, normal: hit.normal, point: hit.point };
+          earliestHit = {
+            collider,
+            normal: hit.normal,
+            point: hit.point,
+            circleOffset: prevCircle.localForwardOffset,
+          };
         }
       }
     }
 
     if (earliestHit) {
       const safeT = Math.max(0, earliestT - 0.002);
-      const dx = car.position.x - previousPose.x;
-      const dz = car.position.z - previousPose.z;
+      const dx = currentPose.x - previousPose.x;
+      const dz = currentPose.z - previousPose.z;
       car.position.x = previousPose.x + dx * safeT;
       car.position.z = previousPose.z + dz * safeT;
 
-      // Apply velocity response for the swept contact
       const response = collisionResponses[earliestHit.collider.profile];
       const contact = fillContact(
         earliestHit.collider.id,
@@ -518,14 +595,15 @@ export function resolveStaticCollisions(
         earliestHit.normal.z,
         earliestHit.point.x,
         earliestHit.point.z,
-        0, // penetration unknown for sweep
         0,
+        earliestHit.circleOffset,
         earliestHit.collider.profile,
         true,
       );
       const result = applyGentleVelocityResponse(car, contact, response);
       if (result.closingSpeed > 0) {
-        contactedIds.add(earliestHit.collider.id);
+        respondedIds.add(earliestHit.collider.id);
+        touchedIds.add(earliestHit.collider.id);
         contactCount++;
         const severity = clamp(
           (result.closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
@@ -539,93 +617,74 @@ export function resolveStaticCollisions(
 
   // --- Position correction iterations ---
   for (let iter = 0; iter < MAX_POSITION_ITERATIONS; iter++) {
-    for (const collider of colliders) {
-      if (contactedIds.has(collider.id) && iter > 0) continue; // Already responded this step
+    let correctedAny = false;
 
-      const circles = getCarCollisionCircles(
+    for (const collider of colliders) {
+      // Recompute circles at corrected position each iteration
+      writeCarCollisionCircles(
+        _correctedCircles,
         { x: car.position.x, z: car.position.z, heading: car.heading },
         tuning,
       );
 
-      // Find deepest contact for this collider across all 3 circles
-      let deepest: {
-        normal: { x: number; z: number };
-        point: { x: number; z: number };
-        penetration: number;
-        circleOffset: number;
-      } | null = null;
-
-      for (const circle of circles) {
-        const hit =
-          collider.shape === "box"
-            ? circleVsBoxContact(circle, collider as BoxCollider)
-            : circleVsCircleContact(circle, {
-                x: (collider as CircleCollider).x,
-                z: (collider as CircleCollider).z,
-                radius: (collider as CircleCollider).radius,
-              });
-
-        if (!hit) continue;
-        if (!deepest || hit.penetration > deepest.penetration) {
-          deepest = {
-            normal: hit.normal,
-            point: hit.point,
-            penetration: hit.penetration,
-            circleOffset: circle.localForwardOffset,
-          };
-        }
-      }
-
+      const deepest = findDeepestContact(_correctedCircles, collider);
       if (!deepest) continue;
+
+      touchedIds.add(collider.id);
 
       const response = collisionResponses[collider.profile];
 
-      // Position correction
       const correction = Math.min(
         response.maxCorrection,
         Math.max(0, deepest.penetration - response.correctionSlop) * response.correctionPercent,
       );
-      car.position.x += deepest.normal.x * correction;
-      car.position.z += deepest.normal.z * correction;
+
+      if (correction > 0) {
+        car.position.x += deepest.normal.x * correction;
+        car.position.z += deepest.normal.z * correction;
+        correctedAny = true;
+      }
 
       // Velocity response — only once per collider per step
-      if (!contactedIds.has(collider.id)) {
-        const contact = fillContact(
-          collider.id,
-          deepest.normal.x,
-          deepest.normal.z,
-          deepest.point.x,
-          deepest.point.z,
-          deepest.penetration,
-          deepest.circleOffset,
-          collider.profile,
-          false,
+      if (respondedIds.has(collider.id)) continue;
+
+      const contact = fillContact(
+        collider.id,
+        deepest.normal.x,
+        deepest.normal.z,
+        deepest.point.x,
+        deepest.point.z,
+        deepest.penetration,
+        deepest.circleOffset,
+        collider.profile,
+        false,
+      );
+      const result = applyGentleVelocityResponse(car, contact, response);
+      if (result.closingSpeed > 0 || result.appliedNormalDelta > 0) {
+        respondedIds.add(collider.id);
+        contactCount++;
+
+        const severity = clamp(
+          (result.closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
+          0,
+          1,
         );
-        const result = applyGentleVelocityResponse(car, contact, response);
-        if (result.closingSpeed > 0 || result.appliedNormalDelta > 0) {
-          contactedIds.add(collider.id);
-          contactCount++;
+        if (severity > strongestSeverity) strongestSeverity = severity;
 
-          const severity = clamp(
-            (result.closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
-            0,
-            1,
-          );
-          if (severity > strongestSeverity) strongestSeverity = severity;
-
-          // Gentle yaw impulse
-          const contactOffsetX = deepest.point.x - car.position.x;
-          const contactOffsetZ = deepest.point.z - car.position.z;
-          const lever = contactOffsetX * deepest.normal.z - contactOffsetZ * deepest.normal.x;
-          const yawDelta = clamp(
-            lever * result.appliedNormalDelta * response.yawImpulseScale,
-            -response.maxYawImpulse,
-            response.maxYawImpulse,
-          );
-          car.yawVelocity += yawDelta;
-        }
+        // Gentle yaw impulse
+        const contactOffsetX = deepest.point.x - car.position.x;
+        const contactOffsetZ = deepest.point.z - car.position.z;
+        const lever = contactOffsetX * deepest.normal.z - contactOffsetZ * deepest.normal.x;
+        const yawDelta = clamp(
+          lever * result.appliedNormalDelta * response.yawImpulseScale,
+          -response.maxYawImpulse,
+          response.maxYawImpulse,
+        );
+        car.yawVelocity += yawDelta;
       }
     }
+
+    if (!correctedAny) break;
   }
 
   // Recompute speed
@@ -638,7 +697,7 @@ export function resolveStaticCollisions(
   return {
     severity: strongestSeverity,
     contactCount,
-    colliderIds: [...contactedIds],
+    colliderIds: [...touchedIds],
   };
 }
 

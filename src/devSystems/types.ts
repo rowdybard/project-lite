@@ -105,7 +105,7 @@ export type DevSystemsHost = {
   suspendEngineSound(): void;
   updateCornerMarkerFlex(dt: number): void;
   updateWindUniforms(dt: number): void;
-  syncConeMeshes(): void;
+  syncConeMeshes(dt: number): void;
   getCameraOrbit(): number;
   getNearbyGarage(): boolean;
 

@@ -26,7 +26,7 @@ import {
   type BuiltinTextureId,
   type VfxPreset,
 } from "../vfx/presets";
-import { pickPngFile, uploadPng } from "../vfx/textureUpload";
+import { uploadPng } from "../vfx/textureUpload";
 import type { ApplyPresetResult } from "../render/objects/tireSmokeGpu";
 
 // Player-facing effect editor: PNG upload, live orbitable preview, gradient-stop curve
@@ -42,11 +42,121 @@ type SliderDef = {
   set(value: number): void;
 };
 
+type Disposer = () => void;
+
+type PointerDragHandlers = {
+  start(event: PointerEvent): boolean;
+  move(event: PointerEvent): void;
+  end?(event: PointerEvent | null, cancelled: boolean): void;
+};
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const CURVE_TIMES = [0, 1 / 3, 2 / 3, 1];
 
 function defaultPreset(): VfxPreset {
   return JSON.parse(JSON.stringify(builtinPresets[0])) as VfxPreset;
+}
+
+// Shared, lifetime-aware pointer drag helper. Handles pointercancel, lostpointercapture,
+// and aborts cleanly when the returned disposer is called.
+function bindPointerDrag(target: HTMLElement | SVGElement, handlers: PointerDragHandlers): Disposer {
+  let active: { pointerId: number; abort: AbortController } | null = null;
+
+  const finish = (event: PointerEvent | null, cancelled: boolean, release: boolean) => {
+    const session = active;
+    if (!session) return;
+    active = null;
+    session.abort.abort();
+    if (release && target.hasPointerCapture(session.pointerId)) {
+      try {
+        target.releasePointerCapture(session.pointerId);
+      } catch {
+        // already released
+      }
+    }
+    handlers.end?.(event, cancelled);
+  };
+
+  function onMove(event: PointerEvent) {
+    if (!active || event.pointerId !== active.pointerId) return;
+    event.preventDefault();
+    handlers.move(event);
+  }
+
+  function onUp(event: PointerEvent) {
+    if (!active || event.pointerId !== active.pointerId) return;
+    handlers.move(event);
+    finish(event, false, true);
+  }
+
+  function onCancel(event: PointerEvent) {
+    if (!active || event.pointerId !== active.pointerId) return;
+    finish(event, true, true);
+  }
+
+  function onLostCapture(event: PointerEvent) {
+    if (!active || event.pointerId !== active.pointerId) return;
+    finish(event, true, false);
+  }
+
+  function onDown(event: PointerEvent) {
+    if (event.button !== 0 || !event.isPrimary) return;
+    finish(null, true, true);
+    if (!handlers.start(event)) return;
+    event.preventDefault();
+    const abort = new AbortController();
+    active = { pointerId: event.pointerId, abort };
+    try {
+      target.setPointerCapture(event.pointerId);
+    } catch {
+      // continue without capture
+    }
+    const signal = abort.signal;
+    target.addEventListener("pointermove", onMove as EventListener, { signal });
+    target.addEventListener("pointerup", onUp as EventListener, { signal });
+    target.addEventListener("pointercancel", onCancel as EventListener, { signal });
+    target.addEventListener("lostpointercapture", onLostCapture as EventListener, { signal });
+  }
+
+  target.addEventListener("pointerdown", onDown as EventListener);
+  return () => {
+    finish(null, true, true);
+    target.removeEventListener("pointerdown", onDown as EventListener);
+  };
+}
+
+// Native picker helpers — mount offscreen, open synchronously, clean up on settle.
+let activeNativePickerCleanup: (() => void) | null = null;
+
+function closeActiveNativePicker() {
+  activeNativePickerCleanup?.();
+  activeNativePickerCleanup = null;
+}
+
+function mountPickerInput(input: HTMLInputElement) {
+  input.tabIndex = -1;
+  Object.assign(input.style, {
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    width: "1px",
+    height: "1px",
+    opacity: "0",
+    pointerEvents: "none",
+  });
+  document.body.append(input);
+}
+
+function showNativePicker(input: HTMLInputElement) {
+  try {
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+      return;
+    }
+  } catch {
+    // fallback
+  }
+  input.click();
 }
 
 export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSmoke?: (preset: VfxPreset) => Promise<ApplyPresetResult>; onClearTireSmoke?: () => void } = {}) {
@@ -56,18 +166,20 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   document.body.append(root);
 
   let state = defaultPreset();
+  let committedState = JSON.parse(JSON.stringify(state)) as VfxPreset;
   let savedPresets = loadSavedPresets();
   let texture: Texture = createBuiltinTexture("soft-circle");
   let textureLabel = "Soft Circle";
-  let system: GpuParticleSystem | null = null;
-  let systemLuts: Parameters<typeof disposeLuts> = [];
-  let rebuildTimer = 0;
+  let previewBundle: PreviewBundle | null = null;
+  let rebuildRaf = 0;
+  let pendingState: VfxPreset | null = null;
   let renderer: WebGLRenderer | null = null;
   let previewScene: Scene | null = null;
   let previewCamera: PerspectiveCamera | null = null;
   let rafId = 0;
   let lastFrame = 0;
   let applyToken = 0;
+  let textureRequestId = 0;
   let orbitYaw = 0.8;
   let orbitPitch = 0.3;
   let orbitDistance = 9;
@@ -76,6 +188,120 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   let resizeObserver: ResizeObserver | null = null;
   let disposed = false;
   let isOpen = false;
+
+  // Disposer registries — panel rerender clears panel disposers; dispose clears both.
+  const lifetimeDisposers = new Set<Disposer>();
+  const panelDisposers = new Set<Disposer>();
+
+  function addPanelDisposer(disposer: Disposer) {
+    panelDisposers.add(disposer);
+  }
+
+  function clearPanelDisposers() {
+    for (const disposer of panelDisposers) disposer();
+    panelDisposers.clear();
+  }
+
+  function clearLifetimeDisposers() {
+    for (const disposer of lifetimeDisposers) disposer();
+    lifetimeDisposers.clear();
+  }
+
+  type PreviewBundle = {
+    system: GpuParticleSystem;
+    luts: Parameters<typeof disposeLuts>;
+  };
+
+  function buildPreviewCandidate(
+    candidateState: VfxPreset,
+    candidateTexture: Texture,
+  ): PreviewBundle {
+    let candidateSystem: GpuParticleSystem | null = null;
+    let candidateLuts: Parameters<typeof disposeLuts> = [];
+    try {
+      const built = buildSystemOptions(candidateState, candidateTexture);
+      candidateLuts = built.luts;
+      candidateSystem = createGpuParticleSystem(built.options);
+      return { system: candidateSystem, luts: candidateLuts };
+    } catch (error) {
+      candidateSystem?.dispose();
+      disposeLuts(...candidateLuts);
+      throw error;
+    }
+  }
+
+  function disposePreviewBundle(bundle: PreviewBundle | null) {
+    if (!bundle) return;
+    previewScene?.remove(bundle.system.root);
+    bundle.system.dispose();
+    disposeLuts(...bundle.luts);
+  }
+
+  function updateBudgetText() {
+    const budget = root.querySelector("[data-budget]");
+    if (budget && previewBundle) {
+      budget.textContent = `${previewBundle.system.capacity} instances (cap ${particleBudgetLimits.perSystem}, global ${particleBudgetLimits.global}) · rate ${state.rate}/s (max ${particleBudgetLimits.maxRate})`;
+    }
+  }
+
+  function commitPreviewState(candidateState: VfxPreset): boolean {
+    if (root.hidden || !previewScene) return false;
+    let candidate: PreviewBundle;
+    try {
+      candidate = buildPreviewCandidate(candidateState, texture);
+    } catch (error) {
+      state = JSON.parse(JSON.stringify(committedState)) as VfxPreset;
+      renderControls();
+      setStatus(
+        error instanceof Error
+          ? `Preview unchanged: ${error.message}`
+          : "Preview unchanged.",
+      );
+      return false;
+    }
+    previewScene.add(candidate.system.root);
+    const previous = previewBundle;
+    previewBundle = candidate;
+    state = JSON.parse(JSON.stringify(candidateState)) as VfxPreset;
+    committedState = JSON.parse(JSON.stringify(candidateState)) as VfxPreset;
+    disposePreviewBundle(previous);
+    updateBudgetText();
+    setStatus("");
+    return true;
+  }
+
+  function commitTextureCandidate(
+    candidateState: VfxPreset,
+    candidateTexture: Texture,
+    candidateLabel: string,
+  ): boolean {
+    if (!previewScene) return false;
+    let candidate: PreviewBundle;
+    try {
+      candidate = buildPreviewCandidate(candidateState, candidateTexture);
+    } catch (error) {
+      candidateTexture.dispose();
+      setStatus(
+        error instanceof Error
+          ? `Texture unchanged: ${error.message}`
+          : "Texture unchanged.",
+      );
+      return false;
+    }
+    previewScene.add(candidate.system.root);
+    const previousBundle = previewBundle;
+    const previousTexture = texture;
+    previewBundle = candidate;
+    texture = candidateTexture;
+    textureLabel = candidateLabel;
+    state = JSON.parse(JSON.stringify(candidateState)) as VfxPreset;
+    committedState = JSON.parse(JSON.stringify(candidateState)) as VfxPreset;
+    disposePreviewBundle(previousBundle);
+    previousTexture.dispose();
+    updateBudgetText();
+    setStatus("");
+    return true;
+  }
 
   function ensurePreview() {
     if (renderer) return;
@@ -156,7 +382,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     rafId = requestAnimationFrame(frame);
     const dt = clamp((now - lastFrame) / 1000, 0.001, 0.05);
     lastFrame = now;
-    system?.update(dt);
+    previewBundle?.system.update(dt);
     if (previewCamera) {
       const height = 1.2 + Math.sin(orbitPitch) * orbitDistance;
       const flat = Math.cos(orbitPitch) * orbitDistance;
@@ -176,39 +402,25 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   document.addEventListener("visibilitychange", onVisibilityChange);
 
   function disposeSystem() {
-    if (system) {
-      previewScene?.remove(system.root);
-      system.dispose();
-      system = null;
-    }
-    disposeLuts(...systemLuts);
-    systemLuts = [];
+    disposePreviewBundle(previewBundle);
+    previewBundle = null;
   }
 
   function rebuildSystem() {
     if (root.hidden || !previewScene) return;
-    disposeSystem();
-    const built = buildSystemOptions(state, texture);
-    system = createGpuParticleSystem(built.options);
-    systemLuts = built.luts;
-    previewScene.add(system.root);
-    const budget = root.querySelector("[data-budget]");
-    if (budget) {
-      budget.textContent = `${system.capacity} instances (cap ${particleBudgetLimits.perSystem}, global ${particleBudgetLimits.global}) · rate ${state.rate}/s (max ${particleBudgetLimits.maxRate})`;
-    }
-  }
-
-  function installTexture(nextTexture: Texture, nextLabel: string) {
-    const previousTexture = texture;
-    texture = nextTexture;
-    textureLabel = nextLabel;
-    rebuildSystem();
-    previousTexture.dispose();
+    commitPreviewState(state);
   }
 
   function scheduleRebuild() {
-    window.clearTimeout(rebuildTimer);
-    rebuildTimer = window.setTimeout(rebuildSystem, 140);
+    pendingState = JSON.parse(JSON.stringify(state)) as VfxPreset;
+    if (rebuildRaf !== 0) return;
+    rebuildRaf = requestAnimationFrame(() => {
+      rebuildRaf = 0;
+      const next = pendingState;
+      pendingState = null;
+      if (!next || disposed) return;
+      commitPreviewState(next);
+    });
   }
 
   function sliderRow(def: SliderDef) {
@@ -275,6 +487,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     const canvas = document.createElement("canvas");
     canvas.width = 216;
     canvas.height = 64;
+    canvas.style.touchAction = "none";
     wrap.append(title, canvas);
 
     const stops = (): ScalarStop[] => CURVE_TIMES.map((t, i) => state[key][i] ?? { t, value: 1 });
@@ -303,37 +516,39 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
       });
     }
 
-    canvas.addEventListener("pointerdown", (event) => {
-      canvas.setPointerCapture(event.pointerId);
+    const apply = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
-      const apply = (clientX: number, clientY: number) => {
-        const x = clientX - rect.left;
-        const y = clientY - rect.top;
-        let best = 0;
-        let bestDistance = Infinity;
-        CURVE_TIMES.forEach((t, i) => {
-          const stopX = t * (canvas.width - 12) + 6;
-          if (Math.abs(stopX - x) < bestDistance) {
-            bestDistance = Math.abs(stopX - x);
-            best = i;
-          }
-        });
-        const value = clamp((1 - (y - 6) / (canvas.height - 12)) * maxValue, 0, maxValue);
-        const next = stops();
-        next[best] = { t: CURVE_TIMES[best], value: Math.round(value * 100) / 100 };
-        state[key] = next;
-        draw();
-      };
-      apply(event.clientX, event.clientY);
-      const move = (moveEvent: PointerEvent) => apply(moveEvent.clientX, moveEvent.clientY);
-      const up = () => {
-        canvas.removeEventListener("pointermove", move);
-        canvas.removeEventListener("pointerup", up);
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      let best = 0;
+      let bestDistance = Infinity;
+      CURVE_TIMES.forEach((t, i) => {
+        const stopX = t * (canvas.width - 12) + 6;
+        if (Math.abs(stopX - x) < bestDistance) {
+          bestDistance = Math.abs(stopX - x);
+          best = i;
+        }
+      });
+      const value = clamp((1 - (y - 6) / (canvas.height - 12)) * maxValue, 0, maxValue);
+      const next = stops();
+      next[best] = { t: CURVE_TIMES[best], value: Math.round(value * 100) / 100 };
+      state[key] = next;
+      draw();
+    };
+
+    const disposer = bindPointerDrag(canvas, {
+      start(event) {
+        apply(event.clientX, event.clientY);
+        return true;
+      },
+      move(event) {
+        apply(event.clientX, event.clientY);
+      },
+      end() {
         scheduleRebuild();
-      };
-      canvas.addEventListener("pointermove", move);
-      canvas.addEventListener("pointerup", up);
+      },
     });
+    addPanelDisposer(disposer);
 
     queueMicrotask(draw);
     return wrap;
@@ -347,6 +562,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     const canvas = document.createElement("canvas");
     canvas.width = 216;
     canvas.height = 40;
+    canvas.style.touchAction = "none";
     wrap.append(title, canvas);
 
     const stops = (): ColorStop[] =>
@@ -379,36 +595,64 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
       });
     }
 
-    canvas.addEventListener("pointerdown", (event) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      let best = 0;
-      let bestDistance = Infinity;
-      CURVE_TIMES.forEach((t, i) => {
-        const stopX = t * (canvas.width - 12) + 6;
-        if (Math.abs(stopX - x) < bestDistance) {
-          bestDistance = Math.abs(stopX - x);
-          best = i;
-        }
-      });
-      const picker = document.createElement("input");
-      picker.type = "color";
-      picker.value = toHex(stops()[best]);
-      picker.addEventListener("input", () => {
-        const hex = picker.value;
-        const next = stops();
-        next[best] = {
-          t: CURVE_TIMES[best],
-          r: parseInt(hex.slice(1, 3), 16) / 255,
-          g: parseInt(hex.slice(3, 5), 16) / 255,
-          b: parseInt(hex.slice(5, 7), 16) / 255,
+    const disposer = bindPointerDrag(canvas, {
+      start(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        let best = 0;
+        let bestDistance = Infinity;
+        CURVE_TIMES.forEach((t, i) => {
+          const stopX = t * (canvas.width - 12) + 6;
+          if (Math.abs(stopX - x) < bestDistance) {
+            bestDistance = Math.abs(stopX - x);
+            best = i;
+          }
+        });
+
+        // Open native color picker synchronously
+        closeActiveNativePicker();
+        const picker = document.createElement("input");
+        picker.type = "color";
+        picker.value = toHex(stops()[best]);
+        mountPickerInput(picker);
+
+        const cleanup = () => {
+          picker.removeEventListener("change", onChange);
+          picker.removeEventListener("cancel", onCancel);
+          picker.remove();
+          if (activeNativePickerCleanup === cleanup) activeNativePickerCleanup = null;
         };
-        state.colorOverLife = next;
-        draw();
-        scheduleRebuild();
-      });
-      picker.click();
+        const onChange = () => {
+          const hex = picker.value;
+          const next = stops();
+          next[best] = {
+            t: CURVE_TIMES[best],
+            r: parseInt(hex.slice(1, 3), 16) / 255,
+            g: parseInt(hex.slice(3, 5), 16) / 255,
+            b: parseInt(hex.slice(5, 7), 16) / 255,
+          };
+          state.colorOverLife = next;
+          draw();
+          scheduleRebuild();
+          cleanup();
+        };
+        const onCancel = () => cleanup();
+        picker.addEventListener("change", onChange);
+        picker.addEventListener("cancel", onCancel);
+        // Fallback cleanup when focus returns after dialog closes without event
+        picker.addEventListener("blur", () => {
+          // Give change/cancel a chance to fire first
+          setTimeout(() => {
+            if (picker.isConnected) cleanup();
+          }, 200);
+        });
+        activeNativePickerCleanup = cleanup;
+        showNativePicker(picker);
+        return false; // don't start a drag — we opened a picker instead
+      },
+      move() {},
     });
+    addPanelDisposer(disposer);
 
     queueMicrotask(draw);
     return wrap;
@@ -429,23 +673,23 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
   function applyPreset(preset: VfxPreset) {
     const nextState = JSON.parse(JSON.stringify(preset)) as VfxPreset;
     const token = ++applyToken;
+    const requestId = ++textureRequestId;
     const apply = async () => {
       try {
         const nextTexture = await loadPresetTexture(nextState);
-        if (token !== applyToken) {
+        if (token !== applyToken || requestId !== textureRequestId) {
           nextTexture.dispose();
           return;
         }
 
-        state = nextState;
         const nextTextureState = nextState.texture;
         const nextLabel = nextTextureState.kind === "builtin"
           ? builtinTextureIds.find((item) => item.id === nextTextureState.id)?.label ?? "Built-in"
           : "Uploaded PNG";
-        installTexture(nextTexture, nextLabel);
+        commitTextureCandidate(nextState, nextTexture, nextLabel);
         renderControls();
       } catch (error) {
-        if (token !== applyToken) return;
+        if (token !== applyToken || requestId !== textureRequestId) return;
         console.error("VFX preset apply failed", error);
         setStatus("Failed to load preset texture. Previous preview kept.");
       }
@@ -455,6 +699,7 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
 
   function renderControls() {
     const controls = root.querySelector("[data-controls]")!;
+    clearPanelDisposers();
     controls.innerHTML = "";
 
     const textureSection = document.createElement("section");
@@ -466,12 +711,14 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
         () => (state.texture.kind === "builtin" ? state.texture.id : ""),
         (value) => {
           applyToken += 1;
-          state.texture = { kind: "builtin", id: value as BuiltinTextureId };
-          installTexture(
+          textureRequestId += 1;
+          const nextState = JSON.parse(JSON.stringify(state)) as VfxPreset;
+          nextState.texture = { kind: "builtin", id: value as BuiltinTextureId };
+          commitTextureCandidate(
+            nextState,
             createBuiltinTexture(value as BuiltinTextureId),
             builtinTextureIds.find((item) => item.id === value)?.label ?? "Built-in",
           );
-          setStatus("");
         },
       ),
     );
@@ -482,27 +729,50 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     uploadButton.textContent = "Upload PNG";
     uploadButton.addEventListener("click", () => {
       const token = ++applyToken;
-      void pickPngFile().then(async (file) => {
+      const requestId = ++textureRequestId;
+      closeActiveNativePicker();
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "image/png";
+      mountPickerInput(fileInput);
+
+      const cleanup = () => {
+        fileInput.removeEventListener("change", onChange);
+        fileInput.removeEventListener("cancel", onCancel);
+        fileInput.remove();
+        if (activeNativePickerCleanup === cleanup) activeNativePickerCleanup = null;
+      };
+      const onChange = () => {
+        const file = fileInput.files?.[0] ?? null;
+        cleanup();
         if (!file) return;
-        try {
-          const result = await uploadPng(file);
-          if (token !== applyToken) {
-            result.texture.dispose();
-            return;
+        void (async () => {
+          try {
+            const result = await uploadPng(file);
+            if (token !== applyToken || requestId !== textureRequestId) {
+              result.texture.dispose();
+              return;
+            }
+            const nextState = JSON.parse(JSON.stringify(state)) as VfxPreset;
+            nextState.texture = { kind: "upload", dataUrl: result.dataUrl };
+            commitTextureCandidate(nextState, result.texture, file.name);
+            setStatus(
+              result.hasAlpha
+                ? `Loaded ${file.name} (${result.width}×${result.height})`
+                : `${file.name}: no alpha channel — alpha approximated from luminance`,
+            );
+            renderControls();
+          } catch (error) {
+            if (token !== applyToken || requestId !== textureRequestId) return;
+            setStatus(error instanceof Error ? error.message : "Upload failed.");
           }
-          state.texture = { kind: "upload", dataUrl: result.dataUrl };
-          installTexture(result.texture, file.name);
-          setStatus(
-            result.hasAlpha
-              ? `Loaded ${file.name} (${result.width}×${result.height})`
-              : `${file.name}: no alpha channel — alpha approximated from luminance`,
-          );
-          renderControls();
-        } catch (error) {
-          if (token !== applyToken) return;
-          setStatus(error instanceof Error ? error.message : "Upload failed.");
-        }
-      });
+        })();
+      };
+      const onCancel = () => cleanup();
+      fileInput.addEventListener("change", onChange);
+      fileInput.addEventListener("cancel", onCancel);
+      activeNativePickerCleanup = cleanup;
+      showNativePicker(fileInput);
     });
     const textureName = document.createElement("span");
     textureName.className = "vfx-editor__texture-name";
@@ -720,11 +990,21 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
         URL.revokeObjectURL(link.href);
       }),
       button("Import", () => {
+        closeActiveNativePicker();
         const input = document.createElement("input");
         input.type = "file";
         input.accept = "application/json";
-        input.onchange = () => {
-          const file = input.files?.[0];
+        mountPickerInput(input);
+
+        const cleanup = () => {
+          input.removeEventListener("change", onChange);
+          input.removeEventListener("cancel", onCancel);
+          input.remove();
+          if (activeNativePickerCleanup === cleanup) activeNativePickerCleanup = null;
+        };
+        const onChange = () => {
+          const file = input.files?.[0] ?? null;
+          cleanup();
           if (!file) return;
           void file.text().then((text) => {
             let parsed: unknown;
@@ -743,7 +1023,11 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
             setStatus(`Imported "${preset.name}".`);
           });
         };
-        input.click();
+        const onCancel = () => cleanup();
+        input.addEventListener("change", onChange);
+        input.addEventListener("cancel", onCancel);
+        activeNativePickerCleanup = cleanup;
+        showNativePicker(input);
       }),
       button("Copy share", () => {
         const share = presetToShareString(state);
@@ -822,14 +1106,16 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     const file = event.dataTransfer?.files?.[0];
     if (!file) return;
     const token = ++applyToken;
+    const requestId = ++textureRequestId;
     void uploadPng(file).then(
       (result) => {
-        if (token !== applyToken) {
+        if (token !== applyToken || requestId !== textureRequestId) {
           result.texture.dispose();
           return;
         }
-        state.texture = { kind: "upload", dataUrl: result.dataUrl };
-        installTexture(result.texture, file.name);
+        const nextState = JSON.parse(JSON.stringify(state)) as VfxPreset;
+        nextState.texture = { kind: "upload", dataUrl: result.dataUrl };
+        commitTextureCandidate(nextState, result.texture, file.name);
         setStatus(result.hasAlpha ? `Loaded ${file.name}` : `${file.name}: no alpha channel — alpha approximated from luminance`);
         renderControls();
       },
@@ -866,8 +1152,14 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     isOpen = false;
     root.hidden = true;
     applyToken += 1;
-    window.clearTimeout(rebuildTimer);
-    rebuildTimer = 0;
+    textureRequestId += 1;
+    closeActiveNativePicker();
+    clearPanelDisposers();
+    if (rebuildRaf !== 0) {
+      cancelAnimationFrame(rebuildRaf);
+      rebuildRaf = 0;
+    }
+    pendingState = null;
     cancelAnimationFrame(rafId);
     rafId = 0;
     disposeSystem();
@@ -879,8 +1171,15 @@ export function createVfxEditor(callbacks: { onClose?: () => void; onApplyTireSm
     isOpen = false;
     root.hidden = true;
     applyToken += 1;
-    window.clearTimeout(rebuildTimer);
-    rebuildTimer = 0;
+    textureRequestId += 1;
+    closeActiveNativePicker();
+    clearPanelDisposers();
+    clearLifetimeDisposers();
+    if (rebuildRaf !== 0) {
+      cancelAnimationFrame(rebuildRaf);
+      rebuildRaf = 0;
+    }
+    pendingState = null;
     cancelAnimationFrame(rafId);
     rafId = 0;
     window.removeEventListener("keydown", onKeyDown);

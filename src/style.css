@@ -2328,6 +2328,7 @@ canvas {
 
 .vfx-editor__curve canvas {
   cursor: crosshair;
+  touch-action: none;
 }
 
 .vfx-editor__actions {

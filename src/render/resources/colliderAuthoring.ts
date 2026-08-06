@@ -35,14 +35,18 @@ const carCollisionMinY = 0.18;
 const carCollisionMaxY = 1.65;
 
 // Scratch objects reused across collection to avoid per-instance allocations
-const _box = new Box3();
 const _worldBox = new Box3();
+const _groupLocalBox = new Box3();
+const _childBox = new Box3();
 const _v = new Vector3();
+const _localCenter = new Vector3();
 const _q = new Quaternion();
 const _e = new Euler();
 const _s = new Vector3();
 const _instanceMatrix = new Matrix4();
 const _composed = new Matrix4();
+const _inverseGroupWorld = new Matrix4();
+const _childToGroup = new Matrix4();
 
 export function markBoxCollider<T extends Object3D>(
   object: T,
@@ -136,8 +140,9 @@ function collectMesh(
   _worldBox.copy(localBox).applyMatrix4(mesh.matrixWorld);
   if (!passesHeightFilter(_worldBox.min.y, _worldBox.max.y)) return;
 
-  // Center in world
-  _v.set(0, 0, 0).applyMatrix4(mesh.matrixWorld);
+  // Use local box center (not origin) transformed to world
+  localBox.getCenter(_localCenter);
+  _v.copy(_localCenter).applyMatrix4(mesh.matrixWorld);
 
   // Extract world rotation (Y up → yaw)
   mesh.matrixWorld.decompose(_v, _q, _s);
@@ -147,8 +152,8 @@ function collectMesh(
   const padding = meta.padding ?? 0;
 
   if (meta.shape === "box") {
-    const halfLength = (localBox.max.x - localBox.min.x) * 0.5 * _s.x + padding;
-    const halfWidth = (localBox.max.z - localBox.min.z) * 0.5 * _s.z + padding;
+    const halfLength = (localBox.max.x - localBox.min.x) * 0.5 * Math.abs(_s.x) + padding;
+    const halfWidth = (localBox.max.z - localBox.min.z) * 0.5 * Math.abs(_s.z) + padding;
     if (halfLength <= 0 || halfWidth <= 0) return;
     const id = makeId(idPrefix, mesh.name, nextIndex());
     const collider: BoxCollider = {
@@ -165,8 +170,8 @@ function collectMesh(
     out.push(collider);
   } else {
     const radius = Math.max(
-      (localBox.max.x - localBox.min.x) * 0.5 * _s.x,
-      (localBox.max.z - localBox.min.z) * 0.5 * _s.z,
+      (localBox.max.x - localBox.min.x) * 0.5 * Math.abs(_s.x),
+      (localBox.max.z - localBox.min.z) * 0.5 * Math.abs(_s.z),
     ) + padding;
     if (radius <= 0) return;
     const id = makeId(idPrefix, mesh.name, nextIndex());
@@ -190,21 +195,30 @@ function collectGroup(
   out: StaticCollider[],
   nextIndex: () => number,
 ) {
-  _box.makeEmpty();
+  // Build aggregate bounds in group-local coordinates to avoid
+  // double-rotating a world AABB by the group's yaw.
+  _groupLocalBox.makeEmpty();
+  _inverseGroupWorld.copy(group.matrixWorld).invert();
+
   group.traverse((child) => {
-    if (child instanceof Mesh && child.geometry) {
-      if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
-      if (child.geometry.boundingBox) {
-        _worldBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-        _box.union(_worldBox);
-      }
-    }
+    if (!(child instanceof Mesh) || !child.geometry) return;
+    if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+    if (!child.geometry.boundingBox) return;
+    _childToGroup.multiplyMatrices(_inverseGroupWorld, child.matrixWorld);
+    _childBox.copy(child.geometry.boundingBox).applyMatrix4(_childToGroup);
+    _groupLocalBox.union(_childBox);
   });
 
-  if (_box.isEmpty()) return;
-  if (!passesHeightFilter(_box.min.y, _box.max.y)) return;
+  if (_groupLocalBox.isEmpty()) return;
 
-  _v.set(0, 0, 0).applyMatrix4(group.matrixWorld);
+  // Check world-space height filter
+  _worldBox.copy(_groupLocalBox).applyMatrix4(group.matrixWorld);
+  if (!passesHeightFilter(_worldBox.min.y, _worldBox.max.y)) return;
+
+  // Local center transformed to world
+  _groupLocalBox.getCenter(_localCenter);
+  _v.copy(_localCenter).applyMatrix4(group.matrixWorld);
+
   group.matrixWorld.decompose(_v, _q, _s);
   _e.setFromQuaternion(_q, "YXZ");
   const angle = _e.y;
@@ -212,15 +226,15 @@ function collectGroup(
   const padding = meta.padding ?? 0;
 
   if (meta.shape === "box") {
-    const halfLength = (_box.max.x - _box.min.x) * 0.5 + padding;
-    const halfWidth = (_box.max.z - _box.min.z) * 0.5 + padding;
+    const halfLength = (_groupLocalBox.max.x - _groupLocalBox.min.x) * 0.5 * Math.abs(_s.x) + padding;
+    const halfWidth = (_groupLocalBox.max.z - _groupLocalBox.min.z) * 0.5 * Math.abs(_s.z) + padding;
     if (halfLength <= 0 || halfWidth <= 0) return;
     const id = makeId(idPrefix, group.name, nextIndex());
     out.push({
       id,
       shape: "box",
-      x: (_box.max.x + _box.min.x) * 0.5,
-      z: (_box.max.z + _box.min.z) * 0.5,
+      x: _v.x,
+      z: _v.z,
       angle,
       halfLength,
       halfWidth,
@@ -229,16 +243,16 @@ function collectGroup(
     });
   } else {
     const radius = Math.max(
-      (_box.max.x - _box.min.x) * 0.5,
-      (_box.max.z - _box.min.z) * 0.5,
+      (_groupLocalBox.max.x - _groupLocalBox.min.x) * 0.5 * Math.abs(_s.x),
+      (_groupLocalBox.max.z - _groupLocalBox.min.z) * 0.5 * Math.abs(_s.z),
     ) + padding;
     if (radius <= 0) return;
     const id = makeId(idPrefix, group.name, nextIndex());
     out.push({
       id,
       shape: "circle",
-      x: (_box.max.x + _box.min.x) * 0.5,
-      z: (_box.max.z + _box.min.z) * 0.5,
+      x: _v.x,
+      z: _v.z,
       radius,
       profile: meta.profile,
       cameraObstruction: meta.cameraObstruction ?? false,
@@ -260,6 +274,7 @@ function collectInstanced(
   if (!localBox) return;
 
   const padding = meta.padding ?? 0;
+  localBox.getCenter(_localCenter);
   const localHalfX = (localBox.max.x - localBox.min.x) * 0.5 + padding;
   const localHalfZ = (localBox.max.z - localBox.min.z) * 0.5 + padding;
 
@@ -269,14 +284,15 @@ function collectInstanced(
     _worldBox.copy(localBox).applyMatrix4(_composed);
     if (!passesHeightFilter(_worldBox.min.y, _worldBox.max.y)) continue;
 
-    _v.set(0, 0, 0).applyMatrix4(_composed);
+    // Use local box center (not origin) transformed to world
+    _v.copy(_localCenter).applyMatrix4(_composed);
     _composed.decompose(_v, _q, _s);
     _e.setFromQuaternion(_q, "YXZ");
     const angle = _e.y;
 
     if (meta.shape === "box") {
-      const halfLength = localHalfX * _s.x;
-      const halfWidth = localHalfZ * _s.z;
+      const halfLength = localHalfX * Math.abs(_s.x);
+      const halfWidth = localHalfZ * Math.abs(_s.z);
       if (halfLength <= 0 || halfWidth <= 0) continue;
       const id = makeId(idPrefix, mesh.name, nextIndex());
       out.push({
@@ -291,7 +307,7 @@ function collectInstanced(
         cameraObstruction: meta.cameraObstruction ?? false,
       });
     } else {
-      const radius = Math.max(localHalfX * _s.x, localHalfZ * _s.z);
+      const radius = Math.max(localHalfX * Math.abs(_s.x), localHalfZ * Math.abs(_s.z));
       if (radius <= 0) continue;
       const id = makeId(idPrefix, mesh.name, nextIndex());
       out.push({

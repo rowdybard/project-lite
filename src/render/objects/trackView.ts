@@ -1737,7 +1737,8 @@ function createMetalGuardrails(
       const segmentDir = endBase.clone().sub(startBase);
       const segmentLength = segmentDir.length();
       if (segmentLength < 0.01) continue;
-      const angle = Math.atan2(segmentDir.x, segmentDir.z);
+      segmentDir.multiplyScalar(1 / segmentLength);
+      const angle = yawForTangentX(segmentDir);
 
       const collider = new Mesh(railColliderGeometry, railColliderMaterial);
       collider.scale.x = segmentLength;

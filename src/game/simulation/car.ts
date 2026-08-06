@@ -715,15 +715,8 @@ export function resolveTrackSafetyBoundary(
       car.velocity.x = tangentX * response.tangentRetention + inwardX * bounceSpeed;
       car.velocity.z = tangentZ * response.tangentRetention + inwardZ * bounceSpeed;
 
-      // Gentle yaw impulse
-      const lever = closest.x * inwardZ - closest.z * inwardX;
-      const yawDelta = clamp(
-        lever * bounceSpeed * response.yawImpulseScale,
-        -response.maxYawImpulse,
-        response.maxYawImpulse,
-      );
-      car.yawVelocity += yawDelta;
-
+      // No yaw impulse — the invisible safety boundary should not spin the car.
+      // Visible authored objects already provide contact-point yaw.
       const severity = clamp(
         (closingSpeed - response.bounceThreshold) / response.severityReferenceSpeed,
         0,
